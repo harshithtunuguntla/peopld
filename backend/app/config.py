@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     supabase_url: str
     supabase_service_role_key: str
-    anthropic_api_key: str
+    anthropic_api_key: str = ""  # only needed from Step 6 (icebreaker engine)
     anthropic_model: str = "claude-sonnet-4-6"  # override via env to swap models
     frontend_url: str = "http://localhost:3000"
 

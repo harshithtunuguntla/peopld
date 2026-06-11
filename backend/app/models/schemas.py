@@ -63,16 +63,11 @@ class AttendeeResponse(BaseModel):
     created_at: datetime
 
 
-# --- Round ---
-
-class RoundResponse(BaseModel):
-    id: UUID
-    event_id: UUID
-    round_number: int
-    duration_seconds: int
-    started_at: Optional[datetime]
-    ended_at: Optional[datetime]
-    status: Literal["active", "completed"]
+class AttendeeWithAssignmentResponse(AttendeeResponse):
+    """Used by GET /events/:eventId/attendees/:attendeeId — includes live table info."""
+    current_table_number: Optional[int] = None
+    current_round_id: Optional[UUID] = None
+    current_round_number: Optional[int] = None
 
 
 # --- Table Assignment ---
@@ -85,6 +80,23 @@ class TableAssignmentResponse(BaseModel):
     table_number: int
 
 
+# --- Round ---
+
+class RoundResponse(BaseModel):
+    id: UUID
+    event_id: UUID
+    round_number: int
+    duration_seconds: int
+    started_at: Optional[datetime]
+    ended_at: Optional[datetime]
+    status: Literal["active", "completed"]
+
+
+class RoundWithAssignmentsResponse(RoundResponse):
+    """Used by GET /rounds/current — organizer grid view needs all assignments in one call."""
+    assignments: list[TableAssignmentResponse] = []
+
+
 # --- Icebreaker ---
 
 class IcebreakerResponse(BaseModel):
@@ -95,6 +107,23 @@ class IcebreakerResponse(BaseModel):
     target_attendee_id: UUID
     question_text: str
     generated_at: datetime
+
+
+# --- Connections (Digital Rolodex) ---
+
+class ConnectionEntry(BaseModel):
+    attendee_id: UUID
+    name: str
+    role: str
+    whatsapp_number: Optional[str]
+    round_number: int
+    table_number: int
+
+
+class ConnectionsResponse(BaseModel):
+    total_people_met: int
+    rounds_count: int
+    connections: list[ConnectionEntry]
 
 
 # --- Analytics ---

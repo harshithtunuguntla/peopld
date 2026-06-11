@@ -5,6 +5,13 @@ from app.database import supabase
 router = APIRouter(prefix="/events", tags=["events"])
 
 
+@router.get("/mine", response_model=list[EventResponse])
+async def list_my_events():
+    """Organizer dashboard — returns all events created by the authenticated organizer."""
+    # TODO: filter by organizer_id from auth token
+    raise HTTPException(status_code=501, detail="Not implemented")
+
+
 @router.post("", response_model=EventResponse, status_code=201)
 async def create_event(body: EventCreate):
     # TODO: get organizer_id from auth token

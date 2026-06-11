@@ -1,0 +1,107 @@
+"""In-memory fake of the Supabase client query builder.
+
+Supports the subset of the API the app uses:
+    table(name).select(...).eq(...).order(...).limit(...).execute()
+    table(name).insert(row).execute()
+    table(name).update(changes).eq(...).execute()
+
+Lets the whole test suite run with no Supabase project, no network, no env.
+"""
+
+import uuid
+from datetime import datetime, timezone
+
+
+class FakeResult:
+    def __init__(self, data):
+        self.data = data
+
+
+class FakeQuery:
+    def __init__(self, rows: list):
+        self._rows = rows  # live reference to the table's row list
+        self._filters: list[tuple] = []
+        self._order = None
+        self._limit = None
+        self._op = "select"
+        self._payload = None
+
+    # --- builder methods (chainable) ---
+
+    def select(self, *_cols):
+        self._op = "select"
+        return self
+
+    def insert(self, payload):
+        self._op = "insert"
+        self._payload = payload
+        return self
+
+    def update(self, payload):
+        self._op = "update"
+        self._payload = payload
+        return self
+
+    def eq(self, column, value):
+        self._filters.append((column, value))
+        return self
+
+    def order(self, column, desc: bool = False):
+        self._order = (column, desc)
+        return self
+
+    def limit(self, n: int):
+        self._limit = n
+        return self
+
+    # --- terminal ---
+
+    def execute(self) -> FakeResult:
+        if self._op == "insert":
+            payloads = self._payload if isinstance(self._payload, list) else [self._payload]
+            inserted = []
+            for p in payloads:
+                row = dict(p)
+                row.setdefault("id", str(uuid.uuid4()))
+                row.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+                self._rows.append(row)
+                inserted.append(dict(row))
+            return FakeResult(inserted)
+
+        matched = [
+            r for r in self._rows
+            if all(str(r.get(col)) == str(val) for col, val in self._filters)
+        ]
+
+        if self._op == "update":
+            for r in matched:
+                r.update(self._payload)
+            return FakeResult([dict(r) for r in matched])
+
+        if self._order:
+            col, desc = self._order
+            matched = sorted(matched, key=lambda r: str(r.get(col) or ""), reverse=desc)
+        if self._limit is not None:
+            matched = matched[: self._limit]
+        return FakeResult([dict(r) for r in matched])
+
+
+class FakeSupabase:
+    def __init__(self):
+        self.store: dict[str, list] = {}
+
+    def table(self, name: str) -> FakeQuery:
+        return FakeQuery(self.store.setdefault(name, []))
+
+    # --- test helpers ---
+
+    def seed(self, table: str, *rows: dict) -> list[dict]:
+        """Insert rows directly, filling in id/created_at. Returns the stored rows."""
+        stored = []
+        for row in rows:
+            r = dict(row)
+            r.setdefault("id", str(uuid.uuid4()))
+            r.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+            self.store.setdefault(table, []).append(r)
+            stored.append(r)
+        return stored

@@ -1,53 +1,87 @@
-from fastapi import APIRouter, HTTPException
-from app.models.schemas import RoundResponse, RoundWithAssignmentsResponse, TableAssignmentResponse
-from app.database import supabase
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
+from supabase import Client
+
+from app.database import get_supabase
+from app.deps import get_current_organizer_id
+from app.models.schemas import (
+    RoundResponse,
+    RoundWithAssignmentsResponse,
+    TableAssignmentResponse,
+)
 
 router = APIRouter(prefix="/events/{event_id}/rounds", tags=["rounds"])
 
 
-@router.post("/start", response_model=RoundResponse, status_code=201)
-async def start_round(event_id: str):
-    # Triggers: rotation algorithm → icebreaker generation (async)
-    raise HTTPException(status_code=501, detail="Not implemented")
-
-
-@router.post("/end", response_model=RoundResponse)
-async def end_round(event_id: str):
-    raise HTTPException(status_code=501, detail="Not implemented")
-
-
-@router.get("/current", response_model=RoundWithAssignmentsResponse)
-async def get_current_round(event_id: str):
-    """Returns the active round + all table assignments. Used by the organizer grid view."""
-    round_result = (
-        supabase.table("rounds")
+def _fetch_active_round(db: Client, event_id: str) -> dict:
+    result = (
+        db.table("rounds")
         .select("*")
         .eq("event_id", event_id)
         .eq("status", "active")
-        .single()
+        .limit(1)
         .execute()
     )
-    if not round_result.data:
+    if not result.data:
         raise HTTPException(status_code=404, detail="No active round")
+    return result.data[0]
 
-    round_data = dict(round_result.data)
 
-    assignments_result = (
-        supabase.table("table_assignments")
+@router.post("/start", response_model=RoundResponse, status_code=201)
+async def start_round(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    # Step 4: rotation algorithm assigns tables, then triggers async icebreaker generation
+    raise HTTPException(status_code=501, detail="Implemented in Step 4 (rotation algorithm)")
+
+
+@router.post("/end", response_model=RoundResponse)
+async def end_round(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    active = _fetch_active_round(db, event_id)
+    now = datetime.now(timezone.utc).isoformat()
+    result = (
+        db.table("rounds")
+        .update({"status": "completed", "ended_at": now})
+        .eq("id", active["id"])
+        .execute()
+    )
+    return result.data[0]
+
+
+@router.get("/current", response_model=RoundWithAssignmentsResponse)
+async def get_current_round(event_id: str, db: Client = Depends(get_supabase)):
+    """Active round + all table assignments — powers the organizer grid view."""
+    round_data = dict(_fetch_active_round(db, event_id))
+    assignments = (
+        db.table("table_assignments")
         .select("*")
         .eq("round_id", round_data["id"])
         .execute()
     )
-    round_data["assignments"] = assignments_result.data or []
-
+    round_data["assignments"] = assignments.data or []
     return round_data
 
 
-@router.get("/{round_id}/tables/{table_number}", response_model=list[TableAssignmentResponse])
-async def get_table(event_id: str, round_id: str, table_number: int):
-    """Returns all attendee assignments for one specific table. Used by the attendee Live Dashboard."""
+@router.get(
+    "/{round_id}/tables/{table_number}",
+    response_model=list[TableAssignmentResponse],
+)
+async def get_table(
+    event_id: str,
+    round_id: str,
+    table_number: int,
+    db: Client = Depends(get_supabase),
+):
+    """All attendee assignments at one table — powers the attendee Live Dashboard."""
     result = (
-        supabase.table("table_assignments")
+        db.table("table_assignments")
         .select("*")
         .eq("round_id", round_id)
         .eq("table_number", table_number)

@@ -83,6 +83,7 @@ async def get_table(
     result = (
         db.table("table_assignments")
         .select("*")
+        .eq("event_id", event_id)
         .eq("round_id", round_id)
         .eq("table_number", table_number)
         .execute()

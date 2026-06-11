@@ -17,6 +17,13 @@ def test_create_event_requires_auth(client):
     assert response.status_code == 401
 
 
+def test_create_event_malformed_auth_header(client):
+    response = client.post(
+        "/events", json=EVENT_PAYLOAD, headers={"X-Organizer-Id": "not-a-uuid"}
+    )
+    assert response.status_code == 401
+
+
 def test_create_and_get_event(client):
     created = client.post("/events", json=EVENT_PAYLOAD, headers=AUTH)
     assert created.status_code == 201

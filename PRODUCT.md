@@ -30,7 +30,7 @@
 |---|---|---|
 | 1 | **Repo + Foundation** — GitHub monorepo (`/frontend` Next.js, `/backend` FastAPI), Supabase project + SQL schema (`supabase/schema.sql`, 5 tables) | ✅ Done |
 | 2 | **FastAPI scaffold + core CRUD** — Events, Attendees, Rounds, Connections, Icebreakers endpoints; 34 unit tests (`backend/tests/`) + live smoke test (`backend/scripts/smoke_live.py`) | ✅ Done |
-| 3 | **Auth (deliberately EARLY, not last)** — Phone OTP for attendees (Supabase Auth), email/password for organizers, replace temporary `X-Organizer-Id` header in `backend/app/deps.py` with Supabase JWT verification | ⏳ Next |
+| 3 | **Auth (deliberately EARLY, not last)** — Attendees: Google sign-in + Email OTP (see Decision Log — phone OTP deferred to MVP); organizers: email/password (manual account, `role=organizer`); replace temporary `X-Organizer-Id` header in `backend/app/deps.py` with Supabase JWT verification; link `attendees.user_id` + dedupe registration | ⏳ Next |
 | 4 | **Rotation Algorithm** — ⚠️ design session FIRST (greedy: minimize repeat pairings, handle late arrivals/early exits), then implement `backend/app/algorithm.py` behind `POST /rounds/start` | Pending |
 | 5 | **Supabase Realtime** — ⚠️ agree on channel structure FIRST (frontend + backend must align); attendee screens subscribe to Round + TableAssignment changes | Pending |
 | 6 | **Claude Icebreaker Engine** — 1 API call per table per round (batch), async, curated-question fallback if Claude fails; model configurable via `ANTHROPIC_MODEL` env var | Pending |
@@ -90,3 +90,5 @@
 | 2025-06 | Pre-MVP prototype pivots to structured round-based networking | Fastest path to validate AI + Event Memory hypotheses with a live audience |
 | 2026-06 | 7-step build order locked; Auth moved to Step 3 (early, not last) | Avoids retrofitting auth into every endpoint later; see Build Order section above |
 | 2026-06 | Brainstorm-before-code rule for every step | Each step opens with a short design/requirements session; Steps 4 & 5 require explicit design alignment before implementation |
+| 2026-06 | Pilot attendee auth = Google sign-in (primary) + Email OTP via Brevo SMTP (fallback); phone OTP deferred to MVP | Phone OTP in India needs DLT registration (weeks) or paid providers; Google/email are free, Supabase-native, and have no SMS delivery risk at the venue. Phone/WhatsApp still collected on the registration form as profile data. |
+| 2026-06 | Organizer account created manually in Supabase dashboard with `app_metadata.role = "organizer"`; no signup flow for pilot | One known organizer; building signup UI adds code and attack surface for no benefit |

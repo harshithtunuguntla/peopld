@@ -51,6 +51,24 @@ def test_register_twice_returns_existing_record(client, event):
     assert again.json()["name"] == "Asha"  # original record untouched
 
 
+def test_same_user_can_register_for_two_events(client, db, event):
+    # Dedupe is scoped per-event — one person attends many events
+    other_event = db.seed(
+        "events",
+        {**{k: v for k, v in event.items() if k != "id"}, "name": "Second Meetup"},
+    )[0]
+
+    first = client.post(
+        f"/events/{event['id']}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH
+    )
+    second = client.post(
+        f"/events/{other_event['id']}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH
+    )
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["id"] != second.json()["id"]
+
+
 def test_register_different_users_both_created(client, event):
     first = client.post(
         f"/events/{event['id']}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH

@@ -44,6 +44,7 @@
 | Document | Purpose |
 |---|---|
 | [`docs/product/releases/pre-mvp.md`](docs/product/releases/pre-mvp.md) | **START HERE.** Complete build spec: features, data models, endpoints, tech stack |
+| [`GETTING_STARTED.md`](GETTING_STARTED.md) | Dev onboarding: fresh-clone setup, env files, tests, and how auth works |
 
 ### 📋 Release Roadmap
 | Document | Purpose |

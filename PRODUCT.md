@@ -13,7 +13,28 @@
 | **Target** | Live pilot event (~40 attendees, Hyderabad) |
 | **Build Spec** | [`docs/product/releases/pre-mvp.md`](docs/product/releases/pre-mvp.md) |
 | **Stack** | Next.js + FastAPI + Supabase + Claude API |
-| **Progress** | Not started — planning complete |
+| **Progress** | Steps 1–2 complete (scaffold + backend CRUD, tested live). Next: Step 3 (Auth) |
+| **Working Branch** | `feat/step-1-scaffold` — do NOT merge to main without team agreement |
+
+---
+
+## Build Order
+
+> **Every agent and teammate must follow this sequence. Do not skip steps. Do not build features out of order.**
+>
+> **Rule: brainstorm before code.** Each step starts with a short design/requirements session
+> (agree on approach, data flow, and edge cases with the team) BEFORE any implementation.
+> Steps 4 and 5 especially require an explicit design session — see notes below.
+
+| Step | What | Status |
+|---|---|---|
+| 1 | **Repo + Foundation** — GitHub monorepo (`/frontend` Next.js, `/backend` FastAPI), Supabase project + SQL schema (`supabase/schema.sql`, 5 tables) | ✅ Done |
+| 2 | **FastAPI scaffold + core CRUD** — Events, Attendees, Rounds, Connections, Icebreakers endpoints; 34 unit tests (`backend/tests/`) + live smoke test (`backend/scripts/smoke_live.py`) | ✅ Done |
+| 3 | **Auth (deliberately EARLY, not last)** — Phone OTP for attendees (Supabase Auth), email/password for organizers, replace temporary `X-Organizer-Id` header in `backend/app/deps.py` with Supabase JWT verification | ⏳ Next |
+| 4 | **Rotation Algorithm** — ⚠️ design session FIRST (greedy: minimize repeat pairings, handle late arrivals/early exits), then implement `backend/app/algorithm.py` behind `POST /rounds/start` | Pending |
+| 5 | **Supabase Realtime** — ⚠️ agree on channel structure FIRST (frontend + backend must align); attendee screens subscribe to Round + TableAssignment changes | Pending |
+| 6 | **Claude Icebreaker Engine** — 1 API call per table per round (batch), async, curated-question fallback if Claude fails; model configurable via `ANTHROPIC_MODEL` env var | Pending |
+| 7 | **Next.js Frontend** — all 7 pages (4 attendee + 3 organizer), mobile-first 375px; UI design + error states decided just-in-time per page | Pending |
 
 ---
 
@@ -67,3 +88,5 @@
 | 2025-06 | English-only for Pre-MVP | Multilingual deferred to V1 |
 | 2025-06 | Phone OTP is MVP identity bootstrap | Long-term identity model may require sophistication |
 | 2025-06 | Pre-MVP prototype pivots to structured round-based networking | Fastest path to validate AI + Event Memory hypotheses with a live audience |
+| 2026-06 | 7-step build order locked; Auth moved to Step 3 (early, not last) | Avoids retrofitting auth into every endpoint later; see Build Order section above |
+| 2026-06 | Brainstorm-before-code rule for every step | Each step opens with a short design/requirements session; Steps 4 & 5 require explicit design alignment before implementation |

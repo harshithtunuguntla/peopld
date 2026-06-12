@@ -23,6 +23,7 @@ export default function RegisterPage({
 
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [isEventOrganizer, setIsEventOrganizer] = useState(false);
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [lookingFor, setLookingFor] = useState("");
@@ -43,6 +44,19 @@ export default function RegisterPage({
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // One identity can hold both roles: organizers may also attend their own
+  // event. We don't block them — we just make sure they know who they're
+  // signed in as.
+  useEffect(() => {
+    if (!user) {
+      setIsEventOrganizer(false);
+      return;
+    }
+    apiFetch<{ organizer_id: string }>(`/events/${eventId}`)
+      .then((event) => setIsEventOrganizer(event.organizer_id === user.id))
+      .catch(() => setIsEventOrganizer(false));
+  }, [user, eventId]);
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
@@ -93,6 +107,16 @@ export default function RegisterPage({
         className="flex w-full max-w-sm flex-col gap-3"
       >
         <h1 className="text-xl font-semibold">Register</h1>
+        {isEventOrganizer && (
+          <p className="rounded border border-amber-400 bg-amber-50 p-3 text-sm">
+            You&apos;re signed in as this event&apos;s <strong>organizer</strong>.
+            Looking for the{" "}
+            <a href="/organizer/dashboard" className="underline">
+              organizer dashboard
+            </a>
+            ? Or continue below to also join as an attendee.
+          </p>
+        )}
         <input
           required
           value={name}

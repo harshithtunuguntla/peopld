@@ -98,7 +98,7 @@ export default function AttendeeAuth({ nextPath }: { nextPath: string }) {
       {step === "otp-sent" && (
         <form onSubmit={verifyOtp} className="flex flex-col gap-2">
           <p className="text-sm">
-            We sent a 6-digit code to <strong>{email}</strong>. Check spam if
+            We sent a login code to <strong>{email}</strong>. Check spam if
             you don&apos;t see it.
           </p>
           <input

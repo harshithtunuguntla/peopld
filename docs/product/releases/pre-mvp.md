@@ -42,16 +42,17 @@ No app download required. Works in the browser on any smartphone.
 | Backend | FastAPI (Python) | Algorithm logic, Claude API integration, auto-generated Swagger docs |
 | Database | Supabase (Postgres) | Relational data + Real-time WebSockets + built-in Auth |
 | LLM | Claude API (Sonnet) | Personalized icebreaker generation per table |
-| Auth | Phone OTP (Supabase Auth or MSG91 fallback) | India-first, phone-number-based identity |
+| Auth | Supabase Auth: Google sign-in OR email OTP for attendees; email/password for organizers | *Amended 2026-06 (see PRODUCT.md Decision Log): phone OTP deferred to MVP — India DLT registration takes weeks. Phone/WhatsApp collected as profile data instead* |
 | Frontend Hosting | Vercel | Native Next.js support, instant deployment |
-| Backend Hosting | Render | Reliable Python hosting, generous free tier |
+| Backend Hosting | Google Cloud Run | *Amended 2026-06: team GCP credits; min-instances=1 avoids Render free-tier cold starts on event day* |
 
 ### Key Technical Constraints
 - The app MUST work on mobile browsers without installation
 - All real-time updates MUST push to attendee phones automatically — no manual refresh
 - The rotation algorithm MUST handle variable attendance (late arrivals, early exits)
 - Icebreaker generation MUST NOT block the UI — process asynchronously
-- OTP delivery in India MUST be tested early — SMS can be flaky
+- OTP email delivery MUST be tested early — verify codes land in Gmail inboxes, not spam (SMS OTP deferred to MVP)
+- Supabase free tier auto-pauses after 7 idle days — verify the project is active the week before the event
 
 ---
 

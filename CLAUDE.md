@@ -21,9 +21,10 @@ We are building a structured networking app for a live pilot event (~40 attendee
 
 ## Tech Stack
 - **Frontend:** Next.js (React + TypeScript) → Deploy to Vercel
-- **Backend:** FastAPI (Python with type hints) → Deploy to Render
-- **Database:** Supabase (Postgres + Realtime + Auth)
-- **LLM:** Claude API (Sonnet) for icebreakers
+- **Backend:** FastAPI (Python with type hints) → Deploy to Google Cloud Run (GCP credits; min-instances=1, no cold starts)
+- **Database:** Supabase (Postgres + Realtime + Auth) — free tier, committed for pilot
+- **Auth:** Organizers email/password; attendees Google sign-in OR email OTP (Gmail SMTP). Phone OTP deferred to MVP — see PRODUCT.md Decision Log
+- **LLM:** Claude API (Sonnet) for icebreakers — likely via Vertex AI (GCP credits), final call at Step 6
 
 ## Code Style & Conventions
 - Use TypeScript for all frontend code

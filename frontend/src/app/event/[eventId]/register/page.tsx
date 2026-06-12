@@ -24,6 +24,8 @@ export default function RegisterPage({
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [isEventOrganizer, setIsEventOrganizer] = useState(false);
+  const [existingChecked, setExistingChecked] = useState(false);
+  const [existingAttendeeId, setExistingAttendeeId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [lookingFor, setLookingFor] = useState("");
@@ -57,6 +59,28 @@ export default function RegisterPage({
       .then((event) => setIsEventOrganizer(event.organizer_id === user.id))
       .catch(() => setIsEventOrganizer(false));
   }, [user, eventId]);
+
+  // Already registered? Skip the form entirely.
+  useEffect(() => {
+    if (!user) {
+      setExistingChecked(false);
+      setExistingAttendeeId(null);
+      return;
+    }
+    apiFetch<AttendeeResponse>(`/events/${eventId}/attendees/me`)
+      .then((attendee) => setExistingAttendeeId(attendee.id))
+      .catch(() => setExistingAttendeeId(null)) // 404 = not registered yet
+      .finally(() => setExistingChecked(true));
+  }, [user, eventId]);
+
+  // Give returning attendees a moment to read the message before redirecting.
+  useEffect(() => {
+    if (!existingAttendeeId) return;
+    const timer = setTimeout(() => {
+      router.push(`/event/${eventId}/live?attendee=${existingAttendeeId}`);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [existingAttendeeId, eventId, router]);
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
@@ -96,6 +120,29 @@ export default function RegisterPage({
     return (
       <main className="flex min-h-screen flex-col items-center justify-center p-6">
         <AttendeeAuth nextPath={`/event/${eventId}/register`} />
+      </main>
+    );
+  }
+
+  if (!existingChecked) {
+    return (
+      <main className="flex min-h-screen items-center justify-center p-6">
+        <p>Checking your registration...</p>
+      </main>
+    );
+  }
+
+  if (existingAttendeeId) {
+    const liveUrl = `/event/${eventId}/live?attendee=${existingAttendeeId}`;
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-3 p-6 text-center">
+        <h1 className="text-xl font-semibold">You&apos;re already registered ✅</h1>
+        <p className="text-sm text-gray-600">
+          Taking you to your event dashboard in a moment...
+        </p>
+        <a href={liveUrl} className="text-sm underline">
+          Go now
+        </a>
       </main>
     );
   }

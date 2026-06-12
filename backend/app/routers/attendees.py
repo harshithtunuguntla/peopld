@@ -70,14 +70,51 @@ async def register_attendee(
     return result.data[0]
 
 
+@router.get("/me", response_model=AttendeeResponse)
+async def get_my_registration(
+    event_id: str,
+    user: AuthUser = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """The caller's own registration for this event, 404 if not registered.
+
+    Lets the frontend detect an existing registration BEFORE showing the
+    form. Declared before /{attendee_id} so 'me' isn't matched as an id.
+    """
+    fetch_event_or_404(db, event_id)
+    result = (
+        db.table("attendees")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("user_id", user.id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Not registered for this event")
+    return result.data[0]
+
+
 @router.get("/{attendee_id}", response_model=AttendeeWithAssignmentResponse)
 async def get_attendee(
     event_id: str,
     attendee_id: str,
+    user: AuthUser = Depends(get_current_user),
     db: Client = Depends(get_supabase),
 ):
-    """Attendee profile + current table assignment (if a round is active)."""
+    """Attendee profile + current table assignment (if a round is active).
+
+    Contains contact info, so restricted to the attendee themself or the
+    event's organizer.
+    """
+    event = fetch_event_or_404(db, event_id)
     attendee = _fetch_attendee(db, event_id, attendee_id)
+
+    is_organizer = str(event["organizer_id"]) == user.id
+    is_self = attendee.get("user_id") is not None and str(attendee["user_id"]) == user.id
+    if not (is_organizer or is_self):
+        raise HTTPException(status_code=403, detail="Not allowed to view this attendee")
+
     result = dict(attendee)
 
     active_round = (

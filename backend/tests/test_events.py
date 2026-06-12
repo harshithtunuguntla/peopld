@@ -90,17 +90,43 @@ def test_end_event_completes_active_rounds(client, db, event):
     assert rounds[0]["ended_at"] is not None
 
 
+def test_list_attendees_requires_auth(client, db, event):
+    make_attendee(db, event["id"])
+
+    response = client.get(f"/events/{event['id']}/attendees")
+    assert response.status_code == 401
+
+
+def test_list_attendees_wrong_organizer_forbidden(client, db, event):
+    make_attendee(db, event["id"])
+
+    response = client.get(f"/events/{event['id']}/attendees", headers=OTHER_AUTH)
+    assert response.status_code == 403
+
+
 def test_list_attendees(client, db, event):
     make_attendee(db, event["id"], name="Asha")
     make_attendee(db, event["id"], name="Ravi")
 
-    response = client.get(f"/events/{event['id']}/attendees")
+    response = client.get(f"/events/{event['id']}/attendees", headers=AUTH)
     assert response.status_code == 200
     assert {a["name"] for a in response.json()} == {"Asha", "Ravi"}
 
 
+def test_analytics_requires_organizer(client, event):
+    assert client.get(f"/events/{event['id']}/analytics").status_code == 401
+    assert (
+        client.get(f"/events/{event['id']}/analytics", headers=ATTENDEE_AUTH).status_code
+        == 403
+    )
+    assert (
+        client.get(f"/events/{event['id']}/analytics", headers=OTHER_AUTH).status_code
+        == 403
+    )
+
+
 def test_analytics_empty_event(client, event):
-    response = client.get(f"/events/{event['id']}/analytics")
+    response = client.get(f"/events/{event['id']}/analytics", headers=AUTH)
     assert response.status_code == 200
     body = response.json()
     assert body == {
@@ -131,7 +157,7 @@ def test_analytics_computes_unique_people_met(client, db, event):
     make_assignment(db, event["id"], r2["id"], b["id"], 2)
     make_assignment(db, event["id"], r2["id"], d["id"], 2)
 
-    response = client.get(f"/events/{event['id']}/analytics")
+    response = client.get(f"/events/{event['id']}/analytics", headers=AUTH)
     assert response.status_code == 200
     body = response.json()
     assert body["total_attendees"] == 4

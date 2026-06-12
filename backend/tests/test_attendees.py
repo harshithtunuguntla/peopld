@@ -109,10 +109,30 @@ def test_register_optional_fields_omitted(client, event):
     assert body["whatsapp_number"] is None
 
 
-def test_get_attendee_without_active_round(client, db, event):
+def test_get_attendee_requires_auth(client, db, event):
     attendee = make_attendee(db, event["id"])
 
     response = client.get(f"/events/{event['id']}/attendees/{attendee['id']}")
+    assert response.status_code == 401
+
+
+def test_get_attendee_other_user_forbidden(client, db, event):
+    # Profiles contain contact info — only self or the event organizer
+    attendee = make_attendee(db, event["id"], user_id=ATTENDEE_USER_ID)
+
+    response = client.get(
+        f"/events/{event['id']}/attendees/{attendee['id']}",
+        headers=OTHER_ATTENDEE_AUTH,
+    )
+    assert response.status_code == 403
+
+
+def test_get_attendee_self_without_active_round(client, db, event):
+    attendee = make_attendee(db, event["id"], user_id=ATTENDEE_USER_ID)
+
+    response = client.get(
+        f"/events/{event['id']}/attendees/{attendee['id']}", headers=ATTENDEE_AUTH
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["current_table_number"] is None
@@ -120,11 +140,14 @@ def test_get_attendee_without_active_round(client, db, event):
 
 
 def test_get_attendee_with_active_assignment(client, db, event):
+    # Event organizer can view any attendee
     attendee = make_attendee(db, event["id"])
     round_row = make_round(db, event["id"], round_number=3, status="active")
     make_assignment(db, event["id"], round_row["id"], attendee["id"], table_number=7)
 
-    response = client.get(f"/events/{event['id']}/attendees/{attendee['id']}")
+    response = client.get(
+        f"/events/{event['id']}/attendees/{attendee['id']}", headers=AUTH
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["current_table_number"] == 7
@@ -134,9 +157,34 @@ def test_get_attendee_with_active_assignment(client, db, event):
 
 def test_get_attendee_not_found(client, event):
     response = client.get(
-        f"/events/{event['id']}/attendees/00000000-0000-0000-0000-000000000000"
+        f"/events/{event['id']}/attendees/00000000-0000-0000-0000-000000000000",
+        headers=AUTH,
     )
     assert response.status_code == 404
+
+
+def test_my_registration_requires_auth(client, event):
+    response = client.get(f"/events/{event['id']}/attendees/me")
+    assert response.status_code == 401
+
+
+def test_my_registration_not_registered(client, event):
+    response = client.get(
+        f"/events/{event['id']}/attendees/me", headers=ATTENDEE_AUTH
+    )
+    assert response.status_code == 404
+
+
+def test_my_registration_found(client, event):
+    created = client.post(
+        f"/events/{event['id']}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH
+    )
+
+    response = client.get(
+        f"/events/{event['id']}/attendees/me", headers=ATTENDEE_AUTH
+    )
+    assert response.status_code == 200
+    assert response.json()["id"] == created.json()["id"]
 
 
 def test_patch_attendee_requires_auth(client, db, event):

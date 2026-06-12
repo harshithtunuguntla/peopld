@@ -25,6 +25,9 @@ from supabase import create_client  # noqa: E402
 
 API = "http://localhost:8000"
 PASSWORD = "Smoke-Test-1234!"
+# Public key shipped in the frontend bundle — used to verify RLS keeps
+# direct client access away from PII (anyone on the internet holds this key).
+ANON_KEY = "sb_publishable_X9WPPTO7tL9UHhPkxmI3wA_oVIN1f5a"
 USERS = {
     "organizer": {"email": "smoke-organizer@peopld.test", "role": "organizer"},
     "organizer2": {"email": "smoke-organizer2@peopld.test", "role": "organizer"},
@@ -150,6 +153,9 @@ def main() -> int:
             r = api.post(f"/events/{event_id}/attendees", json=register_payload)
             check("register without token -> 401", r.status_code == 401, r.text)
 
+            r = api.get(f"/events/{event_id}/attendees/me", headers=att)
+            check("GET /attendees/me before registering -> 404", r.status_code == 404, r.text)
+
             r = api.post(f"/events/{event_id}/attendees", headers=att, json=register_payload)
             check("register with attendee JWT -> 201", r.status_code == 201, r.text)
             attendee = r.json()
@@ -161,9 +167,17 @@ def main() -> int:
             check("re-register same user -> 200 + same record (dedupe)",
                   r.status_code == 200 and r.json()["id"] == attendee["id"], r.text)
 
+            r = api.get(f"/events/{event_id}/attendees/me", headers=att)
+            check("GET /attendees/me after registering -> own record",
+                  r.status_code == 200 and r.json()["id"] == attendee["id"], r.text)
+
             r = api.get(f"/events/{event_id}/attendees/{attendee['id']}")
+            check("GET attendee without token -> 401", r.status_code == 401, r.text)
+            r = api.get(f"/events/{event_id}/attendees/{attendee['id']}", headers=org2)
+            check("GET attendee by stranger -> 403", r.status_code == 403, r.text)
+            r = api.get(f"/events/{event_id}/attendees/{attendee['id']}", headers=att)
             body = r.json()
-            check("GET attendee -> 200, no table yet",
+            check("GET attendee (self) -> 200, no table yet",
                   r.status_code == 200 and body["current_table_number"] is None, r.text)
 
             r = api.patch(f"/events/{event_id}/attendees/{attendee['id']}",
@@ -178,7 +192,11 @@ def main() -> int:
                   r.status_code == 200 and r.json()["status"] == "arrived", r.text)
 
             r = api.get(f"/events/{event_id}/attendees")
-            check("GET event attendees -> 1", r.status_code == 200 and len(r.json()) == 1, r.text)
+            check("attendee list without token -> 401", r.status_code == 401, r.text)
+            r = api.get(f"/events/{event_id}/attendees", headers=org2)
+            check("attendee list wrong organizer -> 403", r.status_code == 403, r.text)
+            r = api.get(f"/events/{event_id}/attendees", headers=org)
+            check("attendee list (owner) -> 1", r.status_code == 200 and len(r.json()) == 1, r.text)
 
             # -- 6. Rounds (pre-algorithm states) --
             print("\n[6] Rounds")
@@ -207,7 +225,9 @@ def main() -> int:
             # -- 8. Analytics + end event --
             print("\n[8] Analytics & end event")
             r = api.get(f"/events/{event_id}/analytics")
-            check("GET analytics -> 200, 1 attendee",
+            check("analytics without token -> 401", r.status_code == 401, r.text)
+            r = api.get(f"/events/{event_id}/analytics", headers=org)
+            check("GET analytics (owner) -> 200, 1 attendee",
                   r.status_code == 200 and r.json()["total_attendees"] == 1, r.text)
 
             r = api.post(f"/events/{event_id}/end", headers=org)
@@ -226,6 +246,22 @@ def main() -> int:
             rows = db.table("attendees").select("*").eq("event_id", event_id).execute().data
             check("attendee row exists with linked user_id",
                   len(rows) == 1 and rows[0]["user_id"] == ids["attendee"])
+
+            # -- 9b. RLS: the public anon key must NOT read PII or write --
+            print("\n[9b] RLS verification (attacker with public anon key)")
+            anon = create_client(settings.supabase_url, ANON_KEY)
+            leaked = anon.table("attendees").select("*").limit(5).execute().data
+            check("anon key cannot read attendees (PII)", not leaked,
+                  f"LEAKED {len(leaked or [])} rows - run supabase/migrations/001_tighten_rls.sql")
+            try:
+                anon.table("events").update({"name": "hacked"}).eq("id", event_id).execute()
+            except Exception:
+                pass
+            tampered = db.table("events").select("name").eq("id", event_id).execute().data
+            check("anon key cannot modify events",
+                  tampered and tampered[0]["name"] != "hacked")
+            public_event = anon.table("events").select("name").eq("id", event_id).execute().data
+            check("anon key CAN read events (landing page)", bool(public_event))
 
     finally:
         # -- Cleanup: cascade delete removes attendees with the event --

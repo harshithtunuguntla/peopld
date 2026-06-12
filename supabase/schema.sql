@@ -76,25 +76,15 @@ ALTER TABLE rounds           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE table_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE icebreakers      ENABLE ROW LEVEL SECURITY;
 
+-- SECURITY MODEL: all writes and all PII reads go through the FastAPI
+-- backend (service-role key, bypasses RLS, enforces ownership checks).
+-- Client-side keys get SELECT only on non-PII tables needed for the
+-- public landing page and Realtime subscriptions. The attendees table
+-- (names, WhatsApp, LinkedIn) is NOT client-readable.
+
 -- Anyone can read event details (public landing page)
 CREATE POLICY "events_public_read" ON events
   FOR SELECT USING (true);
-
--- Organizer can create and update their own events
-CREATE POLICY "events_organizer_write" ON events
-  FOR ALL USING (auth.uid() = organizer_id);
-
--- Attendees are readable by anyone with the event link
-CREATE POLICY "attendees_public_read" ON attendees
-  FOR SELECT USING (true);
-
--- Attendees can insert their own registration
-CREATE POLICY "attendees_self_insert" ON attendees
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
-
--- Attendees can update their own record
-CREATE POLICY "attendees_self_update" ON attendees
-  FOR UPDATE USING (auth.uid() = user_id);
 
 -- Rounds are readable by all (needed for realtime)
 CREATE POLICY "rounds_public_read" ON rounds

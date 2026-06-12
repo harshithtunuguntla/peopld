@@ -89,16 +89,31 @@ async def end_event(
 
 
 @router.get("/{event_id}/attendees", response_model=list[AttendeeResponse])
-async def list_attendees(event_id: str, db: Client = Depends(get_supabase)):
-    fetch_event_or_404(db, event_id)
+async def list_attendees(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Full attendee list (includes contact info) — event owner only."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
     result = db.table("attendees").select("*").eq("event_id", event_id).execute()
     return result.data or []
 
 
 @router.get("/{event_id}/analytics", response_model=EventAnalytics)
-async def get_analytics(event_id: str, db: Client = Depends(get_supabase)):
-    """Post-event summary: attendee count, rounds completed, avg unique people met."""
-    fetch_event_or_404(db, event_id)
+async def get_analytics(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Post-event summary: attendee count, rounds completed, avg unique people met.
+
+    Organizer dashboard feature — attendees get their own numbers from the
+    connections endpoint instead.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
 
     attendees = db.table("attendees").select("*").eq("event_id", event_id).execute().data or []
     rounds = db.table("rounds").select("*").eq("event_id", event_id).execute().data or []

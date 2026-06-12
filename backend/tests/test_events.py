@@ -1,4 +1,12 @@
-from tests.conftest import AUTH, OTHER_AUTH, ORGANIZER_ID, make_attendee, make_round, make_assignment
+from tests.conftest import (
+    ATTENDEE_AUTH,
+    AUTH,
+    ORGANIZER_ID,
+    OTHER_AUTH,
+    make_assignment,
+    make_attendee,
+    make_round,
+)
 
 EVENT_PAYLOAD = {
     "name": "Founder Meetup",
@@ -17,11 +25,16 @@ def test_create_event_requires_auth(client):
     assert response.status_code == 401
 
 
-def test_create_event_malformed_auth_header(client):
+def test_create_event_invalid_token(client):
     response = client.post(
-        "/events", json=EVENT_PAYLOAD, headers={"X-Organizer-Id": "not-a-uuid"}
+        "/events", json=EVENT_PAYLOAD, headers={"Authorization": "Bearer garbage-token"}
     )
     assert response.status_code == 401
+
+
+def test_create_event_non_organizer_forbidden(client):
+    response = client.post("/events", json=EVENT_PAYLOAD, headers=ATTENDEE_AUTH)
+    assert response.status_code == 403
 
 
 def test_create_and_get_event(client):

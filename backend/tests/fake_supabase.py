@@ -4,12 +4,14 @@ Supports the subset of the API the app uses:
     table(name).select(...).eq(...).order(...).limit(...).execute()
     table(name).insert(row).execute()
     table(name).update(changes).eq(...).execute()
+    auth.get_user(token)  (tokens registered via register_token())
 
 Lets the whole test suite run with no Supabase project, no network, no env.
 """
 
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 
 class FakeResult:
@@ -86,14 +88,34 @@ class FakeQuery:
         return FakeResult([dict(r) for r in matched])
 
 
+class FakeAuth:
+    """Mimics supabase client.auth for JWT verification in tests."""
+
+    def __init__(self):
+        self._tokens: dict[str, SimpleNamespace] = {}
+
+    def get_user(self, token: str):
+        user = self._tokens.get(token)
+        if user is None:
+            raise Exception("Invalid token")
+        return SimpleNamespace(user=user)
+
+
 class FakeSupabase:
     def __init__(self):
         self.store: dict[str, list] = {}
+        self.auth = FakeAuth()
 
     def table(self, name: str) -> FakeQuery:
         return FakeQuery(self.store.setdefault(name, []))
 
     # --- test helpers ---
+
+    def register_token(self, token: str, user_id: str, email: str = "user@test.local", role: str | None = None) -> None:
+        """Make auth.get_user(token) resolve to this user."""
+        self.auth._tokens[token] = SimpleNamespace(
+            id=user_id, email=email, app_metadata={"role": role} if role else {}
+        )
 
     def seed(self, table: str, *rows: dict) -> list[dict]:
         """Insert rows directly, filling in id/created_at. Returns the stored rows."""

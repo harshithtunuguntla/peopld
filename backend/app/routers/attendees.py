@@ -1,7 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from supabase import Client
 
 from app.database import get_supabase
+from app.deps import (
+    AuthUser,
+    fetch_event_or_404,
+    get_current_organizer_id,
+    get_current_user,
+    require_event_owner,
+)
 from app.models.schemas import (
     AttendeeCreate,
     AttendeeResponse,
@@ -30,18 +37,34 @@ def _fetch_attendee(db: Client, event_id: str, attendee_id: str) -> dict:
 async def register_attendee(
     event_id: str,
     body: AttendeeCreate,
+    response: Response,
+    user: AuthUser = Depends(get_current_user),
     db: Client = Depends(get_supabase),
 ):
-    event = db.table("events").select("*").eq("id", event_id).limit(1).execute()
-    if not event.data:
-        raise HTTPException(status_code=404, detail="Event not found")
-    if event.data[0]["status"] == "ended":
+    event = fetch_event_or_404(db, event_id)
+
+    # Dedupe: one registration per auth identity per event. Re-registering
+    # returns the existing record (200, not 201) — even after the event ends,
+    # so returning attendees can still reach their rolodex.
+    existing = (
+        db.table("attendees")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("user_id", user.id)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        response.status_code = 200
+        return existing.data[0]
+
+    if event["status"] == "ended":
         raise HTTPException(status_code=409, detail="Event has already ended")
 
     row = body.model_dump(mode="json")
     row["event_id"] = event_id
     row["status"] = "registered"
-    row["user_id"] = None  # linked to auth identity in Step 3
+    row["user_id"] = user.id
 
     result = db.table("attendees").insert(row).execute()
     return result.data[0]
@@ -88,9 +111,12 @@ async def update_attendee(
     event_id: str,
     attendee_id: str,
     body: AttendeeUpdate,
+    organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
-    """Organizer control panel — mark attendee arrived / left."""
+    """Organizer control panel — mark attendee arrived / left. Event owner only."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
     attendee = _fetch_attendee(db, event_id, attendee_id)
 
     changes = body.model_dump(exclude_none=True)

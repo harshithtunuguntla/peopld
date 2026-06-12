@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 
 from app.database import get_supabase
-from app.deps import get_current_organizer_id
+from app.deps import fetch_event_or_404, get_current_organizer_id, require_event_owner
 from app.models.schemas import (
     RoundResponse,
     RoundWithAssignmentsResponse,
@@ -34,6 +34,8 @@ async def start_round(
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
     # Step 4: rotation algorithm assigns tables, then triggers async icebreaker generation
     raise HTTPException(status_code=501, detail="Implemented in Step 4 (rotation algorithm)")
 
@@ -44,6 +46,8 @@ async def end_round(
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
     active = _fetch_active_round(db, event_id)
     now = datetime.now(timezone.utc).isoformat()
     result = (

@@ -1,10 +1,10 @@
-from datetime import datetime, timezone
+﻿from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from supabase import Client
 
 from app.database import get_supabase
-from app.deps import get_current_organizer_id
+from app.deps import fetch_event_or_404, get_current_organizer_id, require_event_owner
 from app.models.schemas import (
     AttendeeResponse,
     EventAnalytics,
@@ -16,24 +16,12 @@ from app.models.schemas import (
 router = APIRouter(prefix="/events", tags=["events"])
 
 
-def _fetch_event(db: Client, event_id: str) -> dict:
-    result = db.table("events").select("*").eq("id", event_id).limit(1).execute()
-    if not result.data:
-        raise HTTPException(status_code=404, detail="Event not found")
-    return result.data[0]
-
-
-def _require_owner(event: dict, organizer_id: str) -> None:
-    if str(event["organizer_id"]) != str(organizer_id):
-        raise HTTPException(status_code=403, detail="Not the organizer of this event")
-
-
 @router.get("/mine", response_model=list[EventResponse])
 async def list_my_events(
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
-    """Organizer dashboard — all events created by the authenticated organizer."""
+    """Organizer dashboard - all events created by the authenticated organizer."""
     result = (
         db.table("events")
         .select("*")
@@ -59,8 +47,8 @@ async def create_event(
 
 @router.get("/{event_id}", response_model=EventResponse)
 async def get_event(event_id: str, db: Client = Depends(get_supabase)):
-    """Public — powers the event landing page."""
-    return _fetch_event(db, event_id)
+    """Public - powers the event landing page."""
+    return fetch_event_or_404(db, event_id)
 
 
 @router.patch("/{event_id}", response_model=EventResponse)
@@ -70,8 +58,8 @@ async def update_event(
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
-    event = _fetch_event(db, event_id)
-    _require_owner(event, organizer_id)
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
 
     changes = body.model_dump(exclude_none=True)
     if not changes:
@@ -88,8 +76,8 @@ async def end_event(
     db: Client = Depends(get_supabase),
 ):
     """Ends the event and completes any round still active."""
-    event = _fetch_event(db, event_id)
-    _require_owner(event, organizer_id)
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
 
     now = datetime.now(timezone.utc).isoformat()
     db.table("rounds").update({"status": "completed", "ended_at": now}).eq(
@@ -102,7 +90,7 @@ async def end_event(
 
 @router.get("/{event_id}/attendees", response_model=list[AttendeeResponse])
 async def list_attendees(event_id: str, db: Client = Depends(get_supabase)):
-    _fetch_event(db, event_id)
+    fetch_event_or_404(db, event_id)
     result = db.table("attendees").select("*").eq("event_id", event_id).execute()
     return result.data or []
 
@@ -110,7 +98,7 @@ async def list_attendees(event_id: str, db: Client = Depends(get_supabase)):
 @router.get("/{event_id}/analytics", response_model=EventAnalytics)
 async def get_analytics(event_id: str, db: Client = Depends(get_supabase)):
     """Post-event summary: attendee count, rounds completed, avg unique people met."""
-    _fetch_event(db, event_id)
+    fetch_event_or_404(db, event_id)
 
     attendees = db.table("attendees").select("*").eq("event_id", event_id).execute().data or []
     rounds = db.table("rounds").select("*").eq("event_id", event_id).execute().data or []

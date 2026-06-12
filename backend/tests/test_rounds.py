@@ -1,4 +1,4 @@
-from tests.conftest import AUTH, make_attendee, make_round, make_assignment
+from tests.conftest import ATTENDEE_AUTH, AUTH, OTHER_AUTH, make_attendee, make_round, make_assignment
 
 
 def test_current_round_none_active(client, event):
@@ -28,6 +28,20 @@ def test_current_round_includes_assignments(client, db, event):
 def test_end_round_requires_auth(client, event):
     response = client.post(f"/events/{event['id']}/rounds/end")
     assert response.status_code == 401
+
+
+def test_end_round_non_organizer_forbidden(client, db, event):
+    make_round(db, event["id"], round_number=1, status="active")
+
+    response = client.post(f"/events/{event['id']}/rounds/end", headers=ATTENDEE_AUTH)
+    assert response.status_code == 403
+
+
+def test_end_round_wrong_organizer_forbidden(client, db, event):
+    make_round(db, event["id"], round_number=1, status="active")
+
+    response = client.post(f"/events/{event['id']}/rounds/end", headers=OTHER_AUTH)
+    assert response.status_code == 403
 
 
 def test_end_round_no_active(client, event):

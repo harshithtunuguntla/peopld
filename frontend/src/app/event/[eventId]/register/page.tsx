@@ -1,12 +1,139 @@
-export default async function RegisterPage({
+"use client";
+
+import { useRouter } from "next/navigation";
+import { use, useEffect, useState } from "react";
+import type { User } from "@supabase/supabase-js";
+
+import AttendeeAuth from "@/components/AttendeeAuth";
+import { apiFetch } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
+
+interface AttendeeResponse {
+  id: string;
+  event_id: string;
+}
+
+export default function RegisterPage({
   params,
 }: {
   params: Promise<{ eventId: string }>;
 }) {
-  const { eventId } = await params;
+  const { eventId } = use(params);
+  const router = useRouter();
+
+  const [user, setUser] = useState<User | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("");
+  const [lookingFor, setLookingFor] = useState("");
+  const [linkedin, setLinkedin] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+      setAuthChecked(true);
+    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  async function handleRegister(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      const attendee = await apiFetch<AttendeeResponse>(
+        `/events/${eventId}/attendees`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            role,
+            looking_for: lookingFor || null,
+            linkedin_url: linkedin || null,
+            whatsapp_number: whatsapp || null,
+          }),
+        }
+      );
+      // Existing registrations are returned too (dedupe) — same destination.
+      router.push(`/event/${eventId}/live?attendee=${attendee.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Registration failed");
+      setBusy(false);
+    }
+  }
+
+  if (!authChecked) {
+    return (
+      <main className="flex min-h-screen items-center justify-center p-6">
+        <p>Loading...</p>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center p-6">
+        <AttendeeAuth nextPath={`/event/${eventId}/register`} />
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen p-6">
-      <p>Registration — {eventId}</p>
+    <main className="flex min-h-screen flex-col items-center p-6">
+      <form
+        onSubmit={handleRegister}
+        className="flex w-full max-w-sm flex-col gap-3"
+      >
+        <h1 className="text-xl font-semibold">Register</h1>
+        <input
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Full name"
+          className="w-full rounded border px-4 py-3"
+        />
+        <input
+          required
+          value={role}
+          onChange={(e) => setRole(e.target.value)}
+          placeholder='Role (e.g. "Founder at XYZ")'
+          className="w-full rounded border px-4 py-3"
+        />
+        <input
+          value={lookingFor}
+          onChange={(e) => setLookingFor(e.target.value)}
+          placeholder='Looking for (e.g. "investors, designers")'
+          className="w-full rounded border px-4 py-3"
+        />
+        <input
+          value={linkedin}
+          onChange={(e) => setLinkedin(e.target.value)}
+          placeholder="LinkedIn URL (optional)"
+          className="w-full rounded border px-4 py-3"
+        />
+        <input
+          value={whatsapp}
+          onChange={(e) => setWhatsapp(e.target.value)}
+          placeholder="WhatsApp number (optional)"
+          className="w-full rounded border px-4 py-3"
+        />
+        <button
+          type="submit"
+          disabled={busy}
+          className="w-full rounded border px-4 py-3 font-medium disabled:opacity-50"
+        >
+          {busy ? "Joining..." : "Join the event"}
+        </button>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+      </form>
     </main>
   );
 }

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 
 from app.database import get_supabase
+from app.deps import ORGANIZER_ROLE, AuthUser, fetch_event_or_404, get_current_user
 from app.models.schemas import ConnectionEntry, ConnectionsResponse
 
 router = APIRouter(
@@ -14,9 +15,15 @@ router = APIRouter(
 async def get_connections(
     event_id: str,
     attendee_id: str,
+    user: AuthUser = Depends(get_current_user),
     db: Client = Depends(get_supabase),
 ):
-    """Digital Rolodex — everyone this attendee sat with, grouped by round."""
+    """Digital Rolodex — everyone this attendee sat with, grouped by round.
+
+    Exposes tablemates' contact info, so it is restricted to the attendee
+    themself or the event's organizer.
+    """
+    event = fetch_event_or_404(db, event_id)
     attendee = (
         db.table("attendees")
         .select("*")
@@ -27,6 +34,14 @@ async def get_connections(
     )
     if not attendee.data:
         raise HTTPException(status_code=404, detail="Attendee not found")
+
+    is_organizer = user.role == ORGANIZER_ROLE and str(event["organizer_id"]) == user.id
+    is_self = (
+        attendee.data[0].get("user_id") is not None
+        and str(attendee.data[0]["user_id"]) == user.id
+    )
+    if not (is_organizer or is_self):
+        raise HTTPException(status_code=403, detail="Not allowed to view these connections")
 
     my_assignments = (
         db.table("table_assignments")

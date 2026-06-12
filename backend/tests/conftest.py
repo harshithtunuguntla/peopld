@@ -14,14 +14,25 @@ from tests.fake_supabase import FakeSupabase
 
 ORGANIZER_ID = "11111111-1111-1111-1111-111111111111"
 OTHER_ORGANIZER_ID = "22222222-2222-2222-2222-222222222222"
+ATTENDEE_USER_ID = "33333333-3333-3333-3333-333333333333"
+OTHER_ATTENDEE_USER_ID = "44444444-4444-4444-4444-444444444444"
 
-AUTH = {"X-Organizer-Id": ORGANIZER_ID}
-OTHER_AUTH = {"X-Organizer-Id": OTHER_ORGANIZER_ID}
+# Real Authorization headers — resolved by FakeAuth.get_user(), so the real
+# get_current_user dependency code runs in every test (nothing is overridden).
+AUTH = {"Authorization": "Bearer organizer-token"}
+OTHER_AUTH = {"Authorization": "Bearer other-organizer-token"}
+ATTENDEE_AUTH = {"Authorization": "Bearer attendee-token"}
+OTHER_ATTENDEE_AUTH = {"Authorization": "Bearer other-attendee-token"}
 
 
 @pytest.fixture
 def db() -> FakeSupabase:
-    return FakeSupabase()
+    fake = FakeSupabase()
+    fake.register_token("organizer-token", ORGANIZER_ID, "org@test.local", role="organizer")
+    fake.register_token("other-organizer-token", OTHER_ORGANIZER_ID, "org2@test.local", role="organizer")
+    fake.register_token("attendee-token", ATTENDEE_USER_ID, "asha@test.local")
+    fake.register_token("other-attendee-token", OTHER_ATTENDEE_USER_ID, "ravi@test.local")
+    return fake
 
 
 @pytest.fixture

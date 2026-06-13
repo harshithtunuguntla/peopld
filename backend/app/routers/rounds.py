@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+from math import ceil
 
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
@@ -9,6 +10,7 @@ from app.algorithm import (
     RotationError,
     draft_snapshot_hash,
     generate_rotation,
+    plan_rounds,
 )
 from app.audit import record_audit
 from app.database import get_supabase
@@ -96,36 +98,122 @@ def _next_round_number(db: Client, event_id: str) -> int:
     return max((r["round_number"] for r in rounds), default=0) + 1
 
 
-def _build_draft_row(db: Client, event: dict, event_id: str) -> tuple[dict, dict[str, dict]]:
-    """Generate a seating draft from the current arrived pool.
+def _fetch_plan(db: Client, event_id: str) -> dict | None:
+    result = db.table("round_plans").select("*").eq("event_id", event_id).limit(1).execute()
+    return result.data[0] if result.data else None
+
+
+def _store_plan(db: Client, event_id: str, planned_for_hash: str,
+                horizon_start_round: int, plan: list[dict]) -> None:
+    """Upsert the cached plan (UNIQUE(event_id) -> at most one per event)."""
+    payload = {
+        "event_id": event_id,
+        "planned_for_hash": planned_for_hash,
+        "horizon_start_round": horizon_start_round,
+        "plan": plan,
+    }
+    if _fetch_plan(db, event_id):
+        db.table("round_plans").update(payload).eq("event_id", event_id).execute()
+    else:
+        db.table("round_plans").insert(payload).execute()
+
+
+def _resolve_horizon(event: dict, arrived_count: int, next_round_number: int) -> int:
+    """How many rounds to plan ahead from here.
+
+    Uses the organizer's intended round count (target_rounds) when set, else the
+    room's novelty ceiling. Always at least 1 (the round being started).
+    """
+    seats = event["seats_per_table"]
+    target = event.get("target_rounds")
+    if not target:
+        ceiling = ceil((arrived_count - 1) / max(seats - 1, 1)) if arrived_count > 1 else 1
+        target = min(max(ceiling, 1), 12)
+    return max(1, int(target) - (next_round_number - 1))
+
+
+def _round_repeat_pairings(seating: dict[str, int], pair_counts: PairCounts) -> int:
+    """Seated pairs in this one round that have already met in a published round."""
+    groups: dict[int, list[str]] = {}
+    for attendee_id, table_number in seating.items():
+        groups.setdefault(table_number, []).append(attendee_id)
+    repeats = 0
+    for group in groups.values():
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                if pair_counts.get(frozenset((group[i], group[j])), 0) > 0:
+                    repeats += 1
+    return repeats
+
+
+def _seating_for_next_round(
+    db: Client, event: dict, event_id: str, force_replan: bool = False
+) -> tuple[dict[str, int], str, PairCounts]:
+    """Next round's seating: follow the cached plan, or re-plan if it's stale.
+
+    Re-plans (and re-caches) when: there is no plan, the arrived set / table
+    config changed since the plan was made (hash mismatch), the plan doesn't
+    cover this round number, or a regenerate forced it. Otherwise the cached
+    plan is followed (this is what preserves the lookahead benefit).
+
+    Returns (seating, current_hash, pair_counts). Raises 422 on impossible config.
+    """
+    pool = _arrived_pool(db, event_id)
+    arrived_ids = sorted(str(a["id"]) for a in pool)
+    num_tables, seats = event["num_tables"], event["seats_per_table"]
+    current_hash = draft_snapshot_hash(arrived_ids, num_tables, seats)
+    next_number = _next_round_number(db, event_id)
+    pair_counts = _pair_counts(db, event_id)
+
+    if not force_replan:
+        cached = _fetch_plan(db, event_id)
+        if cached and cached["planned_for_hash"] == current_hash:
+            idx = next_number - cached["horizon_start_round"]
+            plan = cached["plan"]
+            if 0 <= idx < len(plan):
+                return plan[idx], current_hash, pair_counts
+
+    horizon = _resolve_horizon(event, len(arrived_ids), next_number)
+    try:
+        result = plan_rounds(arrived_ids, pair_counts, num_tables, seats, horizon)
+        seatings = result.rounds
+    except RotationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        # Reliability over cleverness: if the planner ever fails unexpectedly,
+        # fall back to greedy for this round so the event never stalls.
+        logger.exception("planner failed — falling back to greedy", extra={"event_id": event_id})
+        try:
+            rotation = generate_rotation(arrived_ids, pair_counts, num_tables, seats)
+        except RotationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        return rotation.tables, current_hash, pair_counts
+
+    _store_plan(db, event_id, current_hash, next_number, seatings)
+    return seatings[0], current_hash, pair_counts
+
+
+def _build_draft_row(db: Client, event: dict, event_id: str,
+                     force_replan: bool = False) -> tuple[dict, dict[str, dict]]:
+    """Materialize the next round's seating (from the plan) into a draft row.
 
     Returns (draft row ready to store, attendee lookup for the preview).
     Raises 422 with an organizer-readable message when no valid seating exists.
     """
     pool = _arrived_pool(db, event_id)
-    arrived_ids = [str(a["id"]) for a in pool]
-    try:
-        rotation = generate_rotation(
-            arrived_ids,
-            _pair_counts(db, event_id),
-            num_tables=event["num_tables"],
-            seats_per_table=event["seats_per_table"],
-        )
-    except RotationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-
+    seating, current_hash, pair_counts = _seating_for_next_round(
+        db, event, event_id, force_replan=force_replan
+    )
     row = {
         "event_id": event_id,
         "round_number": _next_round_number(db, event_id),
         "duration_seconds": event["default_round_duration_seconds"],
         "assignments": [
             {"attendee_id": attendee_id, "table_number": table_number}
-            for attendee_id, table_number in rotation.tables.items()
+            for attendee_id, table_number in seating.items()
         ],
-        "arrived_hash": draft_snapshot_hash(
-            arrived_ids, event["num_tables"], event["seats_per_table"]
-        ),
-        "repeat_pairings": rotation.repeat_pairings,
+        "arrived_hash": current_hash,
+        "repeat_pairings": _round_repeat_pairings(seating, pair_counts),
     }
     return row, {str(a["id"]): a for a in pool}
 
@@ -213,7 +301,9 @@ async def regenerate_draft(
     if not draft:
         raise HTTPException(status_code=404, detail="No draft to regenerate — start a round first")
 
-    row, attendees_by_id = _build_draft_row(db, event, event_id)
+    # Force a fresh plan: regenerating only this round would desync the cached
+    # plan (later rounds were optimized around the seating we're discarding).
+    row, attendees_by_id = _build_draft_row(db, event, event_id, force_replan=True)
     changes = {k: row[k] for k in
                ("round_number", "duration_seconds", "assignments", "arrived_hash", "repeat_pairings")}
     updated = db.table("round_drafts").update(changes).eq("id", draft["id"]).execute().data[0]

@@ -326,6 +326,63 @@ def test_left_then_returns_included_again(client, db, event):
     assert leaver["id"] in {a["attendee_id"] for a in draft["assignments"]}
 
 
+# --- re-planning lifecycle (docs/design/rotation-replanning.md) ---
+
+
+def _plan_row(db, event_id: str) -> dict | None:
+    rows = db.table("round_plans").select("*").eq("event_id", event_id).execute().data
+    return rows[0] if rows else None
+
+
+def test_plan_is_cached_on_start(client, db, event):
+    make_arrived(db, event["id"], 8)
+    client.post(f"/events/{event['id']}/rounds/start", headers=AUTH)
+    plan = _plan_row(db, event["id"])
+    assert plan is not None
+    assert plan["horizon_start_round"] == 1
+    assert len(plan["plan"]) >= 1
+
+
+def test_plan_is_followed_when_roster_unchanged(client, db, event):
+    # Stable roster -> the round-1 plan is FOLLOWED for round 2, not re-planned.
+    make_arrived(db, event["id"], 8)
+    _run_round(client, event["id"])
+    before = _plan_row(db, event["id"])
+    client.post(f"/events/{event['id']}/rounds/start", headers=AUTH)  # round 2
+    after = _plan_row(db, event["id"])
+    assert after["horizon_start_round"] == before["horizon_start_round"] == 1
+    assert after["planned_for_hash"] == before["planned_for_hash"]
+
+
+def test_plan_is_replanned_when_roster_changes(client, db, event):
+    # A latecomer arrives between rounds -> re-plan the remainder from here.
+    make_arrived(db, event["id"], 8)
+    _run_round(client, event["id"])
+    before = _plan_row(db, event["id"])
+    make_arrived(db, event["id"], 1)  # latecomer
+    draft = client.post(f"/events/{event['id']}/rounds/start", headers=AUTH).json()
+    after = _plan_row(db, event["id"])
+    assert draft["round_number"] == 2 and draft["arrived_count"] == 9
+    assert after["horizon_start_round"] == 2
+    assert after["planned_for_hash"] != before["planned_for_hash"]
+
+
+def test_target_rounds_sets_planning_horizon(client, db, event):
+    db.table("events").update({"target_rounds": 5}).eq("id", event["id"]).execute()
+    make_arrived(db, event["id"], 8)
+    client.post(f"/events/{event['id']}/rounds/start", headers=AUTH)
+    assert len(_plan_row(db, event["id"])["plan"]) == 5
+
+
+def test_regenerate_replans_in_place(client, db, event):
+    make_arrived(db, event["id"], 8)
+    client.post(f"/events/{event['id']}/rounds/start", headers=AUTH)
+    regenerated = client.post(f"/events/{event['id']}/rounds/regenerate", headers=AUTH)
+    assert regenerated.status_code == 200
+    assert regenerated.json()["arrived_count"] == 8
+    assert _plan_row(db, event["id"])["horizon_start_round"] == 1
+
+
 # --- audit trail ---
 
 

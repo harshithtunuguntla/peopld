@@ -16,6 +16,7 @@ CREATE TABLE events (
   seats_per_table               INTEGER NOT NULL,
   default_round_duration_seconds INTEGER NOT NULL DEFAULT 300,
   auto_arrive_on_register       BOOLEAN NOT NULL DEFAULT TRUE,
+  target_rounds                 INTEGER,        -- intended round count (planning horizon); NULL = engine picks
   organizer_id                  UUID NOT NULL REFERENCES auth.users(id),
   status                        TEXT NOT NULL DEFAULT 'upcoming'
                                   CHECK (status IN ('upcoming', 'active', 'ended')),
@@ -81,6 +82,18 @@ CREATE TABLE round_drafts (
   created_at       TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Plan cache (Step 4 v2 — re-planning): the cached multi-round plan, followed
+-- while planned_for_hash matches the live arrived set + config. NOT client-
+-- readable, NOT in the realtime publication. See docs/design/rotation-replanning.md.
+CREATE TABLE round_plans (
+  id                  UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id            UUID NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
+  planned_for_hash    TEXT NOT NULL,
+  horizon_start_round INTEGER NOT NULL,
+  plan                JSONB NOT NULL,           -- [ {attendee_id: table_number}, ... ] remaining rounds
+  created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Audit trail (Step 4): every state-changing action. metadata holds
 -- UUIDs/enums/counts only, never PII.
 CREATE TABLE audit_log (
@@ -104,6 +117,7 @@ ALTER TABLE rounds           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE table_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE icebreakers      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE round_drafts     ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
+ALTER TABLE round_plans      ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE audit_log        ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 
 -- SECURITY MODEL: all writes and all PII reads go through the FastAPI

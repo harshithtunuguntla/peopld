@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from itertools import combinations
-from math import comb, ceil
+from math import comb, ceil, exp
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -117,21 +117,150 @@ def summarize(rounds_seq: list[dict[str, int]], num_attendees: int) -> Summary:
     return summary
 
 
-def naive_sequence(ids: list[str], tables: int, seats: int, rounds: int,
-                   rng: random.Random) -> list[dict[str, int]]:
-    """Control group: random seating each round (same table sizes, no memory)."""
-    sizes = plan_table_sizes(len(ids), seats, tables)
-    seq = []
-    for _ in range(rounds):
+# ──────────────────────────────────────────────────────────────────────────
+# Strong reference optimizer  (simulated annealing)
+#
+# This REPLACES naive-random as the benchmark. Beating random proves little;
+# the real question for a product is "how close is our fast greedy to the best
+# overlap-minimisation actually achievable?" SA is a genuine optimisation
+# algorithm — given time it finds near-optimal schedules — so the gap between
+# ours and SA is the honest measure of how much overlap greedy leaves on the
+# table. It is OFFLINE (sees the whole roster at once); our algorithm is ONLINE
+# (re-runs each round on whoever is present), which is the trade-off being
+# quantified, not a flaw.
+# ──────────────────────────────────────────────────────────────────────────
+
+def schedule_repeats(rounds_seq: list[dict[str, int]]) -> int:
+    """Total repeat pairings across the event = Σ_pairs max(times_together − 1, 0).
+
+    The first time two people share a table is a real introduction; every later
+    time is a repeat. This one number is "how much overlap" the whole event
+    produced — the thing we want as small as possible.
+    """
+    counts: dict[frozenset, int] = {}
+    for seating in rounds_seq:
+        groups: dict[int, list[str]] = {}
+        for aid, t in seating.items():
+            groups.setdefault(t, []).append(aid)
+        for members in groups.values():
+            for a, b in combinations(members, 2):
+                p = frozenset((a, b))
+                counts[p] = counts.get(p, 0) + 1
+    return sum(c - 1 for c in counts.values() if c > 1)
+
+
+def _anneal(ids: list[str], sizes: list[int], rounds: int, rng: random.Random,
+            warm_seq: list[dict[str, int]] | None = None,
+            iters: int | None = None) -> tuple[list[dict[str, int]], int]:
+    """One SA run over the full schedule; returns (seating_sequence, total_repeats).
+
+    Move = swap two people seated at different tables in the same round (keeps
+    every table size fixed). Metropolis acceptance lets it escape the local
+    optima a single greedy pass gets stuck in — that headroom is what we measure.
+    Delta is computed incrementally in O(table_size), so even hundreds of
+    thousands of moves stay fast.
+    """
+    R = rounds
+
+    def random_round() -> list[list[str]]:
         order = list(ids)
         rng.shuffle(order)
-        seating, cursor = {}, 0
-        for table_idx, size in enumerate(sizes, start=1):
-            for person in order[cursor:cursor + size]:
-                seating[person] = table_idx
-            cursor += size
+        out, cur = [], 0
+        for sz in sizes:
+            out.append(order[cur:cur + sz])
+            cur += sz
+        return out
+
+    if warm_seq is not None:
+        sched: list[list[list[str]]] = []
+        for seating in warm_seq:
+            groups: dict[int, list[str]] = {}
+            for aid, t in seating.items():
+                groups.setdefault(t, []).append(aid)
+            sched.append([groups[t] for t in sorted(groups)])
+    else:
+        sched = [random_round() for _ in range(R)]
+
+    counts: dict[frozenset, int] = {}
+    for rnd in sched:
+        for tbl in rnd:
+            for a, b in combinations(tbl, 2):
+                p = frozenset((a, b))
+                counts[p] = counts.get(p, 0) + 1
+    cur_cost = sum(c - 1 for c in counts.values() if c > 1)
+
+    if iters is None:
+        iters = max(30000, len(ids) * R * 200)
+    t0, t1 = 2.0, 0.02
+    best_cost = cur_cost
+    best = [[list(t) for t in rnd] for rnd in sched]
+
+    for it in range(iters):
+        temp = t0 * (t1 / t0) ** (it / iters)
+        rnd = sched[rng.randrange(R)]
+        if len(rnd) < 2:
+            continue
+        ti, tj = rng.sample(range(len(rnd)), 2)
+        a_tbl, b_tbl = rnd[ti], rnd[tj]
+        ia, ib = rng.randrange(len(a_tbl)), rng.randrange(len(b_tbl))
+        x, y = a_tbl[ia], b_tbl[ib]
+        a_rest = [m for k, m in enumerate(a_tbl) if k != ia]
+        b_rest = [m for k, m in enumerate(b_tbl) if k != ib]
+
+        delta = 0
+        for m in a_rest:  # x leaves table A
+            delta += -1 if counts.get(frozenset((x, m)), 0) >= 2 else 0
+        for m in b_rest:  # x joins table B
+            delta += 1 if counts.get(frozenset((x, m)), 0) >= 1 else 0
+        for m in b_rest:  # y leaves table B
+            delta += -1 if counts.get(frozenset((y, m)), 0) >= 2 else 0
+        for m in a_rest:  # y joins table A
+            delta += 1 if counts.get(frozenset((y, m)), 0) >= 1 else 0
+
+        if delta <= 0 or rng.random() < exp(-delta / max(temp, 1e-9)):
+            a_tbl[ia], b_tbl[ib] = y, x
+            for m in a_rest:
+                counts[frozenset((x, m))] -= 1
+            for m in b_rest:
+                p = frozenset((x, m)); counts[p] = counts.get(p, 0) + 1
+            for m in b_rest:
+                counts[frozenset((y, m))] -= 1
+            for m in a_rest:
+                p = frozenset((y, m)); counts[p] = counts.get(p, 0) + 1
+            cur_cost += delta
+            if cur_cost < best_cost:
+                best_cost = cur_cost
+                best = [[list(t) for t in rr] for rr in sched]
+
+    seq: list[dict[str, int]] = []
+    for rnd in best:
+        seating = {}
+        for tnum, tbl in enumerate(rnd, 1):
+            for m in tbl:
+                seating[m] = tnum
         seq.append(seating)
-    return seq
+    return seq, best_cost
+
+
+def annealed_sequence(ids: list[str], tables: int, seats: int, rounds: int,
+                      rng: random.Random,
+                      warm_seq: list[dict[str, int]] | None = None,
+                      restarts: int = 3) -> list[dict[str, int]]:
+    """Best schedule a strong optimizer can find — the 'best achievable' bar.
+
+    Runs SA several times (one warm-started from OUR result, so the benchmark is
+    never worse than ours; the rest from random starts to explore globally) and
+    keeps the lowest-overlap schedule found.
+    """
+    sizes = plan_table_sizes(len(ids), seats, tables)
+    best_seq: list[dict[str, int]] | None = None
+    best_cost: int | None = None
+    for s in range(restarts):
+        ws = warm_seq if (s == 0 and warm_seq is not None) else None
+        seq, cost = _anneal(ids, sizes, rounds, rng, warm_seq=ws)
+        if best_cost is None or cost < best_cost:
+            best_seq, best_cost = seq, cost
+    return best_seq or []
 
 
 def theoretical(num_attendees: int, seats: int, rounds: int) -> tuple[list[float], int]:
@@ -273,34 +402,52 @@ def _pct(latencies: list[float], p: float) -> float:
     return round(s[min(len(s) - 1, int(p / 100 * len(s)))], 1)
 
 
-def print_report(args, ours: Summary, naive: Summary, ideal_overlap: int,
+def print_report(args, ours: Summary, bench: Summary, ideal_overlap: int,
                  latencies: dict[str, list[float]] | None) -> None:
     rounds_run = len(ours.rounds)
     overlap = ours.first_overlap_round
     novel_rounds = (overlap - 1) if overlap else rounds_run
     ratio = round(100 * novel_rounds / max(ideal_overlap - 1, 1)) if ideal_overlap > 1 else 100
 
+    b_overlap = bench.first_overlap_round
+    b_novel = (b_overlap - 1) if b_overlap else rounds_run
+    ours_rep = sum(s.repeat_pairs for s in ours.rounds)
+    bench_rep = sum(s.repeat_pairs for s in bench.rounds)
+    extra = ours_rep - bench_rep
+    mult = (ours_rep / bench_rep) if bench_rep else (1.0 if ours_rep == 0 else None)
+
     print("\n" + "=" * 64)
     print(f"  ROTATION VALIDATION - {args.attendees} people, "
           f"{args.tables} tables x {args.seats} seats, {rounds_run} rounds")
     print("=" * 64)
-    print("\nHEADLINE")
+    print("\nHEADLINE  (total overlap = repeat pairings across the whole event)")
     if overlap:
-        print(f"  Rounds 1-{novel_rounds} were 100% new faces. "
-              f"First overlap appeared in round {overlap}.")
+        print(f"  Ours (greedy):          rounds 1-{novel_rounds} all-new, "
+              f"first overlap round {overlap}, {ours_rep} repeat-pairings total.")
     else:
-        print(f"  All {rounds_run} rounds were 100% new faces — no overlap yet.")
+        print(f"  Ours (greedy):          all {rounds_run} rounds all-new, "
+              f"{ours_rep} repeat-pairings total.")
+    print(f"  Strong optimizer (SA):  first overlap round "
+          f"{b_overlap or '>' + str(rounds_run)}, {bench_rep} repeat-pairings total "
+          f"- the practical best.")
+    if mult is None:
+        print(f"  -> Optimizer found a zero-overlap schedule; greedy made {ours_rep}. "
+              f"Gap = {extra} repeat-pairings.")
+    elif extra == 0:
+        print(f"  -> Greedy MATCHES the optimizer ({ours_rep} repeat-pairings). "
+              f"No headroom — greedy is optimal here.")
+    else:
+        print(f"  -> Greedy makes {mult:.2f}x the optimizer's overlap "
+              f"({extra} more repeat-pairings across the event).")
     print(f"  Theoretical ceiling (approx): {ideal_overlap - 1} fully-novel rounds "
-          f"-> algorithm reached {ratio}% of ideal.")
-    print(f"  Naive-random would have first overlapped in round "
-          f"{naive.first_overlap_round or '>' + str(rounds_run)}.")
+          f"(greedy reached {ratio}%).")
     print(f"  Everyone met avg {ours.final_avg_unique} unique people "
           f"(worst-off: {ours.final_min_unique}). Pair coverage: {ours.coverage_pct}%.")
 
-    print("\nPER-ROUND  (ours vs naive-random)")
+    print("\nPER-ROUND  (ours vs strong optimizer)")
     print(f"  {'rnd':>3} | {'new':>4} {'rep':>4} {'avgU':>5} | "
           f"{'new':>4} {'rep':>4}   (rep = repeat pairings)")
-    for o, n in zip(ours.rounds, naive.rounds):
+    for o, n in zip(ours.rounds, bench.rounds):
         flag = "  <- overlap begins" if o.round_number == overlap else ""
         print(f"  {o.round_number:>3} | {o.new_pairs:>4} {o.repeat_pairs:>4} "
               f"{o.avg_unique_met:>5} | {n.new_pairs:>4} {n.repeat_pairs:>4}{flag}")
@@ -329,7 +476,7 @@ def _section(title: str, badge: str, body: str, explain: str, open_: bool = Fals
     )
 
 
-def write_html(path: str, args, ours: Summary, naive: Summary,
+def write_html(path: str, args, ours: Summary, bench: Summary,
                ideal_curve: list[float], ideal_overlap: int,
                rounds_seq: list[dict[str, int]], attendee_ids: list[str],
                latencies: dict[str, list[float]] | None,
@@ -341,12 +488,21 @@ def write_html(path: str, args, ours: Summary, naive: Summary,
     novel = (overlap - 1) if overlap else rounds_run
     ideal_novel = max(ideal_overlap - 1, 1)
     pct_ideal = round(100 * novel / ideal_novel)
-    naive_novel = (naive.first_overlap_round - 1) if naive.first_overlap_round else rounds_run
+    bench_overlap = bench.first_overlap_round
+    bench_novel = (bench_overlap - 1) if bench_overlap else rounds_run
+    ours_rep = sum(s.repeat_pairs for s in ours.rounds)
+    bench_rep = sum(s.repeat_pairs for s in bench.rounds)
+    extra_rep = ours_rep - bench_rep
+    mult = (ours_rep / bench_rep) if bench_rep else (1.0 if ours_rep == 0 else None)
+    # overlap efficiency: 100% = greedy matches the strong optimizer's overlap
+    overlap_eff = 100 if ours_rep == 0 else round(100 * bench_rep / ours_rep) if ours_rep else 100
     cov, avg_u, min_u = ours.coverage_pct, ours.final_avg_unique, ours.final_min_unique
 
     # ---- verdict badges (heuristic thresholds) ----
-    nov_badge = (_pill("Strong", "good") if pct_ideal >= 50
-                 else _pill("Solid", "ok") if pct_ideal >= 33 else _pill("Modest", "warn"))
+    # Headline badge = how close greedy's overlap is to the strong optimizer's.
+    nov_badge = (_pill("Near-optimal", "good") if overlap_eff >= 85
+                 else _pill("Competitive", "ok") if overlap_eff >= 65
+                 else _pill("Room to improve", "warn"))
     cov_badge = (_pill("Excellent mix", "good") if cov >= 75
                  else _pill("Good mix", "ok") if cov >= 50 else _pill("Low mix", "warn"))
     fair_badge = (_pill("Even spread", "good") if min_u >= 0.85 * avg_u
@@ -363,25 +519,36 @@ def write_html(path: str, args, ours: Summary, naive: Summary,
         return f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="2"/>'
 
     ours_u = [s.avg_unique_met for s in ours.rounds]
-    naive_u = [s.avg_unique_met for s in naive.rounds]
+    bench_u = [s.avg_unique_met for s in bench.rounds]
     chart = (
         '<svg viewBox="0 0 580 210" class="chart">'
         f'{line(ideal_curve[:rounds_run], "#9ca3af", rounds_run)}'
-        f'{line(naive_u, "#ef4444", rounds_run)}'
+        f'{line(bench_u, "#16a34a", rounds_run)}'
         f'{line(ours_u, "#2563eb", rounds_run)}</svg>'
-        '<p class="legend2"><b style="color:#2563eb">— ours</b> '
-        '<b style="color:#ef4444">— naive-random</b> '
+        '<p class="legend2"><b style="color:#2563eb">— ours (greedy)</b> '
+        '<b style="color:#16a34a">— strong optimizer (annealing)</b> '
         '<b style="color:#9ca3af">— theoretical ceiling</b></p>'
     )
+    mult_txt = (f"{mult:.2f}× the optimizer's overlap" if mult and extra_rep
+                else "the same overlap as the optimizer" if extra_rep == 0
+                else f"{ours_rep} repeats vs the optimizer's {bench_rep}")
     sec_novelty = _section(
-        "Novelty over time", nov_badge, chart,
-        f"<b>The headline chart.</b> The average number of <i>different</i> people each "
-        f"attendee has met, round by round. Blue (ours) should climb fast and stay well "
-        f"above red (naive-random); grey is the best any algorithm could theoretically do."
-        f"<br><br><b>This run:</b> by the last round everyone met an average of {avg_u} of "
-        f"{N - 1} possible others ({cov}% of all pairs). Ours stayed 100% new for {novel} "
-        f"rounds vs naive's {naive_novel} — so the algorithm is clearly doing real work, "
-        f"not just shuffling. {nov_badge} = {pct_ideal}% of the theoretical ceiling.",
+        "Overlap vs a strong optimizer", nov_badge, chart,
+        f"<b>The headline chart — and the honest benchmark.</b> The line is the average number "
+        f"of <i>different</i> people each attendee has met, round by round. We compare our fast "
+        f"<b>greedy</b> algorithm (blue) not against random shuffling (which proves nothing) but "
+        f"against a <b>simulated-annealing optimizer</b> (green) — a real optimisation algorithm "
+        f"that grinds toward the best schedule possible. Grey is the theoretical ceiling. Green is "
+        f"the realistic <i>best achievable</i>; the gap between blue and green is exactly how much "
+        f"overlap greedy leaves on the table.<br><br><b>This run:</b> over the whole event greedy "
+        f"produced <b>{ours_rep} repeat-pairings</b> vs the optimizer's <b>{bench_rep}</b> — "
+        f"greedy makes {mult_txt}. Everyone still met an average of {avg_u} of {N - 1} others "
+        f"({cov}% of all pairs). {nov_badge} = greedy achieves {overlap_eff}% of the optimizer's "
+        f"overlap-minimisation. <br><br><i>Why the optimizer can do better:</i> it sees the whole "
+        f"roster at once (offline); ours runs live each round on whoever is present (online), so "
+        f"it can handle late arrivals and early exits the optimizer's fixed schedule cannot. That "
+        f"trade-off — a little extra overlap for robustness on event day — is the design choice "
+        f"this chart quantifies.",
         open_=True,
     )
 
@@ -587,8 +754,9 @@ def write_html(path: str, args, ours: Summary, naive: Summary,
 <h1>Rotation validation</h1>
 <p class="muted">{N} people · {args.tables} tables × {seats} seats · {rounds_run} rounds · {mode}</p>
 <div class="head">{headline}<br>
- Theoretical ceiling ≈ {ideal_novel} novel rounds · everyone met avg {avg_u} unique people
- (worst-off {min_u}) · coverage {cov}%.</div>
+ Overlap: <b>{ours_rep}</b> repeat-pairings (strong optimizer: <b>{bench_rep}</b>) ·
+ greedy at <b>{overlap_eff}%</b> of best-achievable · theoretical ceiling ≈ {ideal_novel} novel rounds<br>
+ everyone met avg {avg_u} unique people (worst-off {min_u}) · coverage {cov}%.</div>
 {sec_novelty}{sec_bars}{sec_heat}{sec_timing}{sec_ideal}{sec_seating}
 <p class="muted">Each section's “What this tells you” explains the chart and whether the
  result is good. Click to expand the collapsed ones.</p>
@@ -680,13 +848,17 @@ def main() -> int:
         print("  Inspect it, then remove with:  python scripts/validate_rotation.py --cleanup")
 
     ours = summarize(rounds_seq, args.attendees)
-    naive = summarize(
-        naive_sequence(attendee_ids, args.tables, args.seats, len(rounds_seq), rng),
-        args.attendees,
+    # Strong benchmark: a simulated-annealing optimizer on the same roster,
+    # warm-started from our own result so it can only match or beat us. This is
+    # the "best achievable in practice" bar that replaces naive-random.
+    print("\n  Running strong optimizer (simulated annealing) for the benchmark...")
+    bench_seq = annealed_sequence(
+        attendee_ids, args.tables, args.seats, len(rounds_seq), rng, warm_seq=rounds_seq,
     )
+    bench = summarize(bench_seq, args.attendees)
     ideal_curve, ideal_overlap = theoretical(args.attendees, args.seats, len(rounds_seq))
 
-    print_report(args, ours, naive, ideal_overlap, latencies)
+    print_report(args, ours, bench, ideal_overlap, latencies)
 
     # Always save a report into the reports folder (never the repo root).
     # Default name = mode + config + timestamp (never overwritten). --html lets
@@ -700,7 +872,7 @@ def main() -> int:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         fname = f"{mode}-{args.attendees}p-{args.tables}t-{args.seats}s-{len(rounds_seq)}r-{stamp}.html"
         out_path = str(Path(args.reports_dir) / fname)
-    write_html(out_path, args, ours, naive, ideal_curve, ideal_overlap,
+    write_html(out_path, args, ours, bench, ideal_curve, ideal_overlap,
                rounds_seq, attendee_ids, latencies, compute_ms)
     return 0
 

@@ -54,7 +54,7 @@ def main() -> int:
     # -- 0. Schema check: all tables exist and are queryable --
     print("\n[0] Schema verification")
     for table in ["events", "attendees", "rounds", "table_assignments", "icebreakers",
-                  "round_drafts", "audit_log"]:
+                  "round_drafts", "round_plans", "audit_log"]:
         try:
             db.table(table).select("id").limit(1).execute()
             check(f"table '{table}' exists", True)
@@ -240,6 +240,9 @@ def main() -> int:
             leaked_round = anon_peek.table("rounds").select("*").eq("event_id", event_id).execute().data
             check("draft NOT visible as a round (no realtime leak)", not leaked_round,
                   f"LEAKED {len(leaked_round or [])} round rows before publish")
+            leaked_plan = anon_peek.table("round_plans").select("*").execute().data
+            check("anon key cannot read round_plans (future rounds stay hidden)",
+                  not leaked_plan, f"LEAKED {len(leaked_plan or [])} plan rows")
             no_live_round = api.get(f"/events/{event_id}/rounds/current")
             check("GET current round still 404 while only a draft exists",
                   no_live_round.status_code == 404, no_live_round.text)

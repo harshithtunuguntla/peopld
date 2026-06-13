@@ -11,8 +11,10 @@ import pytest
 from app.algorithm import (
     Rotation,
     RotationError,
+    RotationPlan,
     draft_snapshot_hash,
     generate_rotation,
+    plan_rounds,
     plan_table_sizes,
 )
 
@@ -162,6 +164,102 @@ def test_rotation_propagates_plan_errors():
 def test_rotation_returns_dataclass():
     rotation = generate_rotation(_ids(4), {}, 10, 4, rng=random.Random(1))
     assert isinstance(rotation, Rotation)
+
+
+# --- plan_rounds: the re-planning optimizer (docs/design/rotation-replanning.md) ---
+
+
+def _total_repeats(rounds: list[dict]) -> int:
+    """Total repeat-pairings across a planned sequence = Σ pairs max(times − 1, 0)."""
+    counts: dict = {}
+    for seating in rounds:
+        groups: dict = {}
+        for aid, table in seating.items():
+            groups.setdefault(table, []).append(aid)
+        for group in groups.values():
+            for i in range(len(group)):
+                for j in range(i + 1, len(group)):
+                    pair = frozenset((group[i], group[j]))
+                    counts[pair] = counts.get(pair, 0) + 1
+    return sum(c - 1 for c in counts.values() if c > 1)
+
+
+def test_plan_returns_horizon_rounds_seating_everyone():
+    people = _ids(14)
+    plan = plan_rounds(people, {}, num_tables=10, seats_per_table=4, horizon=3,
+                       rng=random.Random(1))
+    assert isinstance(plan, RotationPlan)
+    assert plan.horizon == 3 and len(plan.rounds) == 3
+    assert plan.table_sizes == [4, 4, 3, 3]
+    for seating in plan.rounds:
+        assert sorted(seating.keys()) == sorted(people)
+        assert set(seating.values()) <= {1, 2, 3, 4}
+
+
+def test_plan_reported_repeats_match_recomputed():
+    # The total_repeat_pairings field must equal an independent recomputation.
+    people = _ids(20)
+    plan = plan_rounds(people, {}, num_tables=5, seats_per_table=4, horizon=6,
+                       rng=random.Random(3))
+    assert plan.total_repeat_pairings == _total_repeats(plan.rounds)
+
+
+def test_plan_finds_repeat_free_round_when_one_exists():
+    # 9 people, round 1 = three triples; a repeat-free round 2 exists (3x3 grid).
+    people = _ids(9)
+    history = _pairs_from([people[0:3], people[3:6], people[6:9]])
+    plan = plan_rounds(people, history, num_tables=3, seats_per_table=3, horizon=1,
+                       rng=random.Random(7), warm_restarts=100)
+    assert plan.total_repeat_pairings == 0
+
+
+def test_plan_minimizes_unavoidable_repeats():
+    # 6 people, round 1 = two triples. Any next round of two triples must repeat
+    # at least 2 pairs (pigeonhole); the optimum is exactly 2.
+    people = _ids(6)
+    history = _pairs_from([people[0:3], people[3:6]])
+    plan = plan_rounds(people, history, num_tables=2, seats_per_table=3, horizon=1,
+                       rng=random.Random(7))
+    assert plan.total_repeat_pairings == 2
+
+
+def test_plan_multi_round_reaches_repeat_free_design():
+    # 9 people, 3 tables of 3, 4 rounds: a perfect repeat-free schedule exists
+    # (the affine plane AG(2,3) — 4 parallel classes covering every pair once).
+    # The lookahead planner must build the whole 4-round design with zero overlap.
+    people = _ids(9)
+    plan = plan_rounds(people, {}, num_tables=3, seats_per_table=3, horizon=4,
+                       rng=random.Random(5), warm_restarts=60)
+    assert plan.total_repeat_pairings == 0
+    assert _total_repeats(plan.rounds) == 0
+
+
+def test_plan_deterministic_with_seed():
+    people = _ids(17)
+    a = plan_rounds(people, {}, 10, 4, horizon=5, rng=random.Random(42))
+    b = plan_rounds(people, {}, 10, 4, horizon=5, rng=random.Random(42))
+    assert a.rounds == b.rounds
+    assert a.total_repeat_pairings == b.total_repeat_pairings
+
+
+def test_plan_respects_time_budget():
+    # Even a tiny budget returns a valid, fully-seated plan (falls back to warm start).
+    people = _ids(60)
+    plan = plan_rounds(people, {}, num_tables=15, seats_per_table=4, horizon=10,
+                       rng=random.Random(1), time_budget_s=0.05)
+    assert len(plan.rounds) == 10
+    for seating in plan.rounds:
+        assert sorted(seating.keys()) == sorted(people)
+
+
+def test_plan_invalid_horizon_raises():
+    with pytest.raises(RotationError, match="horizon"):
+        plan_rounds(_ids(12), {}, 10, 4, horizon=0)
+
+
+def test_plan_over_capacity_raises():
+    with pytest.raises(RotationError, match="exceed venue capacity"):
+        plan_rounds(_ids(51), {}, num_tables=10, seats_per_table=4, horizon=3)
 
 
 # --- draft_snapshot_hash: the stale-draft guard ---

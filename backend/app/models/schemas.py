@@ -16,6 +16,7 @@ class EventCreate(BaseModel):
     seats_per_table: int = Field(ge=3)  # algorithm minimum table size is 3
     default_round_duration_seconds: int = Field(default=300, gt=0)
     auto_arrive_on_register: bool = True  # on-site registration marks people arrived
+    target_rounds: Optional[int] = Field(default=None, ge=1)  # intended round count (planning horizon)
 
 
 class EventUpdate(BaseModel):
@@ -25,6 +26,7 @@ class EventUpdate(BaseModel):
     seats_per_table: Optional[int] = Field(default=None, ge=3)
     default_round_duration_seconds: Optional[int] = Field(default=None, gt=0)
     auto_arrive_on_register: Optional[bool] = None
+    target_rounds: Optional[int] = Field(default=None, ge=1)
 
 
 class EventResponse(BaseModel):
@@ -38,6 +40,7 @@ class EventResponse(BaseModel):
     seats_per_table: int
     default_round_duration_seconds: int
     auto_arrive_on_register: bool
+    target_rounds: Optional[int] = None
     organizer_id: UUID
     status: Literal["upcoming", "active", "ended"]
     created_at: datetime

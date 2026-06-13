@@ -36,3 +36,7 @@ Thumbs.db
 *.log
 npm-debug.log*
 *.tsbuildinfo
+
+# Generated validation reports (each run saved locally, not committed)
+backend/reports/
+report.html

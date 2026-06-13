@@ -117,7 +117,8 @@ The team project is already configured. If you ever need to recreate it:
 | `python scripts/tag_organizer.py <email>` | Grant organizer role to an auth user |
 | `python scripts/seed_dev_event.py <organizer-email>` | Create a test event + print the frontend URLs |
 | `python scripts/test_otp_email.py <email>` | Send a real OTP email to verify SMTP delivery |
-| `python scripts/smoke_live.py` | Full live verification suite |
+| `python scripts/smoke_live.py` | Full live verification suite (every endpoint + RLS attacker sim) |
+| `python scripts/validate_rotation.py --attendees 40 --tables 10 --seats 4 --rounds 12 --html report.html` | **Rotation validation** — runs the algorithm on a throwaway `[SANDBOX]` event in the real DB, shows when overlap begins vs naive-random vs theoretical ideal, measures live latency, writes an HTML heatmap. All params are configurable. Add `--dry-run` for an instant in-memory sweep (no DB). `--cleanup` deletes all sandbox events. **Full step-by-step:** [`docs/testing/rotation-validation.md`](docs/testing/rotation-validation.md) |
 
 ---
 

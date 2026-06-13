@@ -30,9 +30,40 @@ def test_register_attendee_links_user_id(client, event):
     assert response.status_code == 201
     body = response.json()
     assert body["name"] == "Asha"
-    assert body["status"] == "registered"
+    # Fixture event has auto_arrive_on_register=true (the pilot default):
+    # registering at the venue marks you arrived immediately.
+    assert body["status"] == "arrived"
     assert body["event_id"] == event["id"]
     assert body["user_id"] == ATTENDEE_USER_ID
+
+
+def test_register_without_auto_arrive_stays_registered(client, db, event):
+    # Organizer turned the flag off (e.g., pre-registration opens before event day)
+    db.table("events").update({"auto_arrive_on_register": False}).eq(
+        "id", event["id"]
+    ).execute()
+
+    response = client.post(
+        f"/events/{event['id']}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "registered"
+
+
+def test_register_writes_audit_entry(client, db, event):
+    client.post(
+        f"/events/{event['id']}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH
+    )
+    rows = [r for r in db.store["audit_log"] if r["action"] == "attendee.registered"]
+    assert len(rows) == 1
+    assert rows[0]["actor_user_id"] == ATTENDEE_USER_ID
+    assert rows[0]["metadata"] == {"auto_arrived": True}
+    # Dedupe path must NOT write a second audit row
+    client.post(
+        f"/events/{event['id']}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH
+    )
+    rows = [r for r in db.store["audit_log"] if r["action"] == "attendee.registered"]
+    assert len(rows) == 1
 
 
 def test_register_twice_returns_existing_record(client, event):
@@ -225,6 +256,10 @@ def test_organizer_marks_attendee_arrived(client, db, event):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "arrived"
+
+    audit = [r for r in db.store["audit_log"] if r["action"] == "attendee.status_changed"]
+    assert len(audit) == 1
+    assert audit[0]["metadata"] == {"from": "registered", "to": "arrived"}
 
 
 def test_organizer_marks_attendee_left(client, db, event):

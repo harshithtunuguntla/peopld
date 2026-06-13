@@ -57,6 +57,7 @@ def event(db) -> dict:
             "num_tables": 10,
             "seats_per_table": 4,
             "default_round_duration_seconds": 300,
+            "auto_arrive_on_register": True,  # production default (pilot: register at venue)
             "organizer_id": ORGANIZER_ID,
             "status": "upcoming",
         },
@@ -89,6 +90,18 @@ def make_round(db, event_id: str, round_number: int = 1, status: str = "active",
     }
     row.update(overrides)
     return db.seed("rounds", row)[0]
+
+
+def make_arrived(db, event_id: str, count: int, prefix: str = "P") -> list[dict]:
+    """Seed N arrived attendees — the round-start pool."""
+    return [
+        make_attendee(db, event_id, name=f"{prefix}{i}", status="arrived")
+        for i in range(count)
+    ]
+
+
+def audit_actions(db) -> list[str]:
+    return [row["action"] for row in db.store.get("audit_log", [])]
 
 
 def make_assignment(db, event_id: str, round_id: str, attendee_id: str, table_number: int) -> dict:

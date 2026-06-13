@@ -51,9 +51,10 @@ def check(name: str, condition: bool, detail: str = ""):
 def main() -> int:
     db = create_client(settings.supabase_url, settings.supabase_service_role_key)
 
-    # -- 0. Schema check: all 5 tables exist and are queryable --
+    # -- 0. Schema check: all tables exist and are queryable --
     print("\n[0] Schema verification")
-    for table in ["events", "attendees", "rounds", "table_assignments", "icebreakers"]:
+    for table in ["events", "attendees", "rounds", "table_assignments", "icebreakers",
+                  "round_drafts", "audit_log"]:
         try:
             db.table(table).select("id").limit(1).execute()
             check(f"table '{table}' exists", True)
@@ -93,6 +94,7 @@ def main() -> int:
     garbage = {"Authorization": "Bearer not-a-real-token"}
 
     event_id = None
+    extra_attendees: list[str] = []
     try:
         with httpx.Client(base_url=API, timeout=30) as api:
             # -- 2. Health --
@@ -198,17 +200,81 @@ def main() -> int:
             r = api.get(f"/events/{event_id}/attendees", headers=org)
             check("attendee list (owner) -> 1", r.status_code == 200 and len(r.json()) == 1, r.text)
 
-            # -- 6. Rounds (pre-algorithm states) --
-            print("\n[6] Rounds")
+            # -- 6. Rounds: full draft -> preview -> publish -> end lifecycle --
+            print("\n[6] Rounds (rotation algorithm)")
             r = api.get(f"/events/{event_id}/rounds/current")
             check("GET current round -> 404 (none yet)", r.status_code == 404, r.text)
 
             r = api.post(f"/events/{event_id}/rounds/start", headers=org2)
             check("start round wrong organizer -> 403", r.status_code == 403, r.text)
+
+            # Only 1 attendee arrived so far -> below the 3-person minimum
             r = api.post(f"/events/{event_id}/rounds/start", headers=org)
-            check("POST start round -> 501 (Step 4)", r.status_code == 501, r.text)
+            check("start with <3 arrived -> 422", r.status_code == 422, r.text)
+
+            # Arrive 5 more (the first attendee was marked arrived in section 5)
+            for i in range(5):
+                ar = create_client(settings.supabase_url, settings.supabase_service_role_key)
+                u = db.auth.admin.create_user(
+                    {"email": f"smoke-pool-{i}@peopld.test", "password": PASSWORD,
+                     "email_confirm": True}
+                ).user
+                extra_attendees.append(u.id)
+                tok = ar.auth.sign_in_with_password(
+                    {"email": f"smoke-pool-{i}@peopld.test", "password": PASSWORD}
+                ).session.access_token
+                hdr = {"Authorization": f"Bearer {tok}"}
+                api.post(f"/events/{event_id}/attendees", headers=hdr,
+                         json={"name": f"Pool {i}", "role": "Founder"})
+                # event has auto_arrive_on_register -> they're already 'arrived'
+
+            r = api.post(f"/events/{event_id}/rounds/start", headers=org)
+            check("POST start round -> 201 draft preview",
+                  r.status_code == 201 and r.json()["arrived_count"] == 6, r.text)
+            draft = r.json() if r.status_code == 201 else {}
+            check("draft splits 6 into two tables of 3",
+                  draft.get("table_count") == 2 and draft.get("repeat_pairings") == 0, str(draft))
+
+            # CRITICAL: the preview must NOT be visible on the realtime tables yet
+            anon_peek = create_client(settings.supabase_url, ANON_KEY)
+            leaked_round = anon_peek.table("rounds").select("*").eq("event_id", event_id).execute().data
+            check("draft NOT visible as a round (no realtime leak)", not leaked_round,
+                  f"LEAKED {len(leaked_round or [])} round rows before publish")
+            no_live_round = api.get(f"/events/{event_id}/rounds/current")
+            check("GET current round still 404 while only a draft exists",
+                  no_live_round.status_code == 404, no_live_round.text)
+
+            r = api.post(f"/events/{event_id}/rounds/start", headers=org)
+            check("start again with pending draft -> 409", r.status_code == 409, r.text)
+
+            r = api.post(f"/events/{event_id}/rounds/regenerate", headers=org)
+            check("regenerate draft -> 200", r.status_code == 200, r.text)
+
+            r = api.post(f"/events/{event_id}/rounds/publish", headers=org)
+            check("publish draft -> 201 active round",
+                  r.status_code == 201 and r.json()["status"] == "active"
+                  and len(r.json()["assignments"]) == 6, r.text)
+
+            live_round = anon_peek.table("rounds").select("*").eq("event_id", event_id).execute().data
+            check("published round IS visible to realtime (anon read)", bool(live_round))
+
+            r = api.post(f"/events/{event_id}/rounds/publish", headers=org)
+            check("publish again -> 404 (draft consumed)", r.status_code == 404, r.text)
+            r = api.post(f"/events/{event_id}/rounds/start", headers=org)
+            check("start while round active -> 409", r.status_code == 409, r.text)
+
             r = api.post(f"/events/{event_id}/rounds/end", headers=org)
-            check("POST end round -> 404 (none active)", r.status_code == 404, r.text)
+            check("POST end round -> completed", r.status_code == 200, r.text)
+            r = api.post(f"/events/{event_id}/rounds/end", headers=org)
+            check("POST end round again -> 404 (none active)", r.status_code == 404, r.text)
+
+            # Audit trail recorded the publish (service-role read; anon must NOT see it)
+            audited = db.table("audit_log").select("action").eq("event_id", event_id).execute().data
+            check("audit_log captured round.published",
+                  any(a["action"] == "round.published" for a in audited), str(audited))
+            anon_audit = anon_peek.table("audit_log").select("*").limit(1).execute().data
+            check("anon key cannot read audit_log", not anon_audit,
+                  f"LEAKED {len(anon_audit or [])} audit rows")
 
             # -- 7. Connections (now auth-protected) --
             print("\n[7] Connections")
@@ -272,6 +338,11 @@ def main() -> int:
             check("event + attendees deleted (cascade)", not leftover)
         for key, uid in ids.items():
             db.auth.admin.delete_user(uid)
+        for uid in extra_attendees:
+            try:
+                db.auth.admin.delete_user(uid)
+            except Exception:
+                pass
         check("test auth users deleted", True)
 
     print(f"\n{'='*50}\nRESULT: {passed} passed, {len(failed)} failed")

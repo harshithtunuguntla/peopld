@@ -2,8 +2,9 @@
 
 Supports the subset of the API the app uses:
     table(name).select(...).eq(...).order(...).limit(...).execute()
-    table(name).insert(row).execute()
+    table(name).insert(row_or_rows).execute()
     table(name).update(changes).eq(...).execute()
+    table(name).delete().eq(...).execute()
     auth.get_user(token)  (tokens registered via register_token())
 
 Lets the whole test suite run with no Supabase project, no network, no env.
@@ -44,6 +45,10 @@ class FakeQuery:
         self._payload = payload
         return self
 
+    def delete(self):
+        self._op = "delete"
+        return self
+
     def eq(self, column, value):
         self._filters.append((column, value))
         return self
@@ -78,6 +83,11 @@ class FakeQuery:
         if self._op == "update":
             for r in matched:
                 r.update(self._payload)
+            return FakeResult([dict(r) for r in matched])
+
+        if self._op == "delete":
+            for r in matched:
+                self._rows.remove(r)
             return FakeResult([dict(r) for r in matched])
 
         if self._order:

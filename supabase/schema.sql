@@ -15,6 +15,7 @@ CREATE TABLE events (
   num_tables                    INTEGER NOT NULL,
   seats_per_table               INTEGER NOT NULL,
   default_round_duration_seconds INTEGER NOT NULL DEFAULT 300,
+  auto_arrive_on_register       BOOLEAN NOT NULL DEFAULT TRUE,
   organizer_id                  UUID NOT NULL REFERENCES auth.users(id),
   status                        TEXT NOT NULL DEFAULT 'upcoming'
                                   CHECK (status IN ('upcoming', 'active', 'ended')),
@@ -66,6 +67,33 @@ CREATE TABLE icebreakers (
   generated_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Seating previews (Step 4): NOT client-readable, NOT in the realtime
+-- publication — attendee phones learn nothing until the organizer publishes.
+-- UNIQUE(event_id) = one pending draft per event (double-click safe).
+CREATE TABLE round_drafts (
+  id               UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id         UUID NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
+  round_number     INTEGER NOT NULL,
+  duration_seconds INTEGER NOT NULL,
+  assignments      JSONB NOT NULL,           -- [{attendee_id, table_number}]
+  arrived_hash     TEXT NOT NULL,            -- snapshot of arrived set + table config (stale-draft guard)
+  repeat_pairings  INTEGER NOT NULL DEFAULT 0,
+  created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Audit trail (Step 4): every state-changing action. metadata holds
+-- UUIDs/enums/counts only, never PII.
+CREATE TABLE audit_log (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id      UUID REFERENCES events(id) ON DELETE CASCADE,
+  actor_user_id UUID,                        -- no FK: keep history even if the user is deleted
+  action        TEXT NOT NULL,               -- e.g. round.published, attendee.status_changed
+  entity_type   TEXT NOT NULL,
+  entity_id     UUID,
+  metadata      JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ─────────────────────────────────────────────
 -- ROW LEVEL SECURITY
 -- ─────────────────────────────────────────────
@@ -75,6 +103,8 @@ ALTER TABLE attendees        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rounds           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE table_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE icebreakers      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE round_drafts     ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
+ALTER TABLE audit_log        ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 
 -- SECURITY MODEL: all writes and all PII reads go through the FastAPI
 -- backend (service-role key, bypasses RLS, enforces ownership checks).
@@ -118,3 +148,4 @@ CREATE INDEX idx_table_assignments_round_id ON table_assignments(round_id);
 CREATE INDEX idx_table_assignments_attendee_id ON table_assignments(attendee_id);
 CREATE INDEX idx_icebreakers_round_recipient ON icebreakers(round_id, recipient_attendee_id);
 CREATE INDEX idx_table_assignments_round_table ON table_assignments(round_id, table_number);
+CREATE INDEX idx_audit_log_event_created ON audit_log(event_id, created_at);

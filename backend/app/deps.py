@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from supabase import Client
 
 from app.database import get_supabase
@@ -18,6 +18,7 @@ class AuthUser:
 
 
 async def get_current_user(
+    request: Request,
     authorization: str | None = Header(default=None),
     db: Client = Depends(get_supabase),
 ) -> AuthUser:
@@ -42,6 +43,7 @@ async def get_current_user(
 
     user = result.user
     role = (user.app_metadata or {}).get("role")
+    request.state.user_id = str(user.id)  # picked up by the request-log middleware
     return AuthUser(id=str(user.id), email=user.email, role=role)
 
 

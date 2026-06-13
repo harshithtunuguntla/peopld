@@ -3,6 +3,13 @@
 > Agreed in the Step 4 design session (2026-06-12) between the product owner and
 > the build agent, per the brainstorm-before-code rule. **Implementation must
 > follow this document.** Anything not listed under Scope is out of scope.
+>
+> **Status: IMPLEMENTED (2026-06-13).** `backend/app/algorithm.py`,
+> draft→publish endpoints in `backend/app/routers/rounds.py`, audit trail in
+> `backend/app/audit.py`, structured logging in `backend/app/logging_config.py`,
+> migration `supabase/migrations/002_step4_rounds.sql`. 111 backend tests pass
+> (50 new for Step 4); smoke_live.py extended with the full lifecycle + a
+> draft-leak attacker check.
 
 ## 1. Goal
 

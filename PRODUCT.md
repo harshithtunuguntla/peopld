@@ -13,7 +13,7 @@
 | **Target** | Live pilot event (~40 attendees, Hyderabad) |
 | **Build Spec** | [`docs/product/releases/pre-mvp.md`](docs/product/releases/pre-mvp.md) |
 | **Stack** | Next.js + FastAPI + Supabase + Claude API |
-| **Progress** | Steps 1–2 complete (scaffold + backend CRUD, tested live). Next: Step 3 (Auth) |
+| **Progress** | Steps 1–4 complete (scaffold, CRUD, auth, rotation algorithm — all tested). Next: Step 5 (Realtime) |
 | **Working Branch** | `feat/step-1-scaffold` — do NOT merge to main without team agreement |
 
 ---
@@ -31,7 +31,7 @@
 | 1 | **Repo + Foundation** — GitHub monorepo (`/frontend` Next.js, `/backend` FastAPI), Supabase project + SQL schema (`supabase/schema.sql`, 5 tables) | ✅ Done |
 | 2 | **FastAPI scaffold + core CRUD** — Events, Attendees, Rounds, Connections, Icebreakers endpoints; 34 unit tests (`backend/tests/`) + live smoke test (`backend/scripts/smoke_live.py`) | ✅ Done |
 | 3 | **Auth (deliberately EARLY, not last)** — Attendees: Google sign-in + Email OTP (see Decision Log — phone OTP deferred to MVP); organizers: email/password (manual account, `role=organizer`); replace temporary `X-Organizer-Id` header in `backend/app/deps.py` with Supabase JWT verification; link `attendees.user_id` + dedupe registration | ⏳ Next |
-| 4 | **Rotation Algorithm** — ⚠️ design session FIRST (greedy: minimize repeat pairings, handle late arrivals/early exits), then implement `backend/app/algorithm.py` behind `POST /rounds/start` | Pending |
+| 4 | **Rotation Algorithm** — greedy novelty (minimize repeat pairings) with restarts; draft→preview→publish lifecycle (drafts in non-realtime `round_drafts` so phones see nothing until publish); `auto_arrive_on_register`; audit trail + structured logging. Design: `docs/design/rotation-algorithm.md`. Impl: `backend/app/algorithm.py`, `routers/rounds.py` | ✅ Done |
 | 5 | **Supabase Realtime** — ⚠️ agree on channel structure FIRST (frontend + backend must align); attendee screens subscribe to Round + TableAssignment changes | Pending |
 | 6 | **Claude Icebreaker Engine** — 1 API call per table per round (batch), async, curated-question fallback if Claude fails; model configurable via `ANTHROPIC_MODEL` env var | Pending |
 | 7 | **Next.js Frontend** — all 7 pages (4 attendee + 3 organizer), mobile-first 375px; UI design + error states decided just-in-time per page | Pending |
@@ -45,6 +45,7 @@
 |---|---|
 | [`docs/product/releases/pre-mvp.md`](docs/product/releases/pre-mvp.md) | **START HERE.** Complete build spec: features, data models, endpoints, tech stack |
 | [`GETTING_STARTED.md`](GETTING_STARTED.md) | Dev onboarding: fresh-clone setup, env files, tests, and how auth works |
+| [`docs/testing/rotation-validation.md`](docs/testing/rotation-validation.md) | Step-by-step: validate the rotation algorithm + see latency (shareable runbook) |
 
 ### 📋 Release Roadmap
 | Document | Purpose |
@@ -97,3 +98,4 @@
 | 2026-06 | OTP email via **Gmail SMTP** (app password), not Brevo | Free 500/day; sent from Google's servers so best Gmail inbox delivery for a Gmail-heavy audience |
 | 2026-06 | Supabase stays on **free tier** through the pilot | Capacity math: ~70 realtime connections vs 200 limit, tiny DB. Trade-off accepted: must verify project is unpaused the week before the event; no daily backups |
 | 2026-06 | Step 6 icebreakers: prefer Claude via **Vertex AI** (GCP credits) — final call at Step 6 | Anthropic SDK has native AnthropicVertex client; credits cover LLM costs |
+| 2026-06 | **Deploy Cloud Run in the same region as the Supabase project** | Live validation (`validate_rotation.py`) measured ~700–900ms per organizer action from dev — dominated by network distance + one `auth.get_user` round-trip per request, not the algorithm (sub-ms). Co-location is the main latency lever. Acceptable for organizer console actions regardless; attendees are on Realtime, not this path. If latency ever bites, local JWT verification (vs `get_user`) is the fallback lever — deliberately not done now (reliability over speed) |

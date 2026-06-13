@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 from supabase import Client
 
+from app.audit import record_audit
 from app.database import get_supabase
 from app.deps import fetch_event_or_404, get_current_organizer_id, require_event_owner
 from app.models.schemas import (
@@ -42,7 +43,16 @@ async def create_event(
     row["organizer_id"] = organizer_id
     row["status"] = "upcoming"
     result = db.table("events").insert(row).execute()
-    return result.data[0]
+    created = result.data[0]
+    record_audit(
+        db,
+        action="event.created",
+        entity_type="event",
+        actor_user_id=organizer_id,
+        event_id=created["id"],
+        entity_id=created["id"],
+    )
+    return created
 
 
 @router.get("/{event_id}", response_model=EventResponse)
@@ -66,6 +76,15 @@ async def update_event(
         return event
 
     result = db.table("events").update(changes).eq("id", event_id).execute()
+    record_audit(
+        db,
+        action="event.updated",
+        entity_type="event",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=event_id,
+        metadata={"changes": changes},  # status/config values only — no PII fields exist here
+    )
     return result.data[0]
 
 
@@ -85,6 +104,14 @@ async def end_event(
     ).eq("status", "active").execute()
 
     result = db.table("events").update({"status": "ended"}).eq("id", event_id).execute()
+    record_audit(
+        db,
+        action="event.ended",
+        entity_type="event",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=event_id,
+    )
     return result.data[0]
 
 

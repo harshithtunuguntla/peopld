@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Literal
 from datetime import date, time, datetime
 from uuid import UUID
@@ -12,13 +12,19 @@ class EventCreate(BaseModel):
     time: time
     location: str
     description: Optional[str] = None
-    num_tables: int
-    seats_per_table: int
-    default_round_duration_seconds: int = 300
+    num_tables: int = Field(ge=1)
+    seats_per_table: int = Field(ge=3)  # algorithm minimum table size is 3
+    default_round_duration_seconds: int = Field(default=300, gt=0)
+    auto_arrive_on_register: bool = True  # on-site registration marks people arrived
 
 
 class EventUpdate(BaseModel):
+    """Organizer-editable config — capacity is never hardcoded (design doc §3)."""
     status: Optional[Literal["upcoming", "active", "ended"]] = None
+    num_tables: Optional[int] = Field(default=None, ge=1)
+    seats_per_table: Optional[int] = Field(default=None, ge=3)
+    default_round_duration_seconds: Optional[int] = Field(default=None, gt=0)
+    auto_arrive_on_register: Optional[bool] = None
 
 
 class EventResponse(BaseModel):
@@ -31,6 +37,7 @@ class EventResponse(BaseModel):
     num_tables: int
     seats_per_table: int
     default_round_duration_seconds: int
+    auto_arrive_on_register: bool
     organizer_id: UUID
     status: Literal["upcoming", "active", "ended"]
     created_at: datetime
@@ -95,6 +102,28 @@ class RoundResponse(BaseModel):
 class RoundWithAssignmentsResponse(RoundResponse):
     """Used by GET /rounds/current — organizer grid view needs all assignments in one call."""
     assignments: list[TableAssignmentResponse] = []
+
+
+# --- Round draft (seating preview, organizer-only) ---
+
+class DraftAssignment(BaseModel):
+    attendee_id: UUID
+    name: str  # joined at read time so the preview is renderable in one call
+    table_number: int
+
+
+class RoundDraftResponse(BaseModel):
+    """Seating preview. Lives in round_drafts (no client RLS access) — attendee
+    phones learn nothing until the organizer publishes."""
+    id: UUID
+    event_id: UUID
+    round_number: int
+    duration_seconds: int
+    arrived_count: int
+    table_count: int
+    repeat_pairings: int  # pairs in this draft who already met — organizer trust signal
+    assignments: list[DraftAssignment]
+    created_at: datetime
 
 
 # --- Icebreaker ---

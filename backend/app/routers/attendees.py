@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
 from supabase import Client
 
+from app.audit import record_audit
 from app.database import get_supabase
 from app.deps import (
     AuthUser,
@@ -61,13 +62,28 @@ async def register_attendee(
     if event["status"] == "ended":
         raise HTTPException(status_code=409, detail="Event has already ended")
 
+    # Registration happens AT the venue for the pilot — auto_arrive_on_register
+    # (event config, default true) marks them arrived immediately so the
+    # organizer doesn't tap "arrived" at the door for every person.
+    auto_arrive = bool(event.get("auto_arrive_on_register", True))
+
     row = body.model_dump(mode="json")
     row["event_id"] = event_id
-    row["status"] = "registered"
+    row["status"] = "arrived" if auto_arrive else "registered"
     row["user_id"] = user.id
 
     result = db.table("attendees").insert(row).execute()
-    return result.data[0]
+    created = result.data[0]
+    record_audit(
+        db,
+        action="attendee.registered",
+        entity_type="attendee",
+        actor_user_id=user.id,
+        event_id=event_id,
+        entity_id=created["id"],
+        metadata={"auto_arrived": auto_arrive},
+    )
+    return created
 
 
 @router.get("/me", response_model=AttendeeResponse)
@@ -161,4 +177,14 @@ async def update_attendee(
         return attendee
 
     result = db.table("attendees").update(changes).eq("id", attendee_id).execute()
-    return result.data[0]
+    updated = result.data[0]
+    record_audit(
+        db,
+        action="attendee.status_changed",
+        entity_type="attendee",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=attendee_id,
+        metadata={"from": attendee["status"], "to": updated["status"]},
+    )
+    return updated

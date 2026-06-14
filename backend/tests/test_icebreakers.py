@@ -3,6 +3,7 @@ from tests.conftest import (
     ATTENDEE_USER_ID,
     AUTH,
     OTHER_ATTENDEE_AUTH,
+    make_assignment,
     make_attendee,
     make_round,
 )
@@ -106,13 +107,31 @@ def test_refresh_icebreaker_requires_auth(client, db, event):
     assert response.status_code == 401
 
 
-def test_refresh_icebreaker_not_implemented_yet(client, db, event):
-    # Step 6 delivers the Claude-powered icebreaker engine
-    attendee = make_attendee(db, event["id"], user_id=ATTENDEE_USER_ID)
+def test_refresh_generates_a_new_icebreaker(client, db, event):
+    # A seated attendee taps "Generate Another" — gets a fresh question for the table.
+    me = make_attendee(db, event["id"], name="Asha", user_id=ATTENDEE_USER_ID, status="arrived")
+    other = make_attendee(db, event["id"], name="Bobby", status="arrived")
     round_row = make_round(db, event["id"])
+    make_assignment(db, event["id"], round_row["id"], me["id"], table_number=1)
+    make_assignment(db, event["id"], round_row["id"], other["id"], table_number=1)
 
     response = client.post(
-        f"/events/{event['id']}/rounds/{round_row['id']}/icebreaker/{attendee['id']}/refresh",
+        f"/events/{event['id']}/rounds/{round_row['id']}/icebreaker/{me['id']}/refresh",
         headers=ATTENDEE_AUTH,
     )
-    assert response.status_code == 501
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recipient_attendee_id"] == me["id"]
+    assert body["target_attendee_id"] == other["id"]  # the only other person
+    assert body["question_text"]
+
+
+def test_refresh_when_not_seated_is_409(client, db, event):
+    me = make_attendee(db, event["id"], user_id=ATTENDEE_USER_ID, status="arrived")
+    round_row = make_round(db, event["id"])  # no assignment for me
+
+    response = client.post(
+        f"/events/{event['id']}/rounds/{round_row['id']}/icebreaker/{me['id']}/refresh",
+        headers=ATTENDEE_AUTH,
+    )
+    assert response.status_code == 409

@@ -4,6 +4,7 @@ import os
 os.environ.setdefault("SUPABASE_URL", "http://test.local")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
+os.environ.setdefault("LLM_PROVIDER", "stub")  # deterministic, offline icebreakers
 
 import pytest
 from fastapi.testclient import TestClient

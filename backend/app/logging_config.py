@@ -22,6 +22,9 @@ CONTEXT_FIELDS = (
     "event_id",
     "entity_id",
     "action",
+    "round_id",
+    "source",  # icebreaker source: "llm" | "fallback"
+    "count",
 )
 
 

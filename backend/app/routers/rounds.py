@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 from math import ceil
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from supabase import Client
 
 from app.algorithm import (
@@ -13,6 +13,7 @@ from app.algorithm import (
     plan_rounds,
 )
 from app.audit import record_audit
+from app.icebreakers import engine as icebreaker_engine
 from app.database import get_supabase
 from app.deps import fetch_event_or_404, get_current_organizer_id, require_event_owner
 from app.models.schemas import (
@@ -367,6 +368,7 @@ async def get_draft(
 async def publish_round(
     event_id: str,
     response: Response,
+    background_tasks: BackgroundTasks,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
@@ -383,6 +385,11 @@ async def publish_round(
         existing = _get_active_round(db, event_id)
         if existing:
             response.status_code = 200  # idempotent retry — not a fresh create
+            # Self-heal: if the first publish's generation was interrupted, retry it
+            # (generate_for_round is a no-op when icebreakers already exist).
+            background_tasks.add_task(
+                icebreaker_engine.generate_for_round, db, event_id, existing["id"]
+            )
             return _round_with_assignments(db, existing)
         raise HTTPException(status_code=404, detail="No draft to publish — start a round first")
     if _has_active_round(db, event_id):
@@ -423,6 +430,9 @@ async def publish_round(
         if existing:
             logger.warning("publish race resolved to existing round", extra={"event_id": event_id})
             response.status_code = 200  # idempotent — the winner already created it
+            background_tasks.add_task(
+                icebreaker_engine.generate_for_round, db, event_id, existing["id"]
+            )
             return _round_with_assignments(db, existing)
         logger.exception("publish failed creating round", extra={"event_id": event_id})
         raise HTTPException(status_code=500, detail="Failed to publish the round — try again")
@@ -461,6 +471,13 @@ async def publish_round(
             "repeat_pairings": draft.get("repeat_pairings", 0),
         },
     )
+
+    # Async (spec §9): phones see the table now; icebreakers arrive seconds later,
+    # each INSERT a Step-5 realtime doorbell. Publish never waits on the LLM.
+    background_tasks.add_task(
+        icebreaker_engine.generate_for_round, db, event_id, round_row["id"]
+    )
+
     result = dict(round_row)
     result["assignments"] = assignments
     return result

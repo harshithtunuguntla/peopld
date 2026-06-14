@@ -3,6 +3,7 @@ from supabase import Client
 
 from app.database import get_supabase
 from app.deps import AuthUser, fetch_event_or_404, get_current_user
+from app.icebreakers import engine
 from app.models.schemas import IcebreakerResponse
 
 router = APIRouter(
@@ -69,6 +70,13 @@ async def refresh_icebreaker(
     user: AuthUser = Depends(get_current_user),
     db: Client = Depends(get_supabase),
 ):
+    """Generate a fresh icebreaker for this attendee's current table (synchronous —
+    the button waits for the new question). Falls back to a curated one if the LLM
+    is unavailable, so the tap always produces something."""
     _require_self_or_organizer(db, event_id, attendee_id, user)
-    # Step 6: generates a fresh icebreaker via the Claude API
-    raise HTTPException(status_code=501, detail="Implemented in Step 6 (icebreaker engine)")
+    icebreaker = engine.refresh_for_attendee(db, event_id, round_id, attendee_id)
+    if icebreaker is None:
+        raise HTTPException(
+            status_code=409, detail="This attendee is not seated in this round"
+        )
+    return icebreaker

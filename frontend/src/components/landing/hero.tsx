@@ -24,8 +24,8 @@ export function Hero() {
       />
       <div className="relative mx-auto max-w-[1320px] px-5 sm:px-8">
         <div className="grid items-start gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-14">
-          {/* COPY */}
-          <div className="order-2 lg:order-1">
+          {/* COPY — first on mobile (headline-first), left on desktop */}
+          <div className="order-1">
             <h1 className="text-balance font-display text-[clamp(36px,5.4vw,76px)] leading-[0.95] tracking-[-0.035em]">
               <SplitReveal as="span" className="block" trigger={false} delay={0.1}>
                 The room
@@ -68,11 +68,11 @@ export function Hero() {
             </div>
           </div>
 
-          {/* ARTWORK — boarding-pass top aligns with the "The room" line */}
-          <div className="relative order-1 lg:order-2">
+          {/* ARTWORK — second on mobile, right on desktop */}
+          <div className="relative order-2">
             <div className="relative mx-auto w-[82%] max-w-[360px] sm:w-[70%] lg:mx-0 lg:ml-auto lg:mt-3">
-              {/* AI gift card peeks out from behind, left */}
-              <div className="absolute -left-[28%] top-[20%] z-0 w-[56%] max-w-[220px]">
+              {/* AI gift card peeks out from behind, left (less on mobile so it stays on-screen) */}
+              <div className="absolute -left-[12%] top-[20%] z-0 w-[56%] max-w-[220px] sm:-left-[22%] lg:-left-[28%]">
                 <AIGiftCard text={HERO.giftIcebreaker} meta={HERO.giftMeta} tilt={-10} delay={0.55} />
               </div>
               {/* main boarding pass */}

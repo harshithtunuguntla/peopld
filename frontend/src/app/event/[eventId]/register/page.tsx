@@ -1,39 +1,61 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
+import { CheckCircle2, Loader2 } from "lucide-react";
 
-import AttendeeAuth from "@/components/AttendeeAuth";
+import { AuthShell, SignInPanel, RegisterForm, type RegisterValues } from "@/components/auth";
+import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
+
+interface EventSummary {
+  id: string;
+  name: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:MM:SS
+  location: string;
+  organizer_id: string;
+}
 
 interface AttendeeResponse {
   id: string;
   event_id: string;
 }
 
-export default function RegisterPage({
-  params,
-}: {
-  params: Promise<{ eventId: string }>;
-}) {
+/** Human "Sat, 14 Jun · The Garage" line for the auth header. */
+function formatEventMeta(event: EventSummary | null): string | undefined {
+  if (!event) return undefined;
+  const day = new Date(`${event.date}T${event.time || "00:00:00"}`).toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+  return [day, event.location].filter(Boolean).join(" · ");
+}
+
+export default function RegisterPage({ params }: { params: Promise<{ eventId: string }> }) {
   const { eventId } = use(params);
   const router = useRouter();
 
+  const [event, setEvent] = useState<EventSummary | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [isEventOrganizer, setIsEventOrganizer] = useState(false);
   const [existingChecked, setExistingChecked] = useState(false);
   const [existingAttendeeId, setExistingAttendeeId] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [role, setRole] = useState("");
-  const [lookingFor, setLookingFor] = useState("");
-  const [linkedin, setLinkedin] = useState("");
-  const [whatsapp, setWhatsapp] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Event is public — load it up front so the "you're joining X" header shows
+  // even before sign-in.
+  useEffect(() => {
+    apiFetch<EventSummary>(`/events/${eventId}`)
+      .then(setEvent)
+      .catch(() => setEvent(null));
+  }, [eventId]);
+
+  // Auth state.
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user);
@@ -41,26 +63,11 @@ export default function RegisterPage({
     });
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
+    } = supabase.auth.onAuthStateChange((_e, session) => setUser(session?.user ?? null));
     return () => subscription.unsubscribe();
   }, []);
 
-  // One identity can hold both roles: organizers may also attend their own
-  // event. We don't block them — we just make sure they know who they're
-  // signed in as.
-  useEffect(() => {
-    if (!user) {
-      setIsEventOrganizer(false);
-      return;
-    }
-    apiFetch<{ organizer_id: string }>(`/events/${eventId}`)
-      .then((event) => setIsEventOrganizer(event.organizer_id === user.id))
-      .catch(() => setIsEventOrganizer(false));
-  }, [user, eventId]);
-
-  // Already registered? Skip the form entirely.
+  // Already registered? Skip the form and head to the live dashboard.
   useEffect(() => {
     if (!user) {
       setExistingChecked(false);
@@ -73,34 +80,34 @@ export default function RegisterPage({
       .finally(() => setExistingChecked(true));
   }, [user, eventId]);
 
-  // Give returning attendees a moment to read the message before redirecting.
+  // Give returning attendees a beat to read the message before redirecting.
   useEffect(() => {
     if (!existingAttendeeId) return;
     const timer = setTimeout(() => {
       router.push(`/event/${eventId}/live?attendee=${existingAttendeeId}`);
-    }, 3000);
+    }, 2500);
     return () => clearTimeout(timer);
   }, [existingAttendeeId, eventId, router]);
 
-  async function handleRegister(e: React.FormEvent) {
-    e.preventDefault();
+  const isEventOrganizer = useMemo(
+    () => !!user && !!event && event.organizer_id === user.id,
+    [user, event],
+  );
+
+  async function handleRegister(values: RegisterValues) {
     setError(null);
     setBusy(true);
     try {
-      const attendee = await apiFetch<AttendeeResponse>(
-        `/events/${eventId}/attendees`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            name,
-            role,
-            looking_for: lookingFor || null,
-            linkedin_url: linkedin || null,
-            whatsapp_number: whatsapp || null,
-          }),
-        }
-      );
-      // Existing registrations are returned too (dedupe) — same destination.
+      const attendee = await apiFetch<AttendeeResponse>(`/events/${eventId}/attendees`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: values.name,
+          role: values.role,
+          looking_for: values.looking_for || null,
+          linkedin_url: values.linkedin_url || null,
+          whatsapp_number: values.whatsapp_number || null,
+        }),
+      });
       router.push(`/event/${eventId}/live?attendee=${attendee.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
@@ -108,103 +115,71 @@ export default function RegisterPage({
     }
   }
 
+  const eventMeta = formatEventMeta(event);
+
+  // --- Render: one shell, swap the inner panel by state ---
+
   if (!authChecked) {
     return (
-      <main className="flex min-h-screen items-center justify-center p-6">
-        <p>Loading...</p>
-      </main>
+      <AuthShell eventName={event?.name} eventMeta={eventMeta}>
+        <Centered>Loading…</Centered>
+      </AuthShell>
     );
   }
 
   if (!user) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center p-6">
-        <AttendeeAuth nextPath={`/event/${eventId}/register`} />
-      </main>
+      <AuthShell eventName={event?.name} eventMeta={eventMeta}>
+        <SignInPanel nextPath={`/event/${eventId}/register`} />
+      </AuthShell>
     );
   }
 
   if (!existingChecked) {
     return (
-      <main className="flex min-h-screen items-center justify-center p-6">
-        <p>Checking your registration...</p>
-      </main>
+      <AuthShell eventName={event?.name} eventMeta={eventMeta}>
+        <Centered>Checking your registration…</Centered>
+      </AuthShell>
     );
   }
 
   if (existingAttendeeId) {
     const liveUrl = `/event/${eventId}/live?attendee=${existingAttendeeId}`;
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-3 p-6 text-center">
-        <h1 className="text-xl font-semibold">You&apos;re already registered ✅</h1>
-        <p className="text-sm text-gray-600">
-          Taking you to your event dashboard in a moment...
-        </p>
-        <a href={liveUrl} className="text-sm underline">
-          Go now
-        </a>
-      </main>
+      <AuthShell eventName={event?.name} eventMeta={eventMeta}>
+        <div className="flex flex-col items-center gap-3 py-2 text-center">
+          <CheckCircle2 className="h-10 w-10 text-chlorine" aria-hidden />
+          <h2 className="font-display text-xl text-cream">You&apos;re already in</h2>
+          <p className="text-sm text-cream/55">Taking you to your dashboard…</p>
+          <Button variant="outline-dark" size="lg" onClick={() => router.push(liveUrl)} className="mt-1">
+            Go now
+          </Button>
+        </div>
+      </AuthShell>
     );
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center p-6">
-      <form
-        onSubmit={handleRegister}
-        className="flex w-full max-w-sm flex-col gap-3"
-      >
-        <h1 className="text-xl font-semibold">Register</h1>
-        {isEventOrganizer && (
-          <p className="rounded border border-amber-400 bg-amber-50 p-3 text-sm">
-            You&apos;re signed in as this event&apos;s <strong>organizer</strong>.
-            Looking for the{" "}
-            <a href="/organizer/dashboard" className="underline">
-              organizer dashboard
-            </a>
-            ? Or continue below to also join as an attendee.
-          </p>
-        )}
-        <input
-          required
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Full name"
-          className="w-full rounded border px-4 py-3"
-        />
-        <input
-          required
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-          placeholder='Role (e.g. "Founder at XYZ")'
-          className="w-full rounded border px-4 py-3"
-        />
-        <input
-          value={lookingFor}
-          onChange={(e) => setLookingFor(e.target.value)}
-          placeholder='Looking for (e.g. "investors, designers")'
-          className="w-full rounded border px-4 py-3"
-        />
-        <input
-          value={linkedin}
-          onChange={(e) => setLinkedin(e.target.value)}
-          placeholder="LinkedIn URL (optional)"
-          className="w-full rounded border px-4 py-3"
-        />
-        <input
-          value={whatsapp}
-          onChange={(e) => setWhatsapp(e.target.value)}
-          placeholder="WhatsApp number (optional)"
-          className="w-full rounded border px-4 py-3"
-        />
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded border px-4 py-3 font-medium disabled:opacity-50"
-        >
-          {busy ? "Joining..." : "Join the event"}
-        </button>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-      </form>
-    </main>
+    <AuthShell eventName={event?.name} eventMeta={eventMeta}>
+      {isEventOrganizer && (
+        <div className="mb-5 rounded-xl border border-gold/30 bg-gold/10 p-3 text-sm text-cream/80">
+          You&apos;re signed in as this event&apos;s <strong className="text-cream">organizer</strong>. Head to the{" "}
+          <a href="/organizer/dashboard" className="font-medium text-gold underline underline-offset-2">
+            organizer dashboard
+          </a>
+          , or continue below to also join as an attendee.
+        </div>
+      )}
+      <RegisterForm onSubmit={handleRegister} busy={busy} error={error} />
+    </AuthShell>
+  );
+}
+
+function Centered({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-center gap-2 py-6 text-sm text-cream/60">
+      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+      {children}
+    </div>
   );
 }

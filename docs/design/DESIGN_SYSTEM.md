@@ -147,6 +147,34 @@ Pair headlines with `text-balance`, body with `text-pretty`.
 - **Hairlines/fills:** light → `border-ink/10`, `bg-ink/[0.04]`; dark →
   `border-white/10`, `bg-white/[0.03]`.
 
+### 4.1 Responsive patterns (mobile)
+
+- **Headline-first hero.** On mobile the copy/headline comes *before* the visual
+  (`order-1` copy, `order-2` artwork); on desktop they sit left/right.
+- **Interactive two-pane sections** (a picker + a preview, e.g. ScenesGallery) use
+  **horizontal tabs above the content on mobile** (so options + preview are visible
+  together) and a vertical list beside it on desktop.
+- **Big display headlines use fluid `clamp()`** with a looser `leading` on small
+  screens so long wrapped lines don't crush together.
+- **Device/preview mocks** (`PhoneFrame`) carry `max-w-full` so they shrink to fit a
+  narrow viewport instead of overflowing.
+- Decorative absolute elements peek **less** on mobile (`-left-[12%] sm:-left-[24%]`)
+  so they don't clip off the edge.
+
+### 4.2 Forms
+
+- Always compose with `Field` + `Input`/`Textarea` — never a raw `<input>`. Every
+  field has a **visible label** (not placeholder-only); placeholders are examples.
+- Inputs are `h-12` (≥44px target) and `text-base` (16px — stops iOS auto-zoom).
+  Use the right `type`/`inputMode`/`autoComplete` (`email`, `tel`, `url`,
+  `one-time-code`) so mobile shows the correct keyboard and can autofill.
+- **Validate on submit**, show the error **directly below the field**, and move
+  focus to the first invalid field. Required fields show `*`; optional fields are
+  labelled "Optional" rather than left ambiguous.
+- Async submit: disable the button and show a spinner; surface server errors in an
+  `role="alert"` banner. The single primary action uses `variant="accent"` +
+  `glow-ember` on dark.
+
 ---
 
 ## 5. Texture & motion
@@ -179,7 +207,19 @@ guard via framer's `useReducedMotion()` or `prefersReducedMotion()`
 Reusable building blocks in `src/components/`. Typed props, zero baked-in content.
 
 **`ui/`** — `button` (CVA pill: variants default/accent/outline/ghost/paper +
-dark variants; `buttonVariants` to style a `<Link>`).
+dark variants; `buttonVariants` to style a `<Link>`). `Input`, `Textarea`,
+`Field` — token-driven form primitives that resolve to light **or** dark variants
+automatically via semantic shadcn tokens (`bg-secondary`, `border-input`,
+`text-foreground`), so the same controls work on the organizer (light) and
+attendee (dark) surfaces. `Field` owns the label↔control wiring, optional hint,
+inline error placement, and ARIA (`aria-invalid`, `aria-describedby`,
+`role="alert"`) via a render-prop.
+
+**`auth/`** — onboarding building blocks: `AuthShell` (the branded dark backdrop
+for every onboarding screen — applies the `dark` token context, aurora + grid,
+centred card, optional event-context header), `SignInPanel` (Google + email-OTP,
+wired to Supabase Auth), `RegisterForm` (attendee profile form; owns its state +
+client validation, emits clean values).
 
 **`brand/`** — `Logo`, `Avatar`, `AvatarStack`, `SectionLabel`, `MarqueeStrip`,
 `StatCard`, `IcebreakerCard`, `BoardingPass` (dark app context), `HeroBoardingPass`
@@ -225,7 +265,7 @@ supports it; mock only where it doesn't yet.
 
 1. **Foundation** — this doc, tokens, fonts, motion primitives, base components. ✅
 2. **Landing** (light, full marketing + dark ScenesGallery island). ✅
-3. **Join / register** (dark, real auth).
+3. **Join / register** (dark, real auth). ✅
 4. **Waiting room** (dark, realtime).
 5. **Round reveal** (dark, the wow moment).
 6. **Live dashboard** (dark, real `/live` + icebreaker).

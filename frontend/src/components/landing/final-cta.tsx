@@ -10,7 +10,7 @@ export function FinalCta() {
   return (
     <section className="py-16 sm:py-24">
       <div className="mx-auto max-w-[1100px] px-6 sm:px-8">
-        <div className="relative overflow-hidden rounded-[36px] bg-coral p-10 text-white sm:p-20">
+        <div className="relative overflow-hidden rounded-[28px] bg-coral p-7 text-white sm:rounded-[36px] sm:p-20">
           <div
             className="absolute -right-20 -top-20 h-72 w-72 animate-spin-slow rounded-full"
             style={{ background: COLORS.lime }}
@@ -22,7 +22,7 @@ export function FinalCta() {
             aria-hidden
           />
           <div className="relative">
-            <h2 className="max-w-3xl text-balance font-display text-5xl leading-[0.95] tracking-[-0.03em] sm:text-7xl">
+            <h2 className="max-w-3xl text-balance font-display text-[clamp(30px,6.5vw,72px)] leading-[1.04] tracking-[-0.03em] sm:leading-[0.95]">
               <SplitReveal as="span" className="block">
                 Run your next event like
               </SplitReveal>

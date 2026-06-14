@@ -70,9 +70,32 @@ export function ScenesGallery() {
           </RevealOnScroll>
         </div>
 
+        {/* Mobile: horizontal tabs above the phone, so options + screen are visible together */}
+        <div className="mb-6 flex gap-2 overflow-x-auto scrollbar-hide lg:hidden">
+          {SCENE_META.map((s, i) => {
+            const isActive = active === s.key;
+            return (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => {
+                  setActive(s.key);
+                  setPlaying(false);
+                }}
+                aria-pressed={isActive}
+                className={`shrink-0 rounded-full border px-4 py-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ember ${
+                  isActive ? "border-ember bg-ember/10 text-cream" : "border-white/10 bg-white/[0.03] text-cream/60"
+                }`}
+              >
+                {String(i + 1).padStart(2, "0")} {s.label}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="grid items-start gap-8 lg:grid-cols-[1fr_440px] lg:gap-12">
-          {/* Picker */}
-          <div className="order-2 space-y-2 lg:order-1">
+          {/* Desktop: vertical detailed picker */}
+          <div className="hidden space-y-2 lg:order-1 lg:block">
             {SCENE_META.map((s, i) => {
               const isActive = active === s.key;
               return (

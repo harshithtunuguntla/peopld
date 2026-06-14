@@ -6,7 +6,7 @@ import { Wifi, BatteryFull, Signal } from "lucide-react";
 export function PhoneFrame({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <div
-      className={`relative h-[760px] w-[360px] rounded-[3.2rem] bg-gradient-to-b from-zinc-700 to-zinc-950 p-3 shadow-2xl ring-1 ring-white/5 sm:h-[800px] sm:w-[380px] ${className}`}
+      className={`relative h-[700px] w-[340px] max-w-full rounded-[3.2rem] bg-gradient-to-b from-zinc-700 to-zinc-950 p-3 shadow-2xl ring-1 ring-white/5 sm:h-[800px] sm:w-[380px] ${className}`}
     >
       <div className="relative h-full w-full overflow-hidden rounded-[2.6rem] bg-ink-950">
         <div className="relative flex h-7 items-center justify-between px-7 text-[11px] font-medium text-cream/90">

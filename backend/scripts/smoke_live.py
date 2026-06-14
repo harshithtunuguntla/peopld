@@ -11,6 +11,7 @@ everything it created.
 """
 
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -257,19 +258,79 @@ def main() -> int:
             check("publish draft -> 201 active round",
                   r.status_code == 201 and r.json()["status"] == "active"
                   and len(r.json()["assignments"]) == 6, r.text)
+            published_id = r.json()["id"] if r.status_code == 201 else None
 
             live_round = anon_peek.table("rounds").select("*").eq("event_id", event_id).execute().data
             check("published round IS visible to realtime (anon read)", bool(live_round))
 
+            # -- 6b. Live recovery endpoint (REQ-RT-01) + realtime PII guard --
+            print("\n[6b] Live state recovery (REQ-RT-01) + realtime privacy")
+            t0 = time.perf_counter()
+            r = api.get(f"/events/{event_id}/live", headers=att)
+            recover_ms = (time.perf_counter() - t0) * 1000
+            live = r.json() if r.status_code == 200 else {}
+            check("GET /live (attendee) -> 200 in round", r.status_code == 200, r.text)
+            check("live phase == in_round", live.get("phase") == "in_round", str(live))
+            check("live seated with a table number",
+                  live.get("seated") is True and (live.get("seat") or {}).get("table_number") is not None,
+                  str(live))
+            check("live round carries started_at + duration (countdown source)",
+                  (live.get("round") or {}).get("started_at") is not None
+                  and (live.get("round") or {}).get("duration_seconds") == 300, str(live.get("round")))
+            check("live server_time present (clock-skew anchor)", bool(live.get("server_time")), str(live))
+            check(f"REQ-RT-01: recovery within 3s (took {recover_ms:.0f}ms)",
+                  recover_ms < 3000, f"{recover_ms:.0f}ms")
+            check("live payload carries NO WhatsApp number", "+919999999999" not in r.text, "PII LEAK in /live")
+            check("live payload has no whatsapp_number/linkedin_url keys",
+                  "whatsapp_number" not in r.text and "linkedin_url" not in r.text, "PII key in /live")
+            check("GET /live without token -> 401", api.get(f"/events/{event_id}/live").status_code == 401)
+
+            # Tables a phone subscribes to over realtime must be PII-free.
+            anon_assign = (anon_peek.table("table_assignments").select("*")
+                           .eq("event_id", event_id).execute().data or [])
+            check("realtime table_assignments readable (doorbell works)", bool(anon_assign))
+            check("realtime table_assignments carry NO names (IDs only)",
+                  all("name" not in row for row in anon_assign), "PII LEAK in table_assignments")
+
+            # Idempotent publish (REQ-RT-03): a retried publish returns the SAME
+            # round (timeout/double-click safe), never a duplicate.
             r = api.post(f"/events/{event_id}/rounds/publish", headers=org)
-            check("publish again -> 404 (draft consumed)", r.status_code == 404, r.text)
+            check("publish again -> 200 idempotent (same round, no duplicate)",
+                  r.status_code == 200 and r.json().get("id") == published_id, r.text)
             r = api.post(f"/events/{event_id}/rounds/start", headers=org)
             check("start while round active -> 409", r.status_code == 409, r.text)
+
+            # -- 6c. Round cancel / rollback (REQ-RT-02) --
+            print("\n[6c] Round cancel / rollback (REQ-RT-02)")
+            r = api.post(f"/events/{event_id}/rounds/cancel", headers=org2)
+            check("cancel wrong organizer -> 403", r.status_code == 403, r.text)
+            r = api.post(f"/events/{event_id}/rounds/cancel", headers=org)
+            check("cancel active round -> 200", r.status_code == 200 and r.json().get("cancelled"), r.text)
+            r = api.get(f"/events/{event_id}/rounds/current")
+            check("GET current -> 404 after cancel (round gone)", r.status_code == 404, r.text)
+            gone = anon_peek.table("rounds").select("*").eq("event_id", event_id).execute().data
+            check("cancelled round removed from realtime tables", not gone,
+                  f"{len(gone or [])} round rows remain")
+            r = api.get(f"/events/{event_id}/live", headers=att)
+            check("live phase resets after cancel (only round was cancelled -> not_started)",
+                  r.status_code == 200 and r.json().get("phase") == "not_started", r.text)
+            r = api.post(f"/events/{event_id}/rounds/cancel", headers=org)
+            check("cancel again -> 404 (nothing active)", r.status_code == 404, r.text)
+
+            # Re-publish so the rest of the lifecycle can run (round_number reused)
+            api.post(f"/events/{event_id}/rounds/start", headers=org)
+            r = api.post(f"/events/{event_id}/rounds/publish", headers=org)
+            check("re-publish after cancel -> 201, round_number reused (1)",
+                  r.status_code == 201 and r.json()["round_number"] == 1, r.text)
 
             r = api.post(f"/events/{event_id}/rounds/end", headers=org)
             check("POST end round -> completed", r.status_code == 200, r.text)
             r = api.post(f"/events/{event_id}/rounds/end", headers=org)
             check("POST end round again -> 404 (none active)", r.status_code == 404, r.text)
+
+            r = api.get(f"/events/{event_id}/live", headers=att)
+            check("live phase == between_rounds after end round",
+                  r.status_code == 200 and r.json().get("phase") == "between_rounds", r.text)
 
             # Audit trail recorded the publish (service-role read; anon must NOT see it)
             audited = db.table("audit_log").select("action").eq("event_id", event_id).execute().data
@@ -286,8 +347,8 @@ def main() -> int:
             r = api.get(f"/events/{event_id}/attendees/{attendee['id']}/connections", headers=org2)
             check("connections wrong organizer -> 403", r.status_code == 403, r.text)
             r = api.get(f"/events/{event_id}/attendees/{attendee['id']}/connections", headers=att)
-            check("connections self -> empty rolodex",
-                  r.status_code == 200 and r.json()["total_people_met"] == 0, r.text)
+            check("connections self -> rolodex shows people met (was seated in a round)",
+                  r.status_code == 200 and r.json()["total_people_met"] >= 1, r.text)
             r = api.get(f"/events/{event_id}/attendees/{attendee['id']}/connections", headers=org)
             check("connections event organizer -> 200", r.status_code == 200, r.text)
 
@@ -296,12 +357,21 @@ def main() -> int:
             r = api.get(f"/events/{event_id}/analytics")
             check("analytics without token -> 401", r.status_code == 401, r.text)
             r = api.get(f"/events/{event_id}/analytics", headers=org)
-            check("GET analytics (owner) -> 200, 1 attendee",
-                  r.status_code == 200 and r.json()["total_attendees"] == 1, r.text)
+            check("GET analytics (owner) -> 200, 6 attendees (att + 5 pool)",
+                  r.status_code == 200 and r.json()["total_attendees"] == 6, r.text)
 
             r = api.post(f"/events/{event_id}/end", headers=org)
             check("POST end event -> ended",
                   r.status_code == 200 and r.json()["status"] == "ended", r.text)
+
+            r = api.get(f"/events/{event_id}/live", headers=att)
+            check("live phase == ended after event ends",
+                  r.status_code == 200 and r.json().get("phase") == "ended", r.text)
+
+            # Rolodex must survive the event ending (people came for this).
+            r = api.get(f"/events/{event_id}/attendees/{attendee['id']}/connections", headers=att)
+            check("rolodex STILL accessible after event ends (data persists)",
+                  r.status_code == 200 and r.json()["total_people_met"] >= 1, r.text)
 
             r = api.post(f"/events/{event_id}/attendees", headers=att,
                          json={"name": "Late", "role": "X"})
@@ -313,8 +383,8 @@ def main() -> int:
             rows = db.table("events").select("*").eq("id", event_id).execute().data
             check("event row exists in real DB", len(rows) == 1 and rows[0]["status"] == "ended")
             rows = db.table("attendees").select("*").eq("event_id", event_id).execute().data
-            check("attendee row exists with linked user_id",
-                  len(rows) == 1 and rows[0]["user_id"] == ids["attendee"])
+            check("attendee rows landed (6) incl. the JWT-linked registrant",
+                  len(rows) == 6 and any(r["user_id"] == ids["attendee"] for r in rows))
 
             # -- 9b. RLS: the public anon key must NOT read PII or write --
             print("\n[9b] RLS verification (attacker with public anon key)")

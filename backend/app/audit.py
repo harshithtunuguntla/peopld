@@ -6,7 +6,7 @@ Rules:
 - The audit_log table has no client RLS access (service-role only).
 
 Actions in use: event.created/updated/ended, attendee.registered/status_changed,
-round.draft_created/draft_regenerated/published/ended.
+round.draft_created/draft_regenerated/published/ended/cancelled.
 """
 
 import logging

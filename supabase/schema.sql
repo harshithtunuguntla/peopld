@@ -151,6 +151,14 @@ ALTER PUBLICATION supabase_realtime ADD TABLE rounds;
 ALTER PUBLICATION supabase_realtime ADD TABLE table_assignments;
 ALTER PUBLICATION supabase_realtime ADD TABLE icebreakers;
 
+-- REPLICA IDENTITY FULL: required so DELETE events (round cancel/rollback) carry
+-- the full old row incl. event_id, so phones subscribed with an event_id filter
+-- still receive them. Without this, a cancelled round would be missed by filtered
+-- subscribers until the polling fallback. See docs/design/realtime.md (REQ-RT-02).
+ALTER TABLE rounds            REPLICA IDENTITY FULL;
+ALTER TABLE table_assignments REPLICA IDENTITY FULL;
+ALTER TABLE icebreakers       REPLICA IDENTITY FULL;
+
 -- ─────────────────────────────────────────────
 -- INDEXES (performance for common queries)
 -- ─────────────────────────────────────────────

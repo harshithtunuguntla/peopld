@@ -187,12 +187,73 @@ def test_publish_creates_live_round(client, db, event):
     assert len(current.json()["assignments"]) == 7
 
 
-def test_publish_twice_second_call_has_no_draft(client, db, event):
+def test_publish_twice_is_idempotent(client, db, event):
+    """REQ-RT-03: a retried publish (lost response / double-click) returns the
+    SAME round, not a 404, and never creates a duplicate round."""
     make_arrived(db, event["id"], 6)
     client.post(f"/events/{event['id']}/rounds/start", headers=AUTH)
-    assert client.post(f"/events/{event['id']}/rounds/publish", headers=AUTH).status_code == 201
-    # Double-click: draft already consumed
+    first = client.post(f"/events/{event['id']}/rounds/publish", headers=AUTH)
+    assert first.status_code == 201
+    second = client.post(f"/events/{event['id']}/rounds/publish", headers=AUTH)
+    assert second.status_code == 200
+    assert second.json()["id"] == first.json()["id"]  # same round, idempotent
+    assert len(db.store["rounds"]) == 1  # no duplicate round created
+
+
+def test_publish_with_no_draft_and_no_round_is_404(client, db, event):
+    make_arrived(db, event["id"], 6)
+    # No start -> no draft -> nothing to publish or return
     assert client.post(f"/events/{event['id']}/rounds/publish", headers=AUTH).status_code == 404
+
+
+# --- cancel / rollback (REQ-RT-02) ---
+
+
+def test_cancel_removes_round_and_assignments(client, db, event):
+    make_arrived(db, event["id"], 6)
+    client.post(f"/events/{event['id']}/rounds/start", headers=AUTH)
+    client.post(f"/events/{event['id']}/rounds/publish", headers=AUTH)
+    assert len(db.store["rounds"]) == 1
+    assert len(db.store["table_assignments"]) == 6
+
+    r = client.post(f"/events/{event['id']}/rounds/cancel", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["cancelled"] is True
+    assert r.json()["round_number"] == 1
+    # Round + assignments gone — no trace left behind
+    assert db.store["rounds"] == []
+    assert db.store["table_assignments"] == []
+    # Phones re-fetching /rounds/current now see no active round
+    assert client.get(f"/events/{event['id']}/rounds/current").status_code == 404
+    # Audit trail recorded the rollback
+    assert "round.cancelled" in audit_actions(db)
+
+
+def test_cancel_requires_organizer(client, db, event):
+    make_arrived(db, event["id"], 6)
+    client.post(f"/events/{event['id']}/rounds/start", headers=AUTH)
+    client.post(f"/events/{event['id']}/rounds/publish", headers=AUTH)
+    assert client.post(f"/events/{event['id']}/rounds/cancel").status_code == 401
+    assert client.post(f"/events/{event['id']}/rounds/cancel", headers=ATTENDEE_AUTH).status_code == 403
+    assert client.post(f"/events/{event['id']}/rounds/cancel", headers=OTHER_AUTH).status_code == 403
+
+
+def test_cancel_with_no_active_round_is_404(client, db, event):
+    assert client.post(f"/events/{event['id']}/rounds/cancel", headers=AUTH).status_code == 404
+
+
+def test_cancelled_round_leaves_no_pairing_history(client, db, event):
+    """A cancelled round must not pollute future planning: re-publishing the same
+    pool should again report zero repeat pairings."""
+    make_arrived(db, event["id"], 6)
+    client.post(f"/events/{event['id']}/rounds/start", headers=AUTH)
+    client.post(f"/events/{event['id']}/rounds/publish", headers=AUTH)
+    client.post(f"/events/{event['id']}/rounds/cancel", headers=AUTH)
+
+    again = client.post(f"/events/{event['id']}/rounds/start", headers=AUTH)
+    assert again.status_code == 201
+    assert again.json()["round_number"] == 1  # number reused
+    assert again.json()["repeat_pairings"] == 0  # no leftover history
 
 
 def test_publish_stale_after_new_arrival(client, db, event):

@@ -107,6 +107,14 @@ class RoundWithAssignmentsResponse(RoundResponse):
     assignments: list[TableAssignmentResponse] = []
 
 
+class RoundCancelResponse(BaseModel):
+    """Result of cancelling a published round (REQ-RT-02). The round + its
+    assignments are deleted so they leave no trace in pairing history."""
+    event_id: UUID
+    round_number: int
+    cancelled: bool = True
+
+
 # --- Round draft (seating preview, organizer-only) ---
 
 class DraftAssignment(BaseModel):
@@ -127,6 +135,54 @@ class RoundDraftResponse(BaseModel):
     repeat_pairings: int  # pairs in this draft who already met — organizer trust signal
     assignments: list[DraftAssignment]
     created_at: datetime
+
+
+# --- Live state (Step 5 — Realtime / REQ-RT-01 recovery snapshot) ---
+
+class Tablemate(BaseModel):
+    """A person at your table this round. Name + role ONLY — contact details
+    (WhatsApp/LinkedIn) belong to the post-event rolodex, never the live path."""
+    attendee_id: UUID
+    name: str
+    role: str
+
+
+class LiveRound(BaseModel):
+    round_id: UUID
+    round_number: int
+    status: Literal["active", "completed"]
+    started_at: Optional[datetime]
+    duration_seconds: int
+    ends_at: Optional[datetime] = None  # started_at + duration; phone derives the countdown from this + server_time
+
+
+class LiveSeat(BaseModel):
+    table_number: int
+    tablemates: list[Tablemate]
+
+
+class LiveIcebreaker(BaseModel):
+    question_text: str
+    target_attendee_id: UUID
+
+
+class LiveStateResponse(BaseModel):
+    """The single authoritative snapshot that powers the attendee Live Dashboard.
+
+    REQ-RT-01: the phone fetches this on load, on websocket reconnect, on wake
+    from sleep, and on every realtime 'doorbell' ping. Realtime is best-effort;
+    THIS endpoint is the source of truth. Everything the dashboard renders is
+    here in one round-trip, so recovery is a single network call.
+    """
+    server_time: datetime  # so the phone can correct clock skew when counting down
+    event_status: Literal["upcoming", "active", "ended"]
+    phase: Literal["not_started", "in_round", "between_rounds", "ended"]
+    attendee_id: UUID
+    attendee_status: Literal["registered", "arrived", "left"]
+    seated: bool  # false during a round = no table for you (arrived late / not arrived)
+    round: Optional[LiveRound] = None
+    seat: Optional[LiveSeat] = None
+    icebreaker: Optional[LiveIcebreaker] = None
 
 
 # --- Icebreaker ---

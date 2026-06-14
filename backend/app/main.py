@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.logging_config import setup_logging
-from app.routers import events, attendees, rounds, icebreakers, connections
+from app.routers import events, attendees, rounds, icebreakers, connections, live
 
 setup_logging(settings.log_format)
 request_logger = logging.getLogger("app.requests")
@@ -62,6 +62,7 @@ app.include_router(attendees.router)
 app.include_router(rounds.router)
 app.include_router(icebreakers.router)
 app.include_router(connections.router)
+app.include_router(live.router)
 
 
 @app.get("/health")

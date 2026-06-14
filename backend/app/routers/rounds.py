@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 from math import ceil
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from supabase import Client
 
 from app.algorithm import (
@@ -16,6 +16,7 @@ from app.audit import record_audit
 from app.database import get_supabase
 from app.deps import fetch_event_or_404, get_current_organizer_id, require_event_owner
 from app.models.schemas import (
+    RoundCancelResponse,
     RoundDraftResponse,
     RoundResponse,
     RoundWithAssignmentsResponse,
@@ -41,16 +42,36 @@ def _fetch_active_round(db: Client, event_id: str) -> dict:
     return result.data[0]
 
 
-def _has_active_round(db: Client, event_id: str) -> bool:
+def _get_active_round(db: Client, event_id: str) -> dict | None:
+    """The active round if there is one, else None (non-raising)."""
     result = (
         db.table("rounds")
-        .select("id")
+        .select("*")
         .eq("event_id", event_id)
         .eq("status", "active")
         .limit(1)
         .execute()
     )
-    return bool(result.data)
+    return result.data[0] if result.data else None
+
+
+def _has_active_round(db: Client, event_id: str) -> bool:
+    return _get_active_round(db, event_id) is not None
+
+
+def _round_with_assignments(db: Client, round_row: dict) -> dict:
+    """A round row plus all its table assignments (the publish/current shape)."""
+    assignments = (
+        db.table("table_assignments")
+        .select("*")
+        .eq("round_id", round_row["id"])
+        .execute()
+        .data
+        or []
+    )
+    result = dict(round_row)
+    result["assignments"] = assignments
+    return result
 
 
 def _fetch_draft(db: Client, event_id: str) -> dict | None:
@@ -345,6 +366,7 @@ async def get_draft(
 @router.post("/publish", response_model=RoundWithAssignmentsResponse, status_code=201)
 async def publish_round(
     event_id: str,
+    response: Response,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
@@ -355,6 +377,13 @@ async def publish_round(
     require_event_owner(event, organizer_id)
     draft = _fetch_draft(db, event_id)
     if not draft:
+        # Idempotency (REQ-RT-03): a publish whose response was lost (timeout)
+        # may have actually succeeded — the draft is already consumed. If a round
+        # is now active, return it instead of a confusing 404, so a retry is safe.
+        existing = _get_active_round(db, event_id)
+        if existing:
+            response.status_code = 200  # idempotent retry — not a fresh create
+            return _round_with_assignments(db, existing)
         raise HTTPException(status_code=404, detail="No draft to publish — start a round first")
     if _has_active_round(db, event_id):
         raise HTTPException(status_code=409, detail="End the current round first")
@@ -370,21 +399,33 @@ async def publish_round(
         )
 
     now = datetime.now(timezone.utc).isoformat()
-    round_row = (
-        db.table("rounds")
-        .insert(
-            {
-                "event_id": event_id,
-                "round_number": _next_round_number(db, event_id),
-                "duration_seconds": draft["duration_seconds"],
-                "started_at": now,
-                "ended_at": None,
-                "status": "active",
-            }
+    try:
+        round_row = (
+            db.table("rounds")
+            .insert(
+                {
+                    "event_id": event_id,
+                    "round_number": _next_round_number(db, event_id),
+                    "duration_seconds": draft["duration_seconds"],
+                    "started_at": now,
+                    "ended_at": None,
+                    "status": "active",
+                }
+            )
+            .execute()
+            .data[0]
         )
-        .execute()
-        .data[0]
-    )
+    except Exception:
+        # Lost a concurrent publish race: UNIQUE(event_id, round_number) rejected
+        # the duplicate. The winner already created this round — return it rather
+        # than 500, so double-clicks resolve to one round (REQ-RT-03 idempotency).
+        existing = _get_active_round(db, event_id)
+        if existing:
+            logger.warning("publish race resolved to existing round", extra={"event_id": event_id})
+            response.status_code = 200  # idempotent — the winner already created it
+            return _round_with_assignments(db, existing)
+        logger.exception("publish failed creating round", extra={"event_id": event_id})
+        raise HTTPException(status_code=500, detail="Failed to publish the round — try again")
 
     assignment_rows = [
         {
@@ -451,6 +492,46 @@ async def end_round(
         metadata={"round_number": active["round_number"]},
     )
     return result.data[0]
+
+
+@router.post("/cancel", response_model=RoundCancelResponse)
+async def cancel_round(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Roll back a mistakenly published round (REQ-RT-02).
+
+    Unlike /end (which marks the round completed and keeps it in history), cancel
+    DELETES the active round and its assignments + icebreakers so the bad seating
+    leaves no trace — it never happened, and it never pollutes pairing history or
+    future planning. Attendee phones re-fetch /live and fall back to between-rounds.
+    The freed round_number is reused by the next start.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    active = _fetch_active_round(db, event_id)  # 404 if nothing to cancel
+
+    # Count what we're wiping for the audit trail (UUIDs/counts only, no PII).
+    seated_count = len(
+        db.table("table_assignments").select("id").eq("round_id", active["id"]).execute().data or []
+    )
+
+    # Delete children first — robust whether or not ON DELETE CASCADE is present.
+    db.table("icebreakers").delete().eq("round_id", active["id"]).execute()
+    db.table("table_assignments").delete().eq("round_id", active["id"]).execute()
+    db.table("rounds").delete().eq("id", active["id"]).execute()
+
+    record_audit(
+        db,
+        action="round.cancelled",
+        entity_type="round",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=active["id"],
+        metadata={"round_number": active["round_number"], "seated_count": seated_count},
+    )
+    return RoundCancelResponse(event_id=event_id, round_number=active["round_number"])
 
 
 @router.get("/current", response_model=RoundWithAssignmentsResponse)

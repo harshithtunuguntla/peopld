@@ -1,3 +1,4 @@
+import secrets
 from dataclasses import dataclass
 
 from fastapi import Depends, Header, HTTPException, Request
@@ -124,3 +125,40 @@ def code_matches(required: str | None, supplied: str | None) -> bool:
     if not required:
         return True
     return (supplied or "").strip().casefold() == required.casefold()
+
+
+# Unambiguous alphabet — no I/L/O/0/1, so codes are easy to read aloud and type.
+CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+CODE_LENGTH = 6
+
+
+def generate_access_code(db: Client, length: int = CODE_LENGTH) -> str:
+    """A fresh, human-friendly access code that doesn't collide with any existing
+    one (so the global code -> event lookup stays unambiguous).
+
+    Read with the service-role key; event_access_codes has no RLS policies.
+    """
+    existing = {
+        str(r["code"]).casefold()
+        for r in (db.table("event_access_codes").select("code").execute().data or [])
+    }
+    while True:
+        code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(length))
+        if code.casefold() not in existing:
+            return code
+
+
+def find_event_by_code(db: Client, code: str | None) -> str | None:
+    """Reverse lookup: the event whose access code matches `code`, or None.
+
+    Powers the "join via code/QR" hub — attendees enter a code without knowing
+    the event id. Trimmed + case-insensitive. Service-role only (secret table).
+    """
+    supplied = (code or "").strip().casefold()
+    if not supplied:
+        return None
+    rows = db.table("event_access_codes").select("event_id, code").execute().data or []
+    for row in rows:
+        if str(row["code"]).strip().casefold() == supplied:
+            return str(row["event_id"])
+    return None

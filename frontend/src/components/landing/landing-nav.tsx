@@ -33,9 +33,17 @@ export function LandingNav() {
           ))}
         </nav>
 
-        <Link href={ROUTES.host} className={cn(buttonVariants({ size: "sm" }), "h-10 px-5")}>
-          Host an event <ArrowUpRight className="h-3.5 w-3.5" />
-        </Link>
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <Link
+            href={ROUTES.signIn}
+            className="rounded-full px-3.5 py-2 text-[13px] font-medium text-ink/70 transition hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Sign in
+          </Link>
+          <Link href={ROUTES.host} className={cn(buttonVariants({ size: "sm" }), "h-10 px-5")}>
+            Host an event <ArrowUpRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
       </div>
     </header>
   );

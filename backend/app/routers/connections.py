@@ -43,6 +43,17 @@ async def get_connections(
     if not (is_organizer or is_self):
         raise HTTPException(status_code=403, detail="Not allowed to view these connections")
 
+    return build_connection_entries(db, event, attendee.data[0])
+
+
+def build_connection_entries(db: Client, event: dict, attendee: dict) -> ConnectionsResponse:
+    """The Rolodex for one attendee at one event: everyone they sat with, with
+    likes/notes/shared-interests folded in. Pure data assembly (no auth) so it
+    can be reused for the cross-event /me/connections aggregation.
+    """
+    event_id = str(event["id"])
+    attendee_id = str(attendee["id"])
+
     my_assignments = (
         db.table("table_assignments")
         .select("*")
@@ -86,12 +97,12 @@ async def get_connections(
     notes_by_target = {str(n["target_attendee_id"]): n["note"] for n in notes}
 
     # My interests, for highlighting what each connection and I have in common.
-    my_interest_set = {str(t).casefold() for t in (attendee.data[0].get("interests") or [])}
+    my_interest_set = {str(t).casefold() for t in (attendee.get("interests") or [])}
 
     entries: list[ConnectionEntry] = []
     people_met: set = set()
     for a in all_assignments:
-        if a["attendee_id"] == attendee_id:
+        if str(a["attendee_id"]) == attendee_id:
             continue
         if (a["round_id"], a["table_number"]) not in my_tables:
             continue

@@ -61,7 +61,7 @@ export function CountdownPill({
         remaining === 0
           ? "bg-muted text-muted-foreground"
           : low
-            ? "bg-ember/15 text-ember"
+            ? "bg-accent/15 text-accent"
             : "bg-foreground/10 text-foreground",
         className,
       )}

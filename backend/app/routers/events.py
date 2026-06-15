@@ -1,6 +1,6 @@
 ﻿from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 
 from app.audit import record_audit
@@ -10,11 +10,14 @@ from app.deps import (
     code_matches,
     fetch_access_code,
     fetch_event_or_404,
+    find_event_by_code,
+    generate_access_code,
     get_current_organizer_id,
     get_optional_user,
     require_event_owner,
 )
 from app.models.schemas import (
+    AccessCodeResponse,
     AttendeeResponse,
     EventAnalytics,
     EventBrowseItem,
@@ -22,6 +25,8 @@ from app.models.schemas import (
     EventResponse,
     EventStats,
     EventUpdate,
+    JoinRequest,
+    JoinResponse,
     LiveStats,
     VerifyCodeRequest,
     VerifyCodeResponse,
@@ -216,6 +221,23 @@ async def verify_event_code(
     return VerifyCodeResponse(valid=code_matches(fetch_access_code(db, event_id), body.code))
 
 
+@router.post("/join", response_model=JoinResponse)
+async def join_by_code(
+    body: JoinRequest,
+    _user: AuthUser | None = Depends(get_optional_user),
+    db: Client = Depends(get_supabase),
+):
+    """Reverse code -> event lookup for the join hub (code/QR). The attendee
+    knows a code, not an event id; this resolves it so the client can route to
+    the event's registration / waiting room. 404 when nothing matches.
+    """
+    event_id = find_event_by_code(db, body.code)
+    if not event_id:
+        raise HTTPException(status_code=404, detail="No event matches that code")
+    event = fetch_event_or_404(db, event_id)
+    return JoinResponse(event_id=event["id"], name=event["name"], requires_code=True)
+
+
 @router.patch("/{event_id}", response_model=EventResponse)
 async def update_event(
     event_id: str,
@@ -274,6 +296,63 @@ async def end_event(
         entity_id=event_id,
     )
     return _attach_requires_code(db, result.data[0])
+
+
+@router.get("/{event_id}/access-code", response_model=AccessCodeResponse)
+async def get_access_code(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """The event's secret code, returned ONLY to the owning organizer so they can
+    read it aloud / show the QR. Attendee phones can never reach this value."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    return AccessCodeResponse(code=fetch_access_code(db, event_id))
+
+
+@router.post("/{event_id}/access-code/regenerate", response_model=AccessCodeResponse)
+async def regenerate_access_code(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Mint a fresh, unique code for the event (owner only). Old code stops working."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    code = generate_access_code(db)
+    _upsert_access_code(db, event_id, code)
+    record_audit(
+        db,
+        action="event.code_regenerated",
+        entity_type="event",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=event_id,
+        # never log the code value itself
+    )
+    return AccessCodeResponse(code=code)
+
+
+@router.delete("/{event_id}/access-code", response_model=AccessCodeResponse)
+async def clear_access_code(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Remove the code — the event becomes open (link/QR is the only gate)."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    _upsert_access_code(db, event_id, "")  # "" clears the row
+    record_audit(
+        db,
+        action="event.code_cleared",
+        entity_type="event",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=event_id,
+    )
+    return AccessCodeResponse(code=None)
 
 
 @router.get("/{event_id}/attendees", response_model=list[AttendeeResponse])

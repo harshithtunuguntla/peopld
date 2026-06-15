@@ -106,6 +106,77 @@ Pre-check an access code so the form can unlock before submit.
 - **Response `200`** (`VerifyCodeResponse`): `{ "valid": true }`.
 - **Errors:** `404` event not found.
 
+### `POST /events/join`
+
+Reverse lookup: resolve an access **code → event**. Powers the attendee hub's
+"Join via access code" / "Join via QR" buttons (and the `/join?code=` deep link),
+where the attendee knows a code but not which event it belongs to.
+
+- **Why:** the join-first flow — attendees never browse a list of events; they
+  enter the code/QR the organizer gave them and we route them in.
+- **Auth:** none (public — the event id is already public; sign-in is enforced on
+  the hub and at registration).
+- **Request body** (`JoinRequest`): `{ "code": "MIXER7" }` (trimmed,
+  case-insensitive).
+- **Response `200`** (`JoinResponse`): `{ "event_id": "uuid", "name": "…",
+  "requires_code": true }`.
+- **Errors:** `404` no event matches that code.
+
+### `GET /events/{eventId}/access-code`
+
+The event's secret code — returned **only** to the owning organizer.
+
+- **Why:** lets the organizer view / copy / show the code (and build the QR). This
+  is the single place the value leaves the backend, gated on ownership.
+- **Auth:** required (**organizer, owner only**).
+- **Response `200`** (`AccessCodeResponse`): `{ "code": "MIXER7" }` or
+  `{ "code": null }` when the event is open.
+- **Errors:** `403` not the owner; `404` event not found.
+
+### `POST /events/{eventId}/access-code/regenerate`
+
+Mint a fresh, unique code (the old one stops working immediately).
+
+- **Why:** organizers can rotate a leaked code, or generate one for an event that
+  was created open. Codes are 6 chars from an unambiguous alphabet (no I/L/O/0/1)
+  and are guaranteed unique across events (so the reverse lookup is unambiguous).
+- **Auth:** required (**organizer, owner only**). Audited as
+  `event.code_regenerated` (the value is never logged).
+- **Response `200`** (`AccessCodeResponse`): `{ "code": "K7M3PQ" }`.
+- **Errors:** `403` not the owner; `404` event not found.
+
+### `DELETE /events/{eventId}/access-code`
+
+Remove the code — the event becomes open (link/QR is the only gate).
+
+- **Auth:** required (**organizer, owner only**). Audited as `event.code_cleared`.
+- **Response `200`** (`AccessCodeResponse`): `{ "code": null }`.
+- **Errors:** `403` not the owner; `404` event not found.
+
+---
+
+## Me (cross-event)
+
+### `GET /me/connections`
+
+The caller's **cross-event** Rolodex: everyone they've met across every event
+they've attended, each entry tagged with which event it came from.
+
+- **Why:** powers the hub's "My connections" button — a personal address book that
+  outlives any single event.
+- **Auth:** required. Identity is resolved from the JWT (the `user_id` on the
+  caller's attendee rows), never the URL.
+- **Response `200`** (`MyConnectionsResponse`):
+  ```json
+  { "total_people_met": 12, "events_count": 2, "matches_count": 3,
+    "connections": [ { "attendee_id": "uuid", "name": "Maya", "role": "…",
+      "shared_interests": ["AI"], "note": "…", "mutual": true,
+      "event_id": "uuid", "event_name": "Founders Mixer", "event_date": "2026-07-01",
+      "round_number": 1, "table_number": 2, "…": "…" } ] }
+  ```
+- **Notes:** reuses the per-event connection builder, so likes/notes/shared
+  interests behave exactly like the single-event Rolodex.
+
 ---
 
 ## Attendees

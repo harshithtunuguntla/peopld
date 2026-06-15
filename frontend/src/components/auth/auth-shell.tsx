@@ -68,7 +68,7 @@ function EventTitle({ name }: { name: string }) {
   const last = parts.pop();
   return (
     <>
-      {parts.join(" ")} <em className="not-italic font-display italic text-ember">{last}</em>
+      {parts.join(" ")} <em className="not-italic font-display italic text-accent">{last}</em>
     </>
   );
 }

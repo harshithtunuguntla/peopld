@@ -40,6 +40,18 @@ const config: Config = {
         popover: { DEFAULT: "hsl(var(--popover))", foreground: "hsl(var(--popover-foreground))" },
         card: { DEFAULT: "hsl(var(--card))", foreground: "hsl(var(--card-foreground))" },
 
+        // Extended app neutrals (richer ramp for console surfaces — see
+        // docs/design/UI_IMPORT_HANDOFF.md §6). Driven by CSS variables.
+        "surface-2": "hsl(var(--surface-2))",
+        "foreground-subtle": "hsl(var(--foreground-subtle))",
+        "line-strong": "hsl(var(--line-strong))",
+        panel: { DEFAULT: "hsl(var(--panel))", foreground: "hsl(var(--panel-foreground))" },
+
+        // Theme-aware status colors (readable in both modes — see globals.css).
+        success: "hsl(var(--success))",
+        warning: "hsl(var(--warning))",
+        info: "hsl(var(--info))",
+
         // Peopld brand — derived from the single source (src/lib/design/colors.ts).
         paper: COLORS.paper,
         paper2: COLORS.paper2,

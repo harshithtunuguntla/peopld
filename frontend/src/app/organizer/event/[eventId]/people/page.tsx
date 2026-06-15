@@ -154,7 +154,7 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
       )}
 
       {people && people.length > 0 && (
-        <ul className="mt-6 space-y-2.5">
+        <ul className="mt-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           {people.map((p) => (
             <li key={p.id} className="flex items-center gap-3 rounded-2xl border border-border bg-card/50 p-3">
               <Avatar name={p.name} seed={p.id} src={p.avatar_url} size={40} />
@@ -174,7 +174,7 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
 function StatusControls({ status, onSet }: { status: Attendee["status"]; onSet: (s: Attendee["status"]) => void }) {
   const badge = {
     registered: "bg-muted text-muted-foreground",
-    arrived: "bg-chlorine/15 text-chlorine",
+    arrived: "bg-success/15 text-success",
     left: "bg-muted text-muted-foreground line-through",
   }[status];
   return (

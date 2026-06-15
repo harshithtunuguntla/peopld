@@ -10,8 +10,9 @@ import { BoardingPass } from "@/components/brand/boarding-pass";
 import { Avatar } from "@/components/brand/avatar";
 import { IcebreakerCard } from "@/components/brand/icebreaker-card";
 import { buttonVariants } from "@/components/ui/button";
-import { roundFor } from "@/lib/design/rounds";
+import { ROUNDS, roundFor } from "@/lib/design/rounds";
 import { cn } from "@/lib/utils";
+import { Hourglass } from "./hourglass";
 import { apiFetch } from "@/lib/api";
 import { CountdownPill, useCountdown } from "./countdown";
 import type { LiveState, Tablemate } from "@/lib/live/use-live-state";
@@ -59,7 +60,7 @@ function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
           aria-label={liked ? `Unlike ${mate.name}` : `Like ${mate.name}`}
           className={cn(
             "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-60",
-            liked ? "border-coral/40 bg-coral/15 text-coral" : "border-border text-muted-foreground hover:text-foreground",
+            liked ? "border-accent/40 bg-accent/15 text-accent" : "border-border text-muted-foreground hover:text-foreground",
           )}
         >
           <Heart className={cn("h-4 w-4", liked && "fill-current")} aria-hidden />
@@ -152,13 +153,105 @@ function StatusPanel({
   );
 }
 
-export function WaitingRoom() {
+/** Roster avatar stack — real faces of who's already in the room (capped + "+N"). */
+function RoomRoster({ roster }: { roster: LiveState["roster"] }) {
+  const { count, preview } = roster;
+  const overflow = count - preview.length;
   return (
-    <StatusPanel
-      icon={<span className="relative flex h-3 w-3"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" /><span className="relative inline-flex h-3 w-3 rounded-full bg-accent" /></span>}
-      title="You're checked in"
-      subtitle="The first round will start any moment. Keep this screen open — your table appears here automatically."
-    />
+    <div className="rounded-2xl border border-border bg-card/60 p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+          {count === 1 ? "1 in the room" : `${count} in the room`}
+        </span>
+        <span className="relative flex h-2 w-2" aria-hidden>
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+        </span>
+      </div>
+      {count === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">
+          You&apos;re the first one here. Others will appear as they check in.
+        </p>
+      ) : (
+        <div className="mt-3 flex flex-wrap items-center gap-y-2">
+          <div className="flex -space-x-2.5">
+            {preview.map((p) => (
+              <div key={p.attendee_id} className="rounded-full ring-2 ring-background">
+                <Avatar name={p.name} seed={p.attendee_id} src={p.avatar_url} size={32} />
+              </div>
+            ))}
+            {overflow > 0 && (
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground ring-2 ring-background">
+                +{overflow}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The "Tonight" agenda — the planned rounds and their themes. The topics are the
+ * canonical round set for now; an organizer-authored agenda is a future hook. */
+function AgendaCard({ targetRounds, roundSeconds }: { targetRounds: number | null; roundSeconds: number }) {
+  const count = targetRounds && targetRounds > 0 ? targetRounds : ROUNDS.length;
+  const minutes = Math.max(1, Math.round(roundSeconds / 60));
+  const rounds = Array.from({ length: count }, (_, i) => ({ n: i + 1, ...roundFor(i) }));
+  return (
+    <div className="rounded-2xl border border-border bg-card/60 p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Tonight</span>
+        <span className="text-[11px] text-muted-foreground">
+          {count} {count === 1 ? "round" : "rounds"} · {minutes} min
+        </span>
+      </div>
+      <ul className="mt-3 space-y-2.5">
+        {rounds.map((r, i) => (
+          <li key={r.n} className="flex items-center gap-2.5 text-sm">
+            <span
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold"
+              style={{ background: r.bg, color: r.ink }}
+            >
+              {r.n}
+            </span>
+            <span className={cn("truncate", i === 0 ? "text-foreground" : "text-muted-foreground")}>{r.name}</span>
+            {i === 0 && <span className="ml-auto shrink-0 text-[10px] font-medium text-success">Up next</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function WaitingRoom({ state }: { state: LiveState }) {
+  // Defensive: tolerate an older backend that doesn't yet send these fields.
+  const firstName = (state.attendee_name ?? "").trim().split(/\s+/)[0] || "there";
+  const roster = state.roster ?? { count: 0, preview: [] };
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        {/* Translucent "live" badge — design-system success token, demo-style, with
+            a soft glow + pulsing dot so it reads alive without going solid. */}
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-2.5 py-1 text-[11px] font-medium text-success ring-1 ring-inset ring-success/25 shadow-[0_0_16px_-4px_hsl(var(--success)/0.55)]">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" aria-hidden />
+          You&apos;re in
+        </span>
+        <span className="truncate text-xs text-muted-foreground">Hi, {firstName}</span>
+      </div>
+
+      <div className="flex flex-col items-center pt-2 text-center">
+        <Hourglass size={120} />
+        <h1 className="mt-3 font-display text-2xl text-foreground">The room is filling up</h1>
+        <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">
+          <span className="block">Grab a drink and say hi to someone new.</span>
+          <span className="block">We&apos;ll light up this screen the moment your table&apos;s ready.</span>
+        </p>
+      </div>
+
+      <AgendaCard targetRounds={state.target_rounds ?? null} roundSeconds={state.round_seconds ?? 300} />
+      <RoomRoster roster={roster} />
+    </div>
   );
 }
 

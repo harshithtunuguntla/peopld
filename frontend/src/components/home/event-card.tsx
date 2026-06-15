@@ -78,7 +78,7 @@ export function EventCard({ event, todayStr }: { event: EventCardData; todayStr:
         </div>
         {event.registered && (
           <span
-            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-chlorine/15 px-2 py-1 text-[11px] font-medium text-chlorine"
+            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/15 px-2 py-1 text-[11px] font-medium text-success"
             title="You're registered"
           >
             <Check className="h-3 w-3" aria-hidden /> Registered
@@ -101,14 +101,14 @@ export function EventCard({ event, todayStr }: { event: EventCardData; todayStr:
 
 function StatusBadge({ phase }: { phase: Phase }) {
   const map = {
-    now: { label: "Happening now", cls: "bg-ember/15 text-ember" },
-    upcoming: { label: "Upcoming", cls: "bg-ice/15 text-ice" },
+    now: { label: "Happening now", cls: "bg-accent/15 text-accent" },
+    upcoming: { label: "Upcoming", cls: "bg-info/15 text-info" },
     ended: { label: "Ended", cls: "bg-muted text-muted-foreground" },
   } as const;
   const { label, cls } = map[phase];
   return (
     <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide", cls)}>
-      {phase === "now" && <span className="mr-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-ember" aria-hidden />}
+      {phase === "now" && <span className="mr-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />}
       {label}
     </span>
   );

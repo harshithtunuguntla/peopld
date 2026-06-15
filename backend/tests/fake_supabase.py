@@ -25,6 +25,7 @@ class FakeQuery:
     def __init__(self, rows: list):
         self._rows = rows  # live reference to the table's row list
         self._filters: list[tuple] = []
+        self._neq_filters: list[tuple] = []
         self._in_filters: list[tuple] = []
         self._order = None
         self._limit = None
@@ -62,6 +63,10 @@ class FakeQuery:
 
     def eq(self, column, value):
         self._filters.append((column, value))
+        return self
+
+    def neq(self, column, value):
+        self._neq_filters.append((column, value))
         return self
 
     def in_(self, column, values):
@@ -114,6 +119,7 @@ class FakeQuery:
         matched = [
             r for r in self._rows
             if all(str(r.get(col)) == str(val) for col, val in self._filters)
+            and all(str(r.get(col)) != str(val) for col, val in self._neq_filters)
             and all(str(r.get(col)) in vals for col, vals in self._in_filters)
         ]
 

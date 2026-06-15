@@ -27,8 +27,14 @@ from app.models.schemas import (
     LiveRound,
     LiveSeat,
     LiveStateResponse,
+    RosterPerson,
     Tablemate,
+    WaitingRoster,
 )
+
+# How many faces to send for the waiting-room avatar stack (the UI shows "+N"
+# for the rest). Keeps the payload small and avoids dumping the whole guest list.
+ROSTER_PREVIEW_LIMIT = 12
 
 logger = logging.getLogger("app.live")
 
@@ -60,6 +66,25 @@ def _any_round_exists(db: Client, event_id: str) -> bool:
 def _event_attendees(db: Client, event_id: str) -> dict[str, dict]:
     rows = db.table("attendees").select("*").eq("event_id", event_id).execute().data or []
     return {str(r["id"]): r for r in rows}
+
+
+def _waiting_roster(db: Client, event_id: str) -> WaitingRoster:
+    """Everyone currently in the room (anyone who hasn't left), for the waiting-
+    room social proof. Returns a total count plus a capped sample of faces."""
+    rows = (
+        db.table("attendees")
+        .select("id, name, avatar_url, status")
+        .eq("event_id", event_id)
+        .neq("status", "left")
+        .execute()
+        .data
+        or []
+    )
+    preview = [
+        RosterPerson(attendee_id=r["id"], name=r["name"], avatar_url=r.get("avatar_url"))
+        for r in rows[:ROSTER_PREVIEW_LIMIT]
+    ]
+    return WaitingRoster(count=len(rows), preview=preview)
 
 
 @router.get("", response_model=LiveStateResponse)
@@ -199,9 +224,14 @@ async def get_live_state(
         server_time=now,
         event_status=event_status,
         phase=phase,
+        event_name=event["name"],
         attendee_id=attendee["id"],
+        attendee_name=attendee["name"],
         attendee_status=attendee["status"],
+        target_rounds=event.get("target_rounds"),
+        round_seconds=event.get("default_round_duration_seconds") or 300,
         seated=seated,
+        roster=_waiting_roster(db, event_id),
         round=round_payload,
         seat=seat_payload,
         icebreaker=icebreaker_payload,

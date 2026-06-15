@@ -5,11 +5,14 @@ import QRCode from "qrcode";
 import { Check, Copy, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api";
 
 /**
- * Day-of-event invite: a big scannable QR + a copyable register link, so the
- * organizer can get 40 phones onto the registration page in seconds. The QR is
- * rendered locally (no network image), so it works even on flaky venue wifi.
+ * Day-of-event invite: a big scannable QR that just opens the join page, plus the
+ * access code shown large so the organizer can read it aloud. The QR deliberately
+ * does NOT carry the code — joining always requires typing the code handed out in
+ * the room (PRODUCT.md: access-code is the only door in), so a shared screenshot
+ * can't let anyone in. Rendered locally (no network image) for flaky venue wifi.
  */
 export function InviteDialog({
   eventId,
@@ -21,15 +24,32 @@ export function InviteDialog({
   onClose: () => void;
 }) {
   const [url, setUrl] = useState("");
+  const [code, setCode] = useState<string | null>(null);
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    const u = `${window.location.origin}/event/${eventId}/register`;
-    setUrl(u);
-    QRCode.toDataURL(u, { width: 512, margin: 1, color: { dark: "#0A0A12", light: "#FFFFFF" } })
-      .then(setDataUrl)
-      .catch(() => setDataUrl(null));
+    let cancelled = false;
+    (async () => {
+      let joinCode: string | null = null;
+      try {
+        const res = await apiFetch<{ code: string | null }>(`/events/${eventId}/access-code`);
+        joinCode = res.code;
+      } catch {
+        /* code unavailable — the QR still opens the join page */
+      }
+      if (cancelled) return;
+      setCode(joinCode);
+      // The QR opens the join page only — never the code itself.
+      const u = `${window.location.origin}/join`;
+      setUrl(u);
+      QRCode.toDataURL(u, { width: 512, margin: 1, color: { dark: "#0A0A12", light: "#FFFFFF" } })
+        .then((d) => !cancelled && setDataUrl(d))
+        .catch(() => !cancelled && setDataUrl(null));
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [eventId]);
 
   async function copy() {
@@ -63,19 +83,32 @@ export function InviteDialog({
           <X className="h-4 w-4" aria-hidden />
         </button>
 
-        <p className="text-[11px] uppercase tracking-[0.3em] text-accent">Scan to join</p>
+        <p className="text-[11px] uppercase tracking-[0.3em] text-accent">Read this out</p>
         {eventName && <h2 className="mt-1.5 truncate font-display text-xl text-foreground">{eventName}</h2>}
+
+        {code ? (
+          <div className="mx-auto mt-4 w-fit rounded-2xl border border-border bg-background/50 px-6 py-3">
+            <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Access code</p>
+            <p className="font-display text-4xl tracking-[0.3em] text-foreground">{code}</p>
+          </div>
+        ) : (
+          <p className="mx-auto mt-4 max-w-[18rem] rounded-xl border border-warning/30 bg-warning/10 px-4 py-2.5 text-sm text-foreground/80">
+            This event has no access code yet. Generate one on the dashboard so guests can join.
+          </p>
+        )}
 
         <div className="mx-auto mt-5 w-fit rounded-2xl bg-white p-3">
           {dataUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={dataUrl} alt="QR code to register" width={224} height={224} className="h-56 w-56" />
+            <img src={dataUrl} alt="QR code that opens the join page" width={224} height={224} className="h-56 w-56" />
           ) : (
             <div className="h-56 w-56 animate-pulse rounded-lg bg-muted" />
           )}
         </div>
 
-        <p className="mt-4 text-sm text-muted-foreground">Point a camera here, or share the link:</p>
+        <p className="mt-4 text-sm text-muted-foreground">
+          Scan to open the join page, then type the code above. The QR never carries the code.
+        </p>
         <div className="mt-2 flex items-center gap-2">
           <code className="min-w-0 flex-1 truncate rounded-xl border border-border bg-background/50 px-3 py-2.5 text-left text-xs text-foreground">
             {url}

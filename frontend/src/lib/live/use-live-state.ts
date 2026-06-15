@@ -31,13 +31,27 @@ export interface LiveIcebreaker {
   question_text: string;
   target_attendee_id: string;
 }
+export interface RosterPerson {
+  attendee_id: string;
+  name: string;
+  avatar_url: string | null;
+}
+export interface WaitingRoster {
+  count: number;
+  preview: RosterPerson[];
+}
 export interface LiveState {
   server_time: string;
   event_status: "upcoming" | "active" | "ended";
   phase: "not_started" | "in_round" | "between_rounds" | "ended";
+  event_name: string;
   attendee_id: string;
+  attendee_name: string;
   attendee_status: "registered" | "arrived" | "left";
+  target_rounds: number | null;
+  round_seconds: number;
   seated: boolean;
+  roster: WaitingRoster;
   round: LiveRound | null;
   seat: LiveSeat | null;
   icebreaker: LiveIcebreaker | null;

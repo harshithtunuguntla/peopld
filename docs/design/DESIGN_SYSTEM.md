@@ -100,25 +100,43 @@ token and keeps `bg-${dynamic}` strings and hex out of components.
 ### 1.5 Two themes, one centralized switch (non-negotiable)
 
 The product has **exactly two themes**, both defined once as semantic HSL tokens
-in `globals.css` — `:root` = **light**, `.dark` = **dark**:
+in `globals.css` — `:root` = **light**, `.dark` = **dark**. **Light is the default
+everywhere.**
 
-| Theme | Where | How it's applied |
+> **History:** this used to read "dark everywhere outside the landing, locked, never
+> toggled." That was **deliberately reversed on 2026-06-15** — the app is now **light by
+> default with an opt-in dark toggle**, after importing the prototype's light/dark system
+> (see `docs/design/UI_IMPORT_HANDOFF.md`). The landing stays locked light; the rest is
+> now theme-*aware*, not dark-locked.
+
+| Surface | Default | How it's applied |
 |---|---|---|
-| **Light** | The **marketing landing only**. It is **locked** — no theme switching, ever. | Default (`:root`). Landing components may use brand classes directly (`bg-paper`, `text-ink`). |
-| **Dark** | **Every other surface** (attendee app, organizer app) — the **default** for the whole product outside the landing. | The `dark` class is applied **once** per app route segment: `app/event/layout.tsx`, `app/organizer/layout.tsx`. |
+| **Marketing landing** (`app/page.tsx`) | **Light, locked** — no switching, ever. | `:root`. Landing components may use brand classes directly (`bg-paper`, `text-ink`). It is **not** wrapped in a `ThemeProvider`. |
+| **Every app surface** (attendee app, organizer console, hub, join, me) | **Light**, user-toggleable to dark or "follow system". | A **`ThemeProvider`** (`src/lib/theme/theme-provider.tsx`, `defaultPref="light"`) is mounted once per app route-segment layout (`app/event/layout.tsx`, `app/organizer/layout.tsx`, `app/home/layout.tsx`, `app/join/layout.tsx`, `app/me/layout.tsx`). It toggles the `.dark` class on its wrapper; preference persists in `localStorage`. |
 
 **The rule:** outside the locked landing, components must style with **semantic
 tokens** (`bg-background`, `text-foreground`, `text-muted-foreground`, `bg-card`,
-`border-border`, `bg-primary`, `bg-accent`, `bg-secondary`, `bg-muted`, `ring-ring`,
-`destructive`) — **never** hardcoded `text-cream` / `bg-ink-950` / `border-white/10`
-etc. Flip the theme in one place (the segment layout's `dark` class) and the entire
-subtree adapts. This is why `Button`'s `default`/`accent`/`secondary`/`outline`
-variants are token-driven (one variant, both themes); only the landing-scoped
-`ghost` is light-bound.
+`bg-surface-2`, `text-foreground-subtle`, `border-border`, `border-line-strong`,
+`bg-primary`, `bg-accent`, `bg-secondary`, `bg-muted`, `bg-panel`, `ring-ring`,
+`destructive`) — **never** hardcoded `text-cream` / `bg-ink-950` / `border-white/10`,
+and never a surface color that only reads in one mode. Both themes must look intentional.
+Flip is centralized: the `ThemeProvider` adds/removes `.dark` in one place and the whole
+subtree adapts. `Button`'s `default`/`accent`/`secondary`/`outline` variants are
+token-driven (one variant, both themes); only the landing-scoped `ghost` is light-bound.
 
-Why centralize: a single switch point means a future theme toggle, a per-event
-brand color, or an a11y high-contrast mode is a token change — not a hunt-and-
-replace across every component. Hardcoded surface colors are treated as bugs.
+**The switch UI:** `<ThemeToggle />` (`src/components/ui/theme-toggle.tsx`) lives in app
+headers (attendee hub, organizer shell); a full light/dark/system picker belongs in
+organizer **Settings → Appearance**. `useTheme()` exposes `{ theme, pref, setPref, toggle }`.
+
+> **Brand-accent contrast caveat:** the shared round/accent colors (coral, ember,
+> chlorine, lime, gold, ice) were tuned for dark. As **text** on the light canvas some are
+> low-contrast — prefer them as *fills with `inkOn()` foreground* or as `/15` tinted chips,
+> and use darker status tones (success/warning/info) for small colored text on light. This
+> is paid down per-screen during the UI uplift.
+
+Why centralize: a single switch point means the toggle, a per-event brand color, or an
+a11y high-contrast mode is a token change — not a hunt-and-replace. Hardcoded
+single-mode surface colors are treated as bugs.
 
 ---
 
@@ -183,6 +201,24 @@ Pair headlines with `text-balance`, body with `text-pretty`.
   narrow viewport instead of overflowing.
 - Decorative absolute elements peek **less** on mobile (`-left-[12%] sm:-left-[24%]`)
   so they don't clip off the edge.
+
+### 4.1a App surfaces: mobile-first, laptop first-class
+
+App screens (dark surfaces) are **designed at 375px, then widened** — never left
+phone-only. The recipe:
+
+- **Container width by surface:** attendee hub + cross-event rolodex use
+  `max-w-3xl`; organizer console uses `max-w-2xl` (`OrgShell`). Single-table **live**
+  screens stay column-centered (`max-w-md`) — a table is inherently narrow, so
+  widening it would only spread it thin.
+- **Lists → grids on wider screens:** card lists go `grid grid-cols-1 gap-3
+  sm:grid-cols-2` (hub events, both rolodexes, organizer people). The hub's three
+  primary actions are `grid-cols-1 sm:grid-cols-3` (stacked rows on a phone, an
+  equal trio on a laptop).
+- **The hub** (`/home`) leads with the three actions (Join via code / Join via QR /
+  My connections), then a "Your events" section — same pattern, just `sm:` grids.
+- Add `sm:`/`lg:` modifiers to *widen* a mobile layout; don't branch component logic
+  by screen size. Always eyeball **375px and ≥1024px** before shipping a screen.
 
 ### 4.2 Forms
 

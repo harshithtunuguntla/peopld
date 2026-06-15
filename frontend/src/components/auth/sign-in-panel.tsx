@@ -12,7 +12,16 @@ type Step = "choose" | "otp-sent";
 /** Brand-styled attendee sign-in: Google one-tap OR a 6-digit email code.
  * Two equal options (no password). Wired to Supabase Auth; on success the
  * session is set and the parent re-renders via onAuthStateChange. */
-export function SignInPanel({ nextPath }: { nextPath: string }) {
+export function SignInPanel({
+  nextPath,
+  heading = "Sign in to continue",
+  subheading = "Quick and free — no password to remember.",
+}: {
+  nextPath: string;
+  /** Override the panel heading (e.g. for a sign-up framing). */
+  heading?: string;
+  subheading?: string;
+}) {
   const [step, setStep] = useState<Step>("choose");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -58,8 +67,8 @@ export function SignInPanel({ nextPath }: { nextPath: string }) {
       {step === "choose" ? (
         <>
           <header className="text-center">
-            <h2 className="font-display text-xl text-foreground">Sign in to continue</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Quick and free — no password to remember.</p>
+            <h2 className="font-display text-xl text-foreground">{heading}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{subheading}</p>
           </header>
 
           <Button variant="default" size="lg" onClick={signInWithGoogle} className="w-full gap-3">

@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { LogOut, ChevronLeft } from "lucide-react";
 import { Wordmark } from "@/components/brand/wordmark";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { supabase } from "@/lib/supabase";
 
 /** Control-room chrome for every organizer screen: wordmark + "Organizer" tag,
@@ -25,13 +26,16 @@ export function OrgShell({
             Organizer
           </span>
         </div>
-        <button
-          type="button"
-          onClick={() => supabase.auth.signOut()}
-          className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <LogOut className="h-3.5 w-3.5" aria-hidden /> Sign out
-        </button>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <button
+            type="button"
+            onClick={() => supabase.auth.signOut()}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <LogOut className="h-3.5 w-3.5" aria-hidden /> Sign out
+          </button>
+        </div>
       </div>
 
       {back && (

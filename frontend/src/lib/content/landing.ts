@@ -85,4 +85,6 @@ export const FOOTER_LINKS = [
 /** Where the marketing CTAs point in the real app. */
 export const ROUTES = {
   host: "/organizer/login",
+  /** Attendee sign in / sign up (Google or email code) → lands on the hub. */
+  signIn: "/auth",
 };

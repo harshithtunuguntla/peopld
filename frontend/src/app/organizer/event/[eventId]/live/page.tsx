@@ -331,8 +331,8 @@ function PulseCard({
   highlight?: boolean;
 }) {
   return (
-    <div className={cn("flex items-center gap-2.5 rounded-xl border px-3 py-2", highlight ? "border-coral/40 bg-coral/10" : "border-border bg-card/40")}>
-      <span className={cn(highlight ? "text-coral" : "text-muted-foreground")}>{icon}</span>
+    <div className={cn("flex items-center gap-2.5 rounded-xl border px-3 py-2", highlight ? "border-accent/40 bg-accent/10" : "border-border bg-card/40")}>
+      <span className={cn(highlight ? "text-accent" : "text-muted-foreground")}>{icon}</span>
       <span className="leading-tight">
         <span className="block font-display text-lg text-foreground">{value}</span>
         <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
@@ -424,11 +424,11 @@ function DraftView({
           </p>
         </div>
         {draft.repeat_pairings > 0 ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-gold/15 px-3 py-1 text-xs font-medium text-gold">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/15 px-3 py-1 text-xs font-medium text-warning">
             <AlertTriangle className="h-3.5 w-3.5" aria-hidden /> {draft.repeat_pairings} repeat pairing{draft.repeat_pairings > 1 ? "s" : ""}
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-chlorine/15 px-3 py-1 text-xs font-medium text-chlorine">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-3 py-1 text-xs font-medium text-success">
             <CheckCircle2 className="h-3.5 w-3.5" aria-hidden /> All-new pairings
           </span>
         )}
@@ -475,11 +475,11 @@ function ActiveView({
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card/50 p-4">
         <div className="flex items-center gap-2">
           <span className="relative flex h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ember opacity-70" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-ember" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-70" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent" />
           </span>
           <div>
-            <p className="text-[11px] font-medium uppercase tracking-wide text-ember">Live now</p>
+            <p className="text-[11px] font-medium uppercase tracking-wide text-accent">Live now</p>
             <h2 className="font-display text-lg text-foreground">
               Round {round.round_number} · {theme.name}
             </h2>

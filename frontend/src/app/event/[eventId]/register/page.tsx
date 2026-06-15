@@ -218,9 +218,9 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
   return (
     <AuthShell {...shellProps}>
       {isEventOrganizer && (
-        <div className="mb-5 rounded-xl border border-gold/30 bg-gold/10 p-3 text-sm text-foreground/80">
+        <div className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-foreground/80">
           You&apos;re signed in as this event&apos;s <strong className="text-foreground">organizer</strong>. Head to the{" "}
-          <a href="/organizer/dashboard" className="font-medium text-gold underline underline-offset-2">
+          <a href="/organizer/dashboard" className="font-medium text-warning underline underline-offset-2">
             organizer dashboard
           </a>
           , or continue below to also join as an attendee.
@@ -259,7 +259,7 @@ function AlreadyIn({ onGo }: { onGo: () => void }) {
         transition={{ type: "spring", stiffness: 260, damping: 16 }}
         className="relative"
       >
-        <CheckCircle2 className="h-12 w-12 text-chlorine" aria-hidden />
+        <CheckCircle2 className="h-12 w-12 text-success" aria-hidden />
         {!reduce && (
           <motion.span
             className="absolute inset-0 rounded-full ring-2 ring-chlorine"

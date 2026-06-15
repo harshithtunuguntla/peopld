@@ -79,6 +79,22 @@ class VerifyCodeResponse(BaseModel):
     valid: bool
 
 
+class JoinRequest(BaseModel):
+    code: str
+
+
+class JoinResponse(BaseModel):
+    """Reverse code -> event lookup result for the join hub."""
+    event_id: UUID
+    name: str
+    requires_code: bool = True
+
+
+class AccessCodeResponse(BaseModel):
+    """The event's secret code — returned ONLY to the owning organizer."""
+    code: Optional[str] = None
+
+
 # --- Attendee ---
 
 class AttendeeCreate(BaseModel):
@@ -229,6 +245,23 @@ class LiveSeat(BaseModel):
     tablemates: list[Tablemate]
 
 
+class RosterPerson(BaseModel):
+    """A face in the waiting room. Name + avatar only — no role/contact/PII.
+    `attendee_id` is the stable seed for the gradient avatar, not an IDOR handle
+    (the live snapshot is always scoped to the caller's own event)."""
+    attendee_id: UUID
+    name: str
+    avatar_url: Optional[str] = None
+
+
+class WaitingRoster(BaseModel):
+    """Who's already here, for the waiting-room social proof. `count` is everyone
+    in the room; `preview` is a capped sample of faces to render (the UI shows
+    a `+N` for the remainder)."""
+    count: int
+    preview: list[RosterPerson] = []
+
+
 class LiveIcebreaker(BaseModel):
     question_text: str
     target_attendee_id: UUID
@@ -245,9 +278,14 @@ class LiveStateResponse(BaseModel):
     server_time: datetime  # so the phone can correct clock skew when counting down
     event_status: Literal["upcoming", "active", "ended"]
     phase: Literal["not_started", "in_round", "between_rounds", "ended"]
+    event_name: str  # for the waiting-room header / "Tonight" agenda card
     attendee_id: UUID
+    attendee_name: str  # so the waiting room can greet "Hi, <first name>"
     attendee_status: Literal["registered", "arrived", "left"]
+    target_rounds: Optional[int] = None  # planned rounds → drives the agenda preview
+    round_seconds: int  # default round duration → "N rounds · M min"
     seated: bool  # false during a round = no table for you (arrived late / not arrived)
+    roster: WaitingRoster  # who's already in the room (waiting-room social proof)
     round: Optional[LiveRound] = None
     seat: Optional[LiveSeat] = None
     icebreaker: Optional[LiveIcebreaker] = None
@@ -289,6 +327,21 @@ class ConnectionsResponse(BaseModel):
     rounds_count: int
     matches_count: int = 0  # mutual likes
     connections: list[ConnectionEntry]
+
+
+class MyConnectionEntry(ConnectionEntry):
+    """A connection annotated with which event it came from (cross-event rolodex)."""
+    event_id: UUID
+    event_name: str
+    event_date: date
+
+
+class MyConnectionsResponse(BaseModel):
+    """Everyone the caller has met, aggregated across all of their events."""
+    total_people_met: int
+    events_count: int
+    matches_count: int = 0
+    connections: list[MyConnectionEntry]
 
 
 # --- Likes ---

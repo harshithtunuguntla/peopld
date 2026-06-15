@@ -1,11 +1,15 @@
 import type { ReactNode } from "react";
+import { ThemeProvider } from "@/lib/theme/theme-provider";
 
 /**
- * Attendee home theme boundary. The personal dashboard lives outside /event/*
- * (it's cross-event), so it needs its own dark-theme wrapper — same contract as
- * the event app layout (DESIGN_SYSTEM §1.5: landing locked light, every other
- * surface dark). The `dark` class flips the semantic tokens for the subtree.
+ * Attendee home theme boundary. The personal hub lives outside /event/* (it's
+ * cross-event), so it carries its own theme wrapper — same contract as the event
+ * app layout (DESIGN_SYSTEM §1.5): light by default, dark optional via toggle.
  */
 export default function HomeLayout({ children }: { children: ReactNode }) {
-  return <div className="dark min-h-dvh bg-background text-foreground">{children}</div>;
+  return (
+    <ThemeProvider defaultPref="light" className="min-h-dvh bg-background text-foreground">
+      {children}
+    </ThemeProvider>
+  );
 }

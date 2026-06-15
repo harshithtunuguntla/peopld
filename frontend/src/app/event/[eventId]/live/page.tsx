@@ -126,7 +126,7 @@ function LiveInner({ eventId }: { eventId: string }) {
     default:
       return (
         <LiveShell eventId={eventId}>
-          <WaitingRoom />
+          <WaitingRoom state={state} />
         </LiveShell>
       );
   }

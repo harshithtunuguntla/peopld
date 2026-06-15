@@ -16,28 +16,39 @@ from types import SimpleNamespace
 
 
 class FakeResult:
-    def __init__(self, data):
+    def __init__(self, data, count=None):
         self.data = data
+        self.count = count
 
 
 class FakeQuery:
     def __init__(self, rows: list):
         self._rows = rows  # live reference to the table's row list
         self._filters: list[tuple] = []
+        self._in_filters: list[tuple] = []
         self._order = None
         self._limit = None
         self._op = "select"
         self._payload = None
+        self._count = False
+        self._conflict = None
 
     # --- builder methods (chainable) ---
 
-    def select(self, *_cols):
+    def select(self, *_cols, count=None):
         self._op = "select"
+        self._count = count == "exact"
         return self
 
     def insert(self, payload):
         self._op = "insert"
         self._payload = payload
+        return self
+
+    def upsert(self, payload, on_conflict=None):
+        self._op = "upsert"
+        self._payload = payload
+        self._conflict = on_conflict
         return self
 
     def update(self, payload):
@@ -51,6 +62,10 @@ class FakeQuery:
 
     def eq(self, column, value):
         self._filters.append((column, value))
+        return self
+
+    def in_(self, column, values):
+        self._in_filters.append((column, [str(v) for v in values]))
         return self
 
     def order(self, column, desc: bool = False):
@@ -75,9 +90,31 @@ class FakeQuery:
                 inserted.append(dict(row))
             return FakeResult(inserted)
 
+        if self._op == "upsert":
+            payloads = self._payload if isinstance(self._payload, list) else [self._payload]
+            result = []
+            for p in payloads:
+                existing = None
+                if self._conflict:
+                    existing = next(
+                        (r for r in self._rows if str(r.get(self._conflict)) == str(p.get(self._conflict))),
+                        None,
+                    )
+                if existing is not None:
+                    existing.update(p)
+                    result.append(dict(existing))
+                else:
+                    row = dict(p)
+                    row.setdefault("id", str(uuid.uuid4()))
+                    row.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+                    self._rows.append(row)
+                    result.append(dict(row))
+            return FakeResult(result)
+
         matched = [
             r for r in self._rows
             if all(str(r.get(col)) == str(val) for col, val in self._filters)
+            and all(str(r.get(col)) in vals for col, vals in self._in_filters)
         ]
 
         if self._op == "update":
@@ -90,12 +127,13 @@ class FakeQuery:
                 self._rows.remove(r)
             return FakeResult([dict(r) for r in matched])
 
+        total = len(matched)  # count="exact" reports total matches, ignoring limit
         if self._order:
             col, desc = self._order
             matched = sorted(matched, key=lambda r: str(r.get(col) or ""), reverse=desc)
         if self._limit is not None:
             matched = matched[: self._limit]
-        return FakeResult([dict(r) for r in matched])
+        return FakeResult([dict(r) for r in matched], count=total if self._count else None)
 
 
 class FakeAuth:

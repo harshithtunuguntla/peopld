@@ -5,6 +5,8 @@ from app.audit import record_audit
 from app.database import get_supabase
 from app.deps import (
     AuthUser,
+    code_matches,
+    fetch_access_code,
     fetch_event_or_404,
     get_current_organizer_id,
     get_current_user,
@@ -13,8 +15,10 @@ from app.deps import (
 from app.models.schemas import (
     AttendeeCreate,
     AttendeeResponse,
+    AttendeeSelfUpdate,
     AttendeeUpdate,
     AttendeeWithAssignmentResponse,
+    WalkInCreate,
 )
 
 router = APIRouter(prefix="/events/{event_id}/attendees", tags=["attendees"])
@@ -62,12 +66,19 @@ async def register_attendee(
     if event["status"] == "ended":
         raise HTTPException(status_code=409, detail="Event has already ended")
 
+    # Access-code gate (server-side enforcement — the verify-code endpoint is
+    # only a UX pre-check). Open events have no code and always pass. Skipped
+    # above for the dedupe path so already-registered users never get locked out.
+    row = body.model_dump(mode="json")
+    supplied_code = row.pop("access_code", None)  # never stored on the attendee
+    if not code_matches(fetch_access_code(db, event_id), supplied_code):
+        raise HTTPException(status_code=403, detail="Incorrect event code")
+
     # Registration happens AT the venue for the pilot — auto_arrive_on_register
     # (event config, default true) marks them arrived immediately so the
     # organizer doesn't tap "arrived" at the door for every person.
     auto_arrive = bool(event.get("auto_arrive_on_register", True))
 
-    row = body.model_dump(mode="json")
     row["event_id"] = event_id
     row["status"] = "arrived" if auto_arrive else "registered"
     row["user_id"] = user.id
@@ -82,6 +93,38 @@ async def register_attendee(
         event_id=event_id,
         entity_id=created["id"],
         metadata={"auto_arrived": auto_arrive},
+    )
+    return created
+
+
+@router.post("/walkin", response_model=AttendeeResponse, status_code=201)
+async def add_walkin(
+    event_id: str,
+    body: WalkInCreate,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Organizer adds a walk-in attendee (no app account). Event owner only.
+
+    Used from the people directory for someone who shows up without registering.
+    Marked `arrived` immediately (they're at the door) and has no `user_id`, so
+    they're seated like everyone else but have no live phone screen of their own.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+
+    row = body.model_dump(mode="json")
+    row["event_id"] = event_id
+    row["user_id"] = None
+    row["status"] = "arrived"
+    created = db.table("attendees").insert(row).execute().data[0]
+    record_audit(
+        db,
+        action="attendee.walkin_added",
+        entity_type="attendee",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=created["id"],
     )
     return created
 
@@ -109,6 +152,49 @@ async def get_my_registration(
     if not result.data:
         raise HTTPException(status_code=404, detail="Not registered for this event")
     return result.data[0]
+
+
+@router.patch("/me", response_model=AttendeeResponse)
+async def update_my_registration(
+    event_id: str,
+    body: AttendeeSelfUpdate,
+    user: AuthUser = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """An attendee edits their OWN profile (fix a typo'd WhatsApp, add interests).
+
+    Resolved from the JWT, so you can only ever edit yourself. Declared before
+    /{attendee_id} so 'me' isn't matched as an id. Status is intentionally not
+    editable here — only the organizer moves people between arrived/left.
+    """
+    fetch_event_or_404(db, event_id)
+    me = (
+        db.table("attendees")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("user_id", user.id)
+        .limit(1)
+        .execute()
+    )
+    if not me.data:
+        raise HTTPException(status_code=404, detail="Not registered for this event")
+    attendee = me.data[0]
+
+    changes = body.model_dump(exclude_none=True)
+    if not changes:
+        return attendee
+
+    updated = db.table("attendees").update(changes).eq("id", attendee["id"]).execute().data[0]
+    record_audit(
+        db,
+        action="attendee.profile_updated",
+        entity_type="attendee",
+        actor_user_id=user.id,
+        event_id=event_id,
+        entity_id=attendee["id"],
+        metadata={"fields": sorted(changes.keys())},
+    )
+    return updated
 
 
 @router.get("/{attendee_id}", response_model=AttendeeWithAssignmentResponse)

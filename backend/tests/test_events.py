@@ -1,7 +1,9 @@
 from tests.conftest import (
     ATTENDEE_AUTH,
+    ATTENDEE_USER_ID,
     AUTH,
     ORGANIZER_ID,
+    OTHER_ATTENDEE_USER_ID,
     OTHER_AUTH,
     make_assignment,
     make_attendee,
@@ -133,6 +135,8 @@ def test_analytics_empty_event(client, event):
         "total_attendees": 0,
         "rounds_completed": 0,
         "avg_unique_people_met": 0.0,
+        "total_likes": 0,
+        "total_matches": 0,
     }
 
 
@@ -163,3 +167,106 @@ def test_analytics_computes_unique_people_met(client, db, event):
     assert body["total_attendees"] == 4
     assert body["rounds_completed"] == 2
     assert body["avg_unique_people_met"] == 2.0
+
+
+# --- Access code gate + public stats (Step 7) ---
+
+def test_get_event_reports_requires_code(client):
+    """Open event -> requires_code false; coded event -> true, but the code itself never leaks."""
+    open_event = client.post("/events", json=EVENT_PAYLOAD, headers=AUTH).json()
+    assert open_event["requires_code"] is False
+    assert "access_code" not in open_event
+
+    coded = client.post("/events", json={**EVENT_PAYLOAD, "access_code": "MIXER"}, headers=AUTH).json()
+    assert coded["requires_code"] is True
+    assert "access_code" not in coded
+
+    public = client.get(f"/events/{coded['id']}").json()
+    assert public["requires_code"] is True
+    assert "access_code" not in public  # secret stays server-side
+
+
+def test_verify_code_is_case_insensitive_and_trimmed(client):
+    coded = client.post("/events", json={**EVENT_PAYLOAD, "access_code": "MIXER"}, headers=AUTH).json()
+    eid = coded["id"]
+    assert client.post(f"/events/{eid}/verify-code", json={"code": " mixer "}).json()["valid"] is True
+    assert client.post(f"/events/{eid}/verify-code", json={"code": "nope"}).json()["valid"] is False
+
+
+def test_verify_code_open_event_always_valid(client):
+    open_event = client.post("/events", json=EVENT_PAYLOAD, headers=AUTH).json()
+    assert client.post(f"/events/{open_event['id']}/verify-code", json={"code": ""}).json()["valid"] is True
+
+
+def test_update_event_can_set_and_clear_code(client):
+    event = client.post("/events", json=EVENT_PAYLOAD, headers=AUTH).json()
+    eid = event["id"]
+
+    set_resp = client.patch(f"/events/{eid}", json={"access_code": "OPENSESAME"}, headers=AUTH)
+    assert set_resp.json()["requires_code"] is True
+
+    clear_resp = client.patch(f"/events/{eid}", json={"access_code": ""}, headers=AUTH)
+    assert clear_resp.json()["requires_code"] is False
+
+
+def test_event_stats_counts_attendees(client, db, event):
+    eid = event["id"]
+    assert client.get(f"/events/{eid}/stats").json()["attendee_count"] == 0
+    make_attendee(db, eid, name="Asha")
+    make_attendee(db, eid, name="Ravi")
+    assert client.get(f"/events/{eid}/stats").json()["attendee_count"] == 2
+
+
+# --- Attendee home feed: GET /events (public list) ---
+
+def test_list_events_is_public_and_safe(client, db, event):
+    """No auth needed; only public-safe fields, no organizer config or PII."""
+    db.seed("event_access_codes", {"event_id": event["id"], "code": "MIXER"})
+    make_attendee(db, event["id"], name="Asha")
+
+    response = client.get("/events")
+    assert response.status_code == 200
+    [card] = response.json()
+    assert card["name"] == "Founder Meetup"
+    assert card["requires_code"] is True
+    assert card["attendee_count"] == 1
+    assert card["registered"] is False  # anonymous browser
+    # organizer-internal config never appears on the public card
+    assert "num_tables" not in card
+    assert "seats_per_table" not in card
+    assert "organizer_id" not in card
+
+
+def test_list_events_marks_registered_for_signed_in_caller(client, db, event):
+    # someone else registered (should NOT flip our flag) + the caller registered
+    make_attendee(db, event["id"], name="Ravi", user_id=OTHER_ATTENDEE_USER_ID)
+    make_attendee(db, event["id"], name="Asha", user_id=ATTENDEE_USER_ID)
+
+    anon = client.get("/events").json()[0]
+    assert anon["registered"] is False
+    assert anon["attendee_count"] == 2
+
+    mine = client.get("/events", headers=ATTENDEE_AUTH).json()[0]
+    assert mine["registered"] is True
+
+
+def test_list_events_sorted_soonest_first(client, db):
+    db.seed("events", {
+        "name": "Later", "date": "2026-08-01", "time": "18:00:00",
+        "location": "Hyderabad", "description": None, "num_tables": 5,
+        "seats_per_table": 4, "default_round_duration_seconds": 300,
+        "auto_arrive_on_register": True, "organizer_id": ORGANIZER_ID, "status": "upcoming",
+    })
+    db.seed("events", {
+        "name": "Sooner", "date": "2026-07-01", "time": "18:00:00",
+        "location": "Hyderabad", "description": None, "num_tables": 5,
+        "seats_per_table": 4, "default_round_duration_seconds": 300,
+        "auto_arrive_on_register": True, "organizer_id": ORGANIZER_ID, "status": "upcoming",
+    })
+
+    names = [e["name"] for e in client.get("/events").json()]
+    assert names == ["Sooner", "Later"]
+
+
+def test_list_events_empty(client):
+    assert client.get("/events").json() == []

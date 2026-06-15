@@ -32,6 +32,8 @@ CREATE TABLE attendees (
   looking_for      TEXT,
   linkedin_url     TEXT,
   whatsapp_number  TEXT,
+  avatar_url       TEXT,  -- OAuth (Google) profile photo, captured at registration; null = use initials
+  interests        TEXT[] NOT NULL DEFAULT '{}',  -- conversation-seed tags; shared ones highlighted on cards
   status           TEXT NOT NULL DEFAULT 'registered'
                      CHECK (status IN ('registered', 'arrived', 'left')),
   created_at       TIMESTAMPTZ DEFAULT NOW()
@@ -94,6 +96,40 @@ CREATE TABLE round_plans (
   created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Per-event registration code (Step 7): a short secret the organizer announces
+-- in the room; attendees enter it before the registration form unlocks. SECRET —
+-- its own table with NO RLS policies (service-role only), because the events
+-- table is anon-readable for the public landing page. No row = open event.
+CREATE TABLE event_access_codes (
+  event_id   UUID PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+  code       TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Connection likes (Step 7): an attendee "likes" a tablemate during a live round;
+-- surfaced in the post-event rolodex (mutual = a match). Private signals — its own
+-- table with NO RLS policies (service-role only), like the other secret tables.
+CREATE TABLE connection_likes (
+  id                 UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id           UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  liker_attendee_id  UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
+  liked_attendee_id  UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (event_id, liker_attendee_id, liked_attendee_id)
+);
+
+-- Connection notes (Step 7): a private one-liner an attendee jots about someone
+-- they met. Author-only — its own table with NO RLS policies (service-role only).
+CREATE TABLE connection_notes (
+  id                  UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id            UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  author_attendee_id  UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
+  target_attendee_id  UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
+  note                TEXT NOT NULL,
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (event_id, author_attendee_id, target_attendee_id)
+);
+
 -- Audit trail (Step 4): every state-changing action. metadata holds
 -- UUIDs/enums/counts only, never PII.
 CREATE TABLE audit_log (
@@ -118,6 +154,9 @@ ALTER TABLE table_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE icebreakers      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE round_drafts     ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE round_plans      ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
+ALTER TABLE event_access_codes ENABLE ROW LEVEL SECURITY; -- no policies: service-role only
+ALTER TABLE connection_likes ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
+ALTER TABLE connection_notes ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE audit_log        ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 
 -- SECURITY MODEL: all writes and all PII reads go through the FastAPI

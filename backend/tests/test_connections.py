@@ -68,6 +68,7 @@ def test_connections_empty_when_never_assigned(client, db, event):
     assert response.json() == {
         "total_people_met": 0,
         "rounds_count": 0,
+        "matches_count": 0,
         "connections": [],
     }
 

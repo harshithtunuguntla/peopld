@@ -66,6 +66,28 @@ async def get_connections(
     profiles = {a["id"]: a for a in attendees}
     my_tables = {(m["round_id"], m["table_number"]) for m in my_assignments}
 
+    # Likes both directions (one query each): who I liked, and who liked me.
+    likes = (
+        db.table("connection_likes").select("*").eq("event_id", event_id).execute().data or []
+    )
+    i_liked = {str(l["liked_attendee_id"]) for l in likes if str(l["liker_attendee_id"]) == str(attendee_id)}
+    liked_me = {str(l["liker_attendee_id"]) for l in likes if str(l["liked_attendee_id"]) == str(attendee_id)}
+
+    # My private notes about people, keyed by target. (One query.)
+    notes = (
+        db.table("connection_notes")
+        .select("target_attendee_id, note")
+        .eq("event_id", event_id)
+        .eq("author_attendee_id", str(attendee_id))
+        .execute()
+        .data
+        or []
+    )
+    notes_by_target = {str(n["target_attendee_id"]): n["note"] for n in notes}
+
+    # My interests, for highlighting what each connection and I have in common.
+    my_interest_set = {str(t).casefold() for t in (attendee.data[0].get("interests") or [])}
+
     entries: list[ConnectionEntry] = []
     people_met: set = set()
     for a in all_assignments:
@@ -76,14 +98,26 @@ async def get_connections(
         profile = profiles.get(a["attendee_id"])
         if not profile:
             continue
+        other_id = str(a["attendee_id"])
+        liked = other_id in i_liked
+        their_interests = [str(t) for t in (profile.get("interests") or [])]
+        shared = [t for t in their_interests if t.casefold() in my_interest_set]
         entries.append(
             ConnectionEntry(
                 attendee_id=a["attendee_id"],
                 name=profile["name"],
                 role=profile["role"],
+                looking_for=profile.get("looking_for"),
                 whatsapp_number=profile.get("whatsapp_number"),
+                linkedin_url=profile.get("linkedin_url"),
+                avatar_url=profile.get("avatar_url"),
+                interests=their_interests,
+                shared_interests=shared,
+                note=notes_by_target.get(other_id),
                 round_number=round_numbers.get(a["round_id"], 0),
                 table_number=a["table_number"],
+                liked=liked,
+                mutual=liked and other_id in liked_me,
             )
         )
         people_met.add(a["attendee_id"])
@@ -93,5 +127,6 @@ async def get_connections(
     return ConnectionsResponse(
         total_people_met=len(people_met),
         rounds_count=len({rid for rid, _ in my_tables}),
+        matches_count=sum(1 for e in entries if e.mutual),
         connections=entries,
     )

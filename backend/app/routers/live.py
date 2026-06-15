@@ -141,6 +141,20 @@ async def get_live_state(
                 .execute()
             ).data or []
             attendees_by_id = _event_attendees(db, event_id)
+
+            # Which tablemates have I already liked? (one query)
+            my_likes = (
+                db.table("connection_likes")
+                .select("liked_attendee_id")
+                .eq("event_id", event_id)
+                .eq("liker_attendee_id", str(attendee["id"]))
+                .execute()
+            ).data or []
+            liked_ids = {str(l["liked_attendee_id"]) for l in my_likes}
+
+            my_interests = [str(t) for t in (attendee.get("interests") or [])]
+            my_interest_set = {t.casefold() for t in my_interests}
+
             mates: list[Tablemate] = []
             for row in table_rows:
                 aid = str(row["attendee_id"])
@@ -148,8 +162,19 @@ async def get_live_state(
                     continue  # tablemates = everyone at the table except me
                 info = attendees_by_id.get(aid)
                 if info:
+                    their_interests = [str(t) for t in (info.get("interests") or [])]
+                    shared = [t for t in their_interests if t.casefold() in my_interest_set]
                     mates.append(
-                        Tablemate(attendee_id=aid, name=info["name"], role=info["role"])
+                        Tablemate(
+                            attendee_id=aid,
+                            name=info["name"],
+                            role=info["role"],
+                            looking_for=info.get("looking_for"),
+                            interests=their_interests,
+                            shared_interests=shared,
+                            avatar_url=info.get("avatar_url"),
+                            liked=aid in liked_ids,
+                        )
                     )
             mates.sort(key=lambda m: m.name.lower())
             seat_payload = LiveSeat(table_number=table_number, tablemates=mates)

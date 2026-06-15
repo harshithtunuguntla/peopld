@@ -23,6 +23,48 @@ def test_register_requires_auth(client, event):
     assert response.status_code == 401
 
 
+def test_register_captures_avatar_url(client, event):
+    payload = {**REGISTER_PAYLOAD, "avatar_url": "https://lh3.googleusercontent.com/a/x"}
+    response = client.post(f"/events/{event['id']}/attendees", json=payload, headers=ATTENDEE_AUTH)
+    assert response.status_code == 201
+    assert response.json()["avatar_url"] == "https://lh3.googleusercontent.com/a/x"
+
+
+def test_organizer_adds_walkin(client, event):
+    response = client.post(
+        f"/events/{event['id']}/attendees/walkin",
+        json={"name": "Walk In", "role": "Guest"},
+        headers=AUTH,
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["name"] == "Walk In"
+    assert body["status"] == "arrived"
+    assert body["user_id"] is None
+
+
+def test_walkin_requires_organizer(client, event):
+    assert (
+        client.post(
+            f"/events/{event['id']}/attendees/walkin",
+            json={"name": "X", "role": "Y"},
+            headers=ATTENDEE_AUTH,
+        ).status_code
+        == 403
+    )
+
+
+def test_walkin_wrong_organizer_forbidden(client, event):
+    assert (
+        client.post(
+            f"/events/{event['id']}/attendees/walkin",
+            json={"name": "X", "role": "Y"},
+            headers=OTHER_AUTH,
+        ).status_code
+        == 403
+    )
+
+
 def test_register_attendee_links_user_id(client, event):
     response = client.post(
         f"/events/{event['id']}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH
@@ -296,3 +338,37 @@ def test_wrong_organizer_cannot_modify_attendee(client, db, event):
         headers=OTHER_AUTH,
     )
     assert response.status_code == 403
+
+
+# --- Access-code gate enforcement (Step 7) ---
+
+def test_register_blocked_without_correct_code(client, db, event):
+    """Coded event: wrong/missing code -> 403; correct code -> 201; case-insensitive."""
+    db.seed("event_access_codes", {"event_id": event["id"], "code": "MIXER"})
+    eid = event["id"]
+
+    missing = client.post(f"/events/{eid}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH)
+    assert missing.status_code == 403
+
+    wrong = client.post(
+        f"/events/{eid}/attendees", json={**REGISTER_PAYLOAD, "access_code": "nope"}, headers=ATTENDEE_AUTH
+    )
+    assert wrong.status_code == 403
+
+    ok = client.post(
+        f"/events/{eid}/attendees", json={**REGISTER_PAYLOAD, "access_code": " mixer "}, headers=ATTENDEE_AUTH
+    )
+    assert ok.status_code == 201
+    assert "access_code" not in ok.json()  # never stored/echoed on the attendee
+
+
+def test_already_registered_skips_code_gate(client, db, event):
+    """A returning attendee reaches their record even without re-entering the code."""
+    db.seed("event_access_codes", {"event_id": event["id"], "code": "MIXER"})
+    eid = event["id"]
+    first = client.post(
+        f"/events/{eid}/attendees", json={**REGISTER_PAYLOAD, "access_code": "MIXER"}, headers=ATTENDEE_AUTH
+    )
+    assert first.status_code == 201
+    again = client.post(f"/events/{eid}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH)
+    assert again.status_code == 200  # dedupe, no code needed

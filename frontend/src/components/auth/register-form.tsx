@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
+import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
+import { LinkedInGlyph, WhatsAppGlyph } from "@/components/brand/glyphs";
 
 export interface RegisterValues {
   name: string;
@@ -13,6 +15,7 @@ export interface RegisterValues {
   looking_for: string;
   linkedin_url: string;
   whatsapp_number: string;
+  interests: string[];
 }
 
 type Errors = Partial<Record<keyof RegisterValues, string>>;
@@ -22,14 +25,19 @@ interface RegisterFormProps {
   busy?: boolean;
   /** Server-side error (e.g. event ended) surfaced above the submit button. */
   error?: string | null;
+  /** Pre-fill the name (e.g. from the Google identity) so people don't retype it. */
+  defaultName?: string;
 }
 
-const EMPTY: RegisterValues = { name: "", role: "", looking_for: "", linkedin_url: "", whatsapp_number: "" };
+const EMPTY: RegisterValues = { name: "", role: "", looking_for: "", linkedin_url: "", whatsapp_number: "", interests: [] };
 
 /** Attendee profile form. Owns its field state + client validation; emits clean
  * values to the parent, which maps them to the API and handles the request. */
-export function RegisterForm({ onSubmit, busy, error }: RegisterFormProps) {
-  const [values, setValues] = useState<RegisterValues>(EMPTY);
+export function RegisterForm({ onSubmit, busy, error, defaultName }: RegisterFormProps) {
+  const [values, setValues] = useState<RegisterValues>(() => ({
+    ...EMPTY,
+    name: defaultName?.trim() ?? "",
+  }));
   const [errors, setErrors] = useState<Errors>({});
 
   const set = (key: keyof RegisterValues) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -63,14 +71,15 @@ export function RegisterForm({ onSubmit, busy, error }: RegisterFormProps) {
       looking_for: values.looking_for.trim(),
       linkedin_url: values.linkedin_url.trim(),
       whatsapp_number: values.whatsapp_number.trim(),
+      interests: values.interests,
     });
   }
 
   return (
     <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-5">
       <header>
-        <h2 className="font-display text-xl text-cream">Set up your profile</h2>
-        <p className="mt-1 text-sm text-cream/55">This is what your tablemates will see at the event.</p>
+        <h2 className="font-display text-xl text-foreground">Set up your profile</h2>
+        <p className="mt-1 text-sm text-muted-foreground">This is what your tablemates will see at the event.</p>
       </header>
 
       <Field label="Full name" name="reg-name" required error={errors.name}>
@@ -96,6 +105,19 @@ export function RegisterForm({ onSubmit, busy, error }: RegisterFormProps) {
         )}
       </Field>
 
+      <Field label="Interests" name="reg-interests" hint="A few topics you love — shared ones light up at the table.">
+        {(p) => (
+          <TagInput
+            id={p.id}
+            aria-describedby={p["aria-describedby"]}
+            value={values.interests}
+            onChange={(next) => setValues((v) => ({ ...v, interests: next }))}
+            suggestions={INTEREST_SUGGESTIONS}
+            placeholder="AI, climate, hiring…"
+          />
+        )}
+      </Field>
+
       <Field label="LinkedIn" name="reg-linkedin_url" error={errors.linkedin_url}>
         {(p) => (
           <Input
@@ -103,6 +125,7 @@ export function RegisterForm({ onSubmit, busy, error }: RegisterFormProps) {
             type="url"
             inputMode="url"
             autoComplete="url"
+            startIcon={<LinkedInGlyph />}
             value={values.linkedin_url}
             onChange={set("linkedin_url")}
             placeholder="https://linkedin.com/in/you"
@@ -117,6 +140,7 @@ export function RegisterForm({ onSubmit, busy, error }: RegisterFormProps) {
             type="tel"
             inputMode="tel"
             autoComplete="tel"
+            startIcon={<WhatsAppGlyph />}
             value={values.whatsapp_number}
             onChange={set("whatsapp_number")}
             placeholder="+91 98765 43210"

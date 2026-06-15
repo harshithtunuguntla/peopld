@@ -58,18 +58,18 @@ export function SignInPanel({ nextPath }: { nextPath: string }) {
       {step === "choose" ? (
         <>
           <header className="text-center">
-            <h2 className="font-display text-xl text-cream">Sign in to continue</h2>
-            <p className="mt-1 text-sm text-cream/55">Quick and free — no password to remember.</p>
+            <h2 className="font-display text-xl text-foreground">Sign in to continue</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Quick and free — no password to remember.</p>
           </header>
 
-          <Button variant="paper" size="lg" onClick={signInWithGoogle} className="w-full gap-3">
+          <Button variant="default" size="lg" onClick={signInWithGoogle} className="w-full gap-3">
             <GoogleMark /> Continue with Google
           </Button>
 
-          <div className="flex items-center gap-3 text-xs text-cream/40">
-            <span className="h-px flex-1 bg-white/10" />
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="h-px flex-1 bg-border" />
             or
-            <span className="h-px flex-1 bg-white/10" />
+            <span className="h-px flex-1 bg-border" />
           </div>
 
           <form onSubmit={sendOtp} className="flex flex-col gap-4">
@@ -96,9 +96,9 @@ export function SignInPanel({ nextPath }: { nextPath: string }) {
       ) : (
         <form onSubmit={verifyOtp} className="flex flex-col gap-4">
           <header className="text-center">
-            <h2 className="font-display text-xl text-cream">Check your inbox</h2>
-            <p className="mt-1 text-sm text-cream/55">
-              We sent a 6-digit code to <span className="font-medium text-cream">{email}</span>.
+            <h2 className="font-display text-xl text-foreground">Check your inbox</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              We sent a 6-digit code to <span className="font-medium text-foreground">{email}</span>.
               Check spam if it&apos;s not there.
             </p>
           </header>
@@ -128,7 +128,7 @@ export function SignInPanel({ nextPath }: { nextPath: string }) {
               setCode("");
               setError(null);
             }}
-            className="inline-flex items-center justify-center gap-1.5 text-sm text-cream/55 transition-colors hover:text-cream"
+            className="inline-flex items-center justify-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="h-3.5 w-3.5" /> Use a different method
           </button>

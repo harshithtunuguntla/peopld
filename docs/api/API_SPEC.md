@@ -15,7 +15,8 @@
   `409` (conflict).
 - **IDs** are UUID strings. **Dates** ISO-8601.
 
-Pages covered so far: **Join / Register**.
+Pages covered so far: **Join / Register · Home · Live · Profile · Connections
+(rolodex) · Organizer (login, dashboard, people, control room)**.
 
 ---
 
@@ -40,6 +41,30 @@ collected as profile data instead.
 
 ## Events
 
+### `GET /events`
+
+The attendee **home feed** — every event, soonest first, for the dashboard.
+
+- **Why:** powers the personal home (`/home`): "Happening today" + "Upcoming" +
+  "Past" buckets. The list is public so the page renders before sign-in; the
+  per-caller `registered` flag is filled in once a token is present.
+- **Auth:** optional. Anonymous works (returns `registered: false` everywhere);
+  send the Bearer token to get the caller's own registration state.
+- **Response `200`** (`list[EventBrowseItem]`):
+  ```json
+  [{ "id": "uuid", "name": "Founders & Friends Summer Mixer",
+     "date": "2026-07-01", "time": "18:00:00", "location": "Hyderabad",
+     "status": "upcoming", "requires_code": true,
+     "attendee_count": 38, "registered": false }]
+  ```
+- **Safety:** public-safe fields only — **no** organizer config (capacity,
+  durations), **no** PII (just a count), and the access code is never exposed
+  (only the `requires_code` boolean). `registered` reflects the *caller's* own
+  state, never anyone else's.
+- **Pilot scope:** returns all events (one org / one event for the pilot; the
+  events row is already anon-readable). MVP will scope to invited/discoverable
+  events per tenant — see PRODUCT.md.
+
 ### `GET /events/{eventId}`
 
 Event details that power the join screen header ("You're joining X").
@@ -51,8 +76,34 @@ Event details that power the join screen header ("You're joining X").
   ```json
   { "id": "uuid", "name": "Founder Mixer", "date": "2026-06-14",
     "time": "18:30:00", "location": "The Garage, Hyderabad",
-    "organizer_id": "uuid", "status": "upcoming" }
+    "organizer_id": "uuid", "status": "upcoming",
+    "requires_code": true }
   ```
+- **`requires_code`** — does this event have an access code? The code value
+  **itself is never returned** (it's a secret in a service-role-only table). The
+  page uses this flag to decide whether to show the code gate before the form.
+- **Errors:** `404` event not found.
+
+### `GET /events/{eventId}/stats`
+
+Public, non-PII social proof for the registration header ("38 already inside").
+
+- **Why:** the join screen shows live momentum without exposing who's attending.
+- **Auth:** none (public). Returns a **count only** — names/contacts are never
+  client-readable.
+- **Response `200`** (`EventStats`): `{ "attendee_count": 38 }`.
+- **Errors:** `404` event not found.
+
+### `POST /events/{eventId}/verify-code`
+
+Pre-check an access code so the form can unlock before submit.
+
+- **Why:** lets the code gate give instant feedback. This is a **UX convenience,
+  not the security boundary** — registration re-checks the code server-side.
+- **Auth:** none (public).
+- **Request body** (`VerifyCodeRequest`): `{ "code": "MIXER" }` (trimmed,
+  case-insensitive). Open events (no code) always return valid.
+- **Response `200`** (`VerifyCodeResponse`): `{ "valid": true }`.
 - **Errors:** `404` event not found.
 
 ---
@@ -82,18 +133,197 @@ Register the signed-in user as an attendee (create their profile).
   { "name": "Maya Sharma", "role": "Founder at Acme",
     "looking_for": "investors, designers",   // optional, null if blank
     "linkedin_url": "https://…",              // optional
-    "whatsapp_number": "+91…" }               // optional
+    "whatsapp_number": "+91…",                // optional
+    "interests": ["AI", "Climate"],           // optional tags; shared ones highlight at the table
+    "access_code": "MIXER" }                  // required iff event.requires_code
   ```
 - **Responses:**
   - `201` created (`AttendeeResponse`).
   - `200` **already registered** — returns the existing record (idempotent
-    re-register; same shape). Frontend treats both as success.
-- **Errors:** `409` event has already ended; `404` event not found.
+    re-register; same shape). Frontend treats both as success. The code gate is
+    **skipped** on this path, so returning attendees are never locked out.
+- **Errors:** `403` incorrect/missing event code; `409` event has already ended;
+  `404` event not found.
+- **Notes:** `access_code` is verified server-side (case-insensitive) and is
+  **never stored** on the attendee. This is the real enforcement; `verify-code`
+  is only a pre-check.
 - **Notes:** if the event has `auto_arrive_on_register` (default **true**), the
   new attendee is marked `arrived` immediately — registration happens at the
   venue for the pilot.
 
+### `PATCH /events/{eventId}/attendees/me`
+
+The attendee edits their **own** profile (fix a typo'd WhatsApp, add interests).
+
+- **Why:** registration captured contact + interests once with no way to correct
+  them; the rolodex depends on those fields being right.
+- **Auth:** required (attendee — resolved from JWT, so you can only edit yourself).
+- **Request body** (`AttendeeSelfUpdate`, all optional): `name`, `role`,
+  `looking_for`, `linkedin_url`, `whatsapp_number`, `interests`. Status is **not**
+  editable here — only the organizer moves people between arrived/left.
+- **Response `200`** (`AttendeeResponse`): the updated record.
+- **Errors:** `404` not registered; `401` no/expired token.
+
 ---
 
-_Append the next page's endpoints below as we integrate them (Waiting room → live
-state; Live → icebreakers; Connections → rolodex; Organizer → control)._
+## Live (attendee dashboard)
+
+### `GET /events/{eventId}/live`
+
+The single authoritative snapshot that powers the attendee Live Dashboard.
+
+- **Why:** *Realtime is a doorbell, REST is the source of truth* (REQ-RT-01). The
+  phone fetches this on load, refresh, websocket reconnect, tab wake, network
+  regain, and on every realtime ping — same code path — so recovery is one call.
+  A mid-round reload reconstructs the table from here, not from client/URL state.
+- **Auth:** required (attendee). **The attendee is resolved from the JWT** — no
+  id in the URL, so there is no IDOR surface (you only ever see your own state).
+- **Response `200`** (`LiveStateResponse`):
+  ```json
+  { "server_time": "2026-07-01T18:05:00Z",   // for client clock-skew correction
+    "event_status": "active",
+    "phase": "in_round",                       // not_started | in_round | between_rounds | ended
+    "attendee_id": "uuid", "attendee_status": "arrived",
+    "seated": true,
+    "round": { "round_id": "uuid", "round_number": 3, "status": "active",
+               "started_at": "…", "duration_seconds": 300, "ends_at": "…" },
+    "seat": { "table_number": 4,
+              "tablemates": [ { "attendee_id": "uuid", "name": "Asha", "role": "Founder" } ] },
+    "icebreaker": { "question_text": "…", "target_attendee_id": "uuid" } }
+  ```
+- **Notes:** `round`/`seat`/`icebreaker` are null outside their phase; `icebreaker`
+  may be null briefly while it generates async (the UI shows a "crafting…" state).
+  Tablemates carry **name + role + `avatar_url` + `liked`** (whether *you* have
+  liked them), plus conversation seeds **`looking_for`, `interests`, and
+  `shared_interests`** (tags you both picked) — but never contact info (that's the
+  rolodex). The countdown is derived locally from `ends_at` + `server_time`.
+- **Errors:** `404` event not found **or** caller not registered (frontend routes
+  the latter to the register page); `401` no/expired token.
+
+---
+
+## Likes (the ❤️ that becomes a "match")
+
+One-directional, idempotent likes captured live at the table. Stored in
+`connection_likes`, which has **RLS on with no policies → service-role only**, so
+nobody can read who-liked-whom from the client. Surfaced back only as flags on
+*your own* live snapshot (`liked`) and rolodex (`liked` / `mutual`). Mutual like = a
+**match**.
+
+### `POST /events/{eventId}/likes`
+- **Auth:** required (attendee — liker resolved from JWT, never the body).
+- **Body:** `{ "target_attendee_id": "uuid" }`
+- **Response `201`:** `{ "liked": true }`. Idempotent — liking twice is a no-op `201`.
+- **Errors:** `400` self-like; `404` caller not registered **or** target unknown.
+
+### `DELETE /events/{eventId}/likes/{targetAttendeeId}`
+- **Auth:** required (attendee). Idempotent — unliking what you never liked still `200`.
+- **Response `200`:** `{ "liked": false }`.
+
+---
+
+## Notes (private memory jogger)
+
+A one-line private note an attendee jots about someone they met ("intro to Priya
+re: hiring"). Author-private, stored in `connection_notes` (**RLS on, no policies
+→ service-role only**). Surfaced back only in the author's own rolodex.
+
+### `PUT /events/{eventId}/notes/{targetAttendeeId}`
+- **Auth:** required (attendee — author resolved from JWT).
+- **Body** (`NoteRequest`): `{ "note": "intro to Priya re: hiring" }` (≤500 chars).
+  Empty/blank text **clears** the note (PUT stays idempotent).
+- **Response `200`** (`NoteResponse`): `{ "target_attendee_id": "uuid", "note": "…" }`
+  (`note` is `null` when cleared).
+- **Errors:** `404` caller not registered **or** target unknown.
+
+### `DELETE /events/{eventId}/notes/{targetAttendeeId}`
+- **Auth:** required (attendee). Idempotent — deleting a missing note still `200`.
+- **Response `200`:** `{ "target_attendee_id": "uuid", "note": null }`.
+
+---
+
+## Connections (post-event rolodex)
+
+### `GET /events/{eventId}/connections`
+Everyone you shared a table with, with how to reach them — unlocked once the event
+(or your rounds) is done.
+
+- **Auth:** required (attendee — resolved from JWT).
+- **Response `200`** (`ConnectionsResponse`): `{ "connections": [ … ], "matches_count": 0 }`
+  where each entry carries `attendee_id`, `name`, `role`, `looking_for`,
+  `linkedin_url`, `whatsapp_number`, `avatar_url`, `interests`, **`shared_interests`**
+  (tags you both picked), **`note`** (your private note about them, or null),
+  `round_number`, **`liked`** (you liked them), **`mutual`** (you liked each other =
+  a match). One entry **per shared round** (a repeat pairing appears twice — the
+  frontend groups by person).
+- **Notes:** `matches_count` = number of distinct mutual likes. Contact fields are
+  only ever returned here (and only for people you actually met).
+
+---
+
+## Organizer — People directory
+
+### `GET /events/{eventId}/attendees`
+Full roster **including contact info** — event owner only (`403` otherwise).
+- **Response `200`:** `AttendeeResponse[]` (`id, name, role, looking_for,
+  linkedin_url, whatsapp_number, interests, avatar_url, status, created_at`). The
+  console offers a **CSV export** (built client-side) and a **QR invite** from this list.
+
+### `POST /events/{eventId}/attendees/walkin`
+Add someone at the door with no account (organizer only). They are seated like
+everyone else (`user_id` is null, `status` = `arrived`).
+- **Body:** `{ "name", "role", "looking_for"?, "linkedin_url"?, "whatsapp_number"?, "interests"? }`
+- **Response `201`:** `AttendeeResponse`.
+
+### `PATCH /events/{eventId}/attendees/{attendeeId}`
+Move someone between `registered` / `arrived` / `left` (organizer only). Only
+`arrived` attendees are seated by the planner.
+- **Body:** `{ "status": "arrived" }` → **Response `200`:** `AttendeeResponse`.
+
+---
+
+## Organizer — Control room (rounds)
+
+The console is a state machine: **idle → draft (preview) → active → end/cancel**.
+All endpoints are event-owner only. Drafts live in `round_drafts` (no client RLS,
+not in the realtime publication) so phones see nothing until **publish**.
+
+| Call | What | Response |
+|---|---|---|
+| `GET /events/{id}/rounds/current` | Active round + assignments (powers the live grid). `404` if none. | `RoundWithAssignmentsResponse` |
+| `GET /events/{id}/rounds/draft` | The pending preview (e.g. after reload). `404` if none. | `RoundDraftResponse` |
+| `POST /events/{id}/rounds/start` | Generate the next seating **draft** to preview. `409` if a round/draft already exists. | `201 RoundDraftResponse` |
+| `POST /events/{id}/rounds/regenerate` | Re-plan & replace the pending draft. `404` if no draft. | `RoundDraftResponse` |
+| `POST /events/{id}/rounds/publish` | Make the draft live (Realtime fires; icebreakers generate async). Idempotent on retry; `409` if attendance changed since preview. | `201 RoundWithAssignmentsResponse` |
+| `POST /events/{id}/rounds/end` | Complete the active round (kept in history → connections). | `RoundResponse` |
+| `POST /events/{id}/rounds/cancel` | **Erase** the active round + assignments + icebreakers (bad seating leaves no trace). | `RoundCancelResponse` |
+| `POST /events/{id}/end` | End the whole event; completes any active round; unlocks connections. | `EventResponse` |
+
+- **Draft shape (`RoundDraftResponse`):** `{ id, round_number, duration_seconds,
+  arrived_count, table_count, repeat_pairings, assignments: [{ attendee_id, name,
+  table_number }] }`. `repeat_pairings` is the trust signal shown as a warning.
+- **Active shape (`RoundWithAssignmentsResponse`):** round fields + `assignments:
+  [{ id, round_id, event_id, attendee_id, table_number }]` (**no names** — the
+  console joins via `GET /events/{id}/attendees` for names + avatars).
+- **404 vs error:** the console branches on `ApiError.status === 404` to tell
+  "no round/draft yet" apart from real failures.
+
+---
+
+## Organizer — Analytics & live pulse
+
+### `GET /events/{eventId}/live-stats`
+Live "room pulse" the control room polls (~12s) during the event — event owner only.
+- **Response `200`** (`LiveStats`): `{ registered, arrived, seated_now, not_seated,
+  likes_count, matches_count, active_round_number }`. `seated_now`/`active_round_number`
+  reflect the active round (0/null if none).
+
+### `GET /events/{eventId}/analytics`
+Post-event summary (event owner only), shown on the "wrapped" screen.
+- **Response `200`** (`EventAnalytics`): `{ total_attendees, rounds_completed,
+  avg_unique_people_met, total_likes, total_matches }`. A match is counted once
+  per pair.
+
+---
+
+_Append the next page's endpoints below as we integrate them._

@@ -97,6 +97,29 @@ passes, and round chips all use it.
 (`FILL_BG`, `FILL_FG`, `ACCENT_TEXT`). This lets content modules pick a color by
 token and keeps `bg-${dynamic}` strings and hex out of components.
 
+### 1.5 Two themes, one centralized switch (non-negotiable)
+
+The product has **exactly two themes**, both defined once as semantic HSL tokens
+in `globals.css` — `:root` = **light**, `.dark` = **dark**:
+
+| Theme | Where | How it's applied |
+|---|---|---|
+| **Light** | The **marketing landing only**. It is **locked** — no theme switching, ever. | Default (`:root`). Landing components may use brand classes directly (`bg-paper`, `text-ink`). |
+| **Dark** | **Every other surface** (attendee app, organizer app) — the **default** for the whole product outside the landing. | The `dark` class is applied **once** per app route segment: `app/event/layout.tsx`, `app/organizer/layout.tsx`. |
+
+**The rule:** outside the locked landing, components must style with **semantic
+tokens** (`bg-background`, `text-foreground`, `text-muted-foreground`, `bg-card`,
+`border-border`, `bg-primary`, `bg-accent`, `bg-secondary`, `bg-muted`, `ring-ring`,
+`destructive`) — **never** hardcoded `text-cream` / `bg-ink-950` / `border-white/10`
+etc. Flip the theme in one place (the segment layout's `dark` class) and the entire
+subtree adapts. This is why `Button`'s `default`/`accent`/`secondary`/`outline`
+variants are token-driven (one variant, both themes); only the landing-scoped
+`ghost` is light-bound.
+
+Why centralize: a single switch point means a future theme toggle, a per-event
+brand color, or an a11y high-contrast mode is a token change — not a hunt-and-
+replace across every component. Hardcoded surface colors are treated as bugs.
+
 ---
 
 ## 2. Light vs dark (where each lives)
@@ -206,25 +229,38 @@ guard via framer's `useReducedMotion()` or `prefersReducedMotion()`
 
 Reusable building blocks in `src/components/`. Typed props, zero baked-in content.
 
-**`ui/`** — `button` (CVA pill: variants default/accent/outline/ghost/paper +
-dark variants; `buttonVariants` to style a `<Link>`). `Input`, `Textarea`,
-`Field` — token-driven form primitives that resolve to light **or** dark variants
-automatically via semantic shadcn tokens (`bg-secondary`, `border-input`,
-`text-foreground`), so the same controls work on the organizer (light) and
-attendee (dark) surfaces. `Field` owns the label↔control wiring, optional hint,
-inline error placement, and ARIA (`aria-invalid`, `aria-describedby`,
-`role="alert"`) via a render-prop.
+**`ui/`** — `button` (CVA pill; token-driven variants default/accent/secondary/
+outline that **flip with the theme**, plus landing-scoped `ghost`; `buttonVariants`
+to style a `<Link>`). `Input`, `Textarea`, `Field` — token-driven form primitives
+that resolve to light **or** dark automatically via semantic shadcn tokens
+(`bg-secondary`, `border-input`, `text-foreground`), so the same controls work on
+the organizer (light) and attendee (dark) surfaces. `Input` accepts an optional
+`startIcon` (leading glyph slot, e.g. a brand mark). `Field` owns the
+label↔control wiring, optional hint, inline error placement, and ARIA
+(`aria-invalid`, `aria-describedby`, `role="alert"`) via a render-prop.
 
-**`auth/`** — onboarding building blocks: `AuthShell` (the branded dark backdrop
-for every onboarding screen — applies the `dark` token context, aurora + grid,
-centred card, optional event-context header), `SignInPanel` (Google + email-OTP,
-wired to Supabase Auth), `RegisterForm` (attendee profile form; owns its state +
-client validation, emits clean values).
+**`auth/`** — onboarding building blocks: `AuthShell` (branded backdrop for every
+onboarding screen, mirroring the "01 Join" app scene — amber `Wordmark` top-left,
+big editorial event title with the final word in `ember`, location line,
+decorative social proof; aurora + grid; content card; inherits `dark` from the
+route-segment layout), `SignInPanel` (Google + email-OTP, wired to Supabase Auth),
+`RegisterForm` (attendee profile form; owns state + client validation; LinkedIn/
+WhatsApp fields carry brand glyphs via `startIcon`), `AccessCodeGate` (single
+uppercase code field gating registration behind the organizer-announced event
+code; verifies via `POST /verify-code`, enforced again server-side).
 
-**`brand/`** — `Logo`, `Avatar`, `AvatarStack`, `SectionLabel`, `MarqueeStrip`,
-`StatCard`, `IcebreakerCard`, `BoardingPass` (dark app context), `HeroBoardingPass`
-(fluid light hero), `AIGiftCard`, `PhoneFrame` (marketing only), plus the motion
-primitives in §5.
+**`brand/`** — `Logo` (round coral-dot mark, **landing**), `Wordmark` (ember tile +
+"Peopld", **app headers** — distinct from `Logo`), `glyphs` (`LinkedInGlyph`,
+`WhatsAppGlyph` — official third-party marks), `Avatar`, `AvatarStack`,
+`SectionLabel`, `MarqueeStrip`, `StatCard`, `IcebreakerCard`, `BoardingPass` (dark
+app context), `HeroBoardingPass` (fluid light hero), `AIGiftCard`, `PhoneFrame`
+(marketing only), plus the motion primitives in §5.
+
+> **Brand-glyph hex exception:** third-party brand marks (`GoogleMark`,
+> `LinkedInGlyph`, `WhatsAppGlyph`) carry their **official** hex (#0A66C2,
+> #25D366, …) — a brand asset must use its real color to be recognizable. This is
+> the *only* sanctioned place for a raw hex literal in a component; everything
+> else reads a token (§1.1).
 
 **`landing/`** — section components: `LandingNav`, `Hero`, `LogoStrip`,
 `ProblemSection`, `HowItWorks`, `ScenesGallery` (+ `scenes.tsx` preview screens),

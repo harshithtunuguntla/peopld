@@ -17,6 +17,7 @@ class EventCreate(BaseModel):
     default_round_duration_seconds: int = Field(default=300, gt=0)
     auto_arrive_on_register: bool = True  # on-site registration marks people arrived
     target_rounds: Optional[int] = Field(default=None, ge=1)  # intended round count (planning horizon)
+    access_code: Optional[str] = None  # secret registration gate; None = open event. Stored in event_access_codes, never echoed back.
 
 
 class EventUpdate(BaseModel):
@@ -27,6 +28,7 @@ class EventUpdate(BaseModel):
     default_round_duration_seconds: Optional[int] = Field(default=None, gt=0)
     auto_arrive_on_register: Optional[bool] = None
     target_rounds: Optional[int] = Field(default=None, ge=1)
+    access_code: Optional[str] = None  # set "" to clear the gate, a value to (re)set it
 
 
 class EventResponse(BaseModel):
@@ -44,6 +46,37 @@ class EventResponse(BaseModel):
     organizer_id: UUID
     status: Literal["upcoming", "active", "ended"]
     created_at: datetime
+    requires_code: bool = False  # derived: does this event have an access code? (the code itself is never sent)
+
+
+class EventStats(BaseModel):
+    """Public, non-PII social-proof counts for the registration page."""
+    attendee_count: int
+
+
+class EventBrowseItem(BaseModel):
+    """A card on the attendee home dashboard. Public-safe fields only — no
+    organizer-internal config (capacity, durations) and no PII. `registered` is
+    set only when the request carries a valid token (it's that caller's own
+    state); anonymous browsers always see false.
+    """
+    id: UUID
+    name: str
+    date: date
+    time: time
+    location: str
+    status: Literal["upcoming", "active", "ended"]
+    requires_code: bool = False
+    attendee_count: int = 0
+    registered: bool = False  # does the signed-in caller already have a registration here?
+
+
+class VerifyCodeRequest(BaseModel):
+    code: str
+
+
+class VerifyCodeResponse(BaseModel):
+    valid: bool
 
 
 # --- Attendee ---
@@ -54,10 +87,35 @@ class AttendeeCreate(BaseModel):
     looking_for: Optional[str] = None
     linkedin_url: Optional[str] = None
     whatsapp_number: Optional[str] = None
+    interests: list[str] = []  # conversation-seed tags; shared ones highlight on cards
+    avatar_url: Optional[str] = None  # OAuth profile photo, captured client-side at registration
+    access_code: Optional[str] = None  # required iff the event has one; verified server-side, not stored on the attendee
+
+
+class WalkInCreate(BaseModel):
+    """Organizer-added attendee (a walk-in with no app account). No access code,
+    no avatar — just enough to seat them."""
+    name: str
+    role: str
+    looking_for: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    whatsapp_number: Optional[str] = None
+    interests: list[str] = []
 
 
 class AttendeeUpdate(BaseModel):
     status: Optional[Literal["registered", "arrived", "left"]] = None
+
+
+class AttendeeSelfUpdate(BaseModel):
+    """An attendee editing their OWN profile (PATCH /attendees/me). Status is not
+    here on purpose — only the organizer moves people between arrived/left."""
+    name: Optional[str] = None
+    role: Optional[str] = None
+    looking_for: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    whatsapp_number: Optional[str] = None
+    interests: Optional[list[str]] = None
 
 
 class AttendeeResponse(BaseModel):
@@ -69,6 +127,8 @@ class AttendeeResponse(BaseModel):
     looking_for: Optional[str]
     linkedin_url: Optional[str]
     whatsapp_number: Optional[str]
+    interests: list[str] = []
+    avatar_url: Optional[str] = None
     status: Literal["registered", "arrived", "left"]
     created_at: datetime
 
@@ -140,11 +200,19 @@ class RoundDraftResponse(BaseModel):
 # --- Live state (Step 5 — Realtime / REQ-RT-01 recovery snapshot) ---
 
 class Tablemate(BaseModel):
-    """A person at your table this round. Name + role ONLY — contact details
-    (WhatsApp/LinkedIn) belong to the post-event rolodex, never the live path."""
+    """A person at your table this round. Name + role + avatar + conversation
+    seeds (interests / looking_for) — but NO contact details (WhatsApp/LinkedIn),
+    which belong to the post-event rolodex, never the live path. `liked` is
+    whether *I* (the caller) have liked this person; `shared_interests` are tags
+    we both picked, to break the ice."""
     attendee_id: UUID
     name: str
     role: str
+    looking_for: Optional[str] = None
+    interests: list[str] = []
+    shared_interests: list[str] = []
+    avatar_url: Optional[str] = None
+    liked: bool = False
 
 
 class LiveRound(BaseModel):
@@ -203,15 +271,45 @@ class ConnectionEntry(BaseModel):
     attendee_id: UUID
     name: str
     role: str
+    looking_for: Optional[str] = None
     whatsapp_number: Optional[str]
+    linkedin_url: Optional[str] = None
+    avatar_url: Optional[str] = None
+    interests: list[str] = []
+    shared_interests: list[str] = []  # tags the caller and this person both picked
+    note: Optional[str] = None        # the caller's private note about this person
     round_number: int
     table_number: int
+    liked: bool = False   # I liked them
+    mutual: bool = False  # ...and they liked me back → a match
 
 
 class ConnectionsResponse(BaseModel):
     total_people_met: int
     rounds_count: int
+    matches_count: int = 0  # mutual likes
     connections: list[ConnectionEntry]
+
+
+# --- Likes ---
+
+class LikeRequest(BaseModel):
+    target_attendee_id: UUID
+
+
+class LikeResponse(BaseModel):
+    liked: bool
+
+
+# --- Connection notes (private memory jogger about someone you met) ---
+
+class NoteRequest(BaseModel):
+    note: str
+
+
+class NoteResponse(BaseModel):
+    target_attendee_id: UUID
+    note: Optional[str] = None  # null after a delete / when cleared
 
 
 # --- Analytics ---
@@ -220,3 +318,17 @@ class EventAnalytics(BaseModel):
     total_attendees: int
     rounds_completed: int
     avg_unique_people_met: float
+    total_likes: int = 0     # one-directional likes cast across the whole event
+    total_matches: int = 0   # mutual likes (counted once per pair)
+
+
+# --- Live stats (organizer "room pulse" during the event) ---
+
+class LiveStats(BaseModel):
+    registered: int
+    arrived: int
+    seated_now: int       # people with a seat in the active round (0 if none active)
+    not_seated: int       # arrived but without a seat this round
+    likes_count: int      # likes cast so far
+    matches_count: int    # mutual likes so far (per pair)
+    active_round_number: Optional[int] = None

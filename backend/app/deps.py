@@ -47,6 +47,24 @@ async def get_current_user(
     return AuthUser(id=str(user.id), email=user.email, role=role)
 
 
+async def get_optional_user(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    db: Client = Depends(get_supabase),
+) -> AuthUser | None:
+    """Like get_current_user, but never raises — returns None when there's no
+    valid token. For public endpoints that ENRICH their response when signed in
+    (e.g. the events list annotating which ones you're registered for) but must
+    still work for anonymous browsers.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    try:
+        return await get_current_user(request, authorization, db)
+    except HTTPException:
+        return None
+
+
 async def get_current_organizer_id(
     user: AuthUser = Depends(get_current_user),
 ) -> str:
@@ -66,3 +84,43 @@ def fetch_event_or_404(db: Client, event_id: str) -> dict:
 def require_event_owner(event: dict, organizer_id: str) -> None:
     if str(event["organizer_id"]) != str(organizer_id):
         raise HTTPException(status_code=403, detail="Not the organizer of this event")
+
+
+def fetch_access_code(db: Client, event_id: str) -> str | None:
+    """The event's secret registration code, or None if the event is open.
+
+    Read with the service-role key only — event_access_codes has no RLS policies,
+    so attendee phones can never reach this value.
+    """
+    result = (
+        db.table("event_access_codes")
+        .select("code")
+        .eq("event_id", event_id)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0]["code"] if result.data else None
+
+
+def fetch_my_attendee(db: Client, event_id: str, user_id: str) -> dict | None:
+    """The caller's own attendee row for this event, or None if not registered."""
+    res = (
+        db.table("attendees")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+def code_matches(required: str | None, supplied: str | None) -> bool:
+    """True if `supplied` unlocks the gate. Open events (no code) always pass.
+
+    Trimmed + case-insensitive, so 'mixer', ' MIXER ' and 'Mixer' all match.
+    """
+    required = (required or "").strip()
+    if not required:
+        return True
+    return (supplied or "").strip().casefold() == required.casefold()

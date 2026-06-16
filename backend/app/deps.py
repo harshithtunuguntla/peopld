@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import jwt
 from jwt import PyJWKClient
 from fastapi import Depends, Header, HTTPException, Request
+from supabase import Client
 
 from app.config import settings
 

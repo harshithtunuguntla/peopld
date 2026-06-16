@@ -1,11 +1,32 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Literal
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, Literal, List
 from datetime import date, time, datetime
 from datetime import date as DateType, time as TimeType  # aliases for models that also have date/time FIELDS (avoids name shadowing)
 from uuid import UUID
 
 
 # --- Event ---
+
+# Round-agenda guardrails: a theme is a short label, and the agenda is a handful
+# of rounds — not free-form storage. Keep both bounded.
+ROUND_TOPIC_MAX_LEN = 80
+ROUND_TOPICS_MAX = 24
+
+
+def normalize_round_topics(value: Optional[List[str]]) -> Optional[List[str]]:
+    """Trim each theme, cap length/count, and drop trailing blanks.
+
+    Positions matter (index i = round i+1), so an interior "" is preserved as
+    "use the default name for this round" — only trailing blanks are dropped so a
+    fully-default agenda stores cleanly as []. None passes through unchanged so
+    EventUpdate can leave the agenda untouched (exclude_none).
+    """
+    if value is None:
+        return None
+    cleaned = [(t or "").strip()[:ROUND_TOPIC_MAX_LEN] for t in value[:ROUND_TOPICS_MAX]]
+    while cleaned and not cleaned[-1]:
+        cleaned.pop()
+    return cleaned
 
 class EventCreate(BaseModel):
     name: str
@@ -18,7 +39,13 @@ class EventCreate(BaseModel):
     default_round_duration_seconds: int = Field(default=300, gt=0)
     auto_arrive_on_register: bool = True  # on-site registration marks people arrived
     target_rounds: Optional[int] = Field(default=None, ge=1)  # intended round count (planning horizon)
+    round_topics: List[str] = Field(default_factory=list)  # organizer-authored agenda; index i = round i+1's theme
     access_code: Optional[str] = None  # secret registration gate; None = open event. Stored in event_access_codes, never echoed back.
+
+    @field_validator("round_topics")
+    @classmethod
+    def _clean_topics(cls, v: List[str]) -> List[str]:
+        return normalize_round_topics(v) or []
 
 
 class EventUpdate(BaseModel):
@@ -34,7 +61,13 @@ class EventUpdate(BaseModel):
     default_round_duration_seconds: Optional[int] = Field(default=None, gt=0)
     auto_arrive_on_register: Optional[bool] = None
     target_rounds: Optional[int] = Field(default=None, ge=1)
+    round_topics: Optional[List[str]] = None  # None = leave the agenda untouched; [] clears it to defaults
     access_code: Optional[str] = None  # set "" to clear the gate, a value to (re)set it
+
+    @field_validator("round_topics")
+    @classmethod
+    def _clean_topics(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        return normalize_round_topics(v)
 
 
 class EventResponse(BaseModel):
@@ -49,6 +82,7 @@ class EventResponse(BaseModel):
     default_round_duration_seconds: int
     auto_arrive_on_register: bool
     target_rounds: Optional[int] = None
+    round_topics: List[str] = Field(default_factory=list)  # organizer-authored agenda (empty = canonical defaults)
     organizer_id: UUID
     status: Literal["upcoming", "active", "ended"]
     created_at: datetime
@@ -394,6 +428,7 @@ class LiveStateResponse(BaseModel):
     attendee_status: Literal["registered", "arrived", "left"]
     target_rounds: Optional[int] = None  # planned rounds → drives the agenda preview
     round_seconds: int  # default round duration → "N rounds · M min"
+    round_topics: List[str] = Field(default_factory=list)  # organizer-authored agenda; index i = round i+1's theme
     seated: bool  # false during a round = no table for you (arrived late / not arrived)
     roster: WaitingRoster  # who's already in the room (waiting-room social proof)
     round: Optional[LiveRound] = None

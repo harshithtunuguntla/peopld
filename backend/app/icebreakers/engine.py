@@ -122,7 +122,8 @@ def _parse_llm_array(raw: str, n: int) -> dict[int, tuple[int, str]]:
 
 
 def _questions_for_table(
-    roster: list[dict], client: LLMClient, histories: dict[int, list[str]] | None = None
+    roster: list[dict], client: LLMClient, histories: dict[int, list[str]] | None = None,
+    theme: str | None = None,
 ) -> list[tuple[int, int, str, str]]:
     """Return (recipient_idx, target_idx, question, source) for every person.
 
@@ -138,7 +139,7 @@ def _questions_for_table(
         try:
             raw = client.complete(
                 system=prompts.SYSTEM_PROMPT,
-                user=prompts.build_user_prompt(roster, histories),
+                user=prompts.build_user_prompt(roster, histories, theme),
                 prefill=prompts.JSON_PREFILL,
                 max_tokens=settings.icebreaker_max_tokens,
                 temperature=settings.icebreaker_temperature,
@@ -171,6 +172,29 @@ def _questions_for_table(
 def _histories_for_roster(db: Client, roster: list[dict]) -> dict[int, list[str]]:
     """{person index -> their prior question_texts} for anti-repetition."""
     return {i + 1: _recipient_history(db, p["id"]) for i, p in enumerate(roster)}
+
+
+def _round_theme(db: Client, event_id: str, round_id: str) -> str | None:
+    """The organizer-authored topic for this round, or None.
+
+    Maps the round's number (1-based) onto the event's round_topics array
+    (index i = round i+1). Best-effort: any missing/blank entry means "no theme",
+    and the icebreakers fall back to their normal role-and-goal questions.
+    """
+    rounds = (
+        db.table("rounds").select("*").eq("id", round_id).limit(1).execute().data or []
+    )
+    if not rounds:
+        return None
+    number = rounds[0].get("round_number")
+    events = (
+        db.table("events").select("*").eq("id", event_id).limit(1).execute().data or []
+    )
+    topics = (events[0].get("round_topics") if events else None) or []
+    if not isinstance(number, int) or not (1 <= number <= len(topics)):
+        return None
+    theme = (topics[number - 1] or "").strip()
+    return theme or None
 
 
 def _rows_for_table(
@@ -211,6 +235,7 @@ def generate_for_round(db: Client, event_id: str, round_id: str, *, client: LLMC
         }
         by_id = _attendees_by_id(db, event_id)
         tables = _tables_for_round(db, round_id, by_id)
+        theme = _round_theme(db, event_id, round_id)
         pending = {t: roster for t, roster in tables.items() if t not in done_tables}
         if not pending:
             logger.info("icebreakers already generated — skipping", extra={"event_id": event_id})
@@ -226,7 +251,7 @@ def generate_for_round(db: Client, event_id: str, round_id: str, *, client: LLMC
                 continue
             started = time.monotonic()
             histories = _histories_for_roster(db, roster)
-            questions = _questions_for_table(roster, client, histories)
+            questions = _questions_for_table(roster, client, histories, theme)
             rows = _rows_for_table(round_id, table_number, roster, questions, generated_at)
             db.table("icebreakers").insert(rows).execute()
 
@@ -294,7 +319,8 @@ def refresh_for_attendee(
 
     # History (incl. the question being refreshed) makes the new one differ.
     histories = _histories_for_roster(db, roster)
-    questions = _questions_for_table(roster, client, histories)
+    theme = _round_theme(db, event_id, round_id)
+    questions = _questions_for_table(roster, client, histories, theme)
     rows = _rows_for_table(round_id, table_number, roster, questions, _now_iso())
     mine = next((r for r in rows if str(r["recipient_attendee_id"]) == str(attendee_id)), None)
     if mine is None:

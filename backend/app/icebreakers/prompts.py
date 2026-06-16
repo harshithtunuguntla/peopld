@@ -48,10 +48,17 @@ def _format_person(index: int, name: str, role: str, looking_for: str) -> str:
 PROMPT_HISTORY_LIMIT = 3
 
 
-def build_user_prompt(roster: list[dict], histories: dict[int, list[str]] | None = None) -> str:
+def build_user_prompt(
+    roster: list[dict],
+    histories: dict[int, list[str]] | None = None,
+    theme: str | None = None,
+) -> str:
     """roster: ordered list of {name, role, looking_for}. Index is position+1.
     histories: {person index -> their recent question_texts, newest first} so the
     model can deliberately ask about something different this round.
+    theme: the organizer-authored topic for THIS round (e.g. "What you're
+    building"). When set, questions are steered toward it so the round's agenda
+    actually shapes the conversation, not just the label on the screen.
 
     The numbered roster lines are also what the StubClient parses, so keep the
     leading "<n>. " format stable (history lines never start with "<n>.").
@@ -70,8 +77,16 @@ def build_user_prompt(roster: list[dict], histories: dict[int, list[str]] | None
         '[{"recipient": <person number>, "target": <a DIFFERENT person number>, '
         '"question": "<the icebreaker>"}]'
     )
+    theme = (theme or "").strip()
+    theme_line = (
+        f"This round's theme is \"{theme}\". Lean every question toward this theme "
+        f"while still grounding it in the two people's roles and goals.\n"
+        if theme
+        else ""
+    )
     return (
         f"People at this table:\n{people_block}\n\n"
+        f"{theme_line}"
         f"Write one icebreaker for every person (numbers 1 to {len(roster)}). "
         f"Each person's target must be a different person at this table. "
         f"Make every question fresh — never reuse the wording or topic of a "

@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
-import { Loader2, Check, Save, KeyRound, CalendarDays, SlidersHorizontal } from "lucide-react";
+import { Loader2, Check, Save, KeyRound, CalendarDays, SlidersHorizontal, ListChecks } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
@@ -13,6 +13,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
+import { ROUNDS, roundFor, defaultRoundName } from "@/lib/design/rounds";
+
+// How many agenda rows to show when "Planned rounds" is left blank (auto-plan):
+// the canonical palette length is a sensible editing surface; names cycle past it.
+const DEFAULT_AGENDA_ROWS = ROUNDS.length;
+const MAX_AGENDA_ROWS = 12;
 
 interface OrgEvent {
   id: string;
@@ -26,6 +32,7 @@ interface OrgEvent {
   default_round_duration_seconds: number;
   auto_arrive_on_register: boolean;
   target_rounds: number | null;
+  round_topics: string[];
   status: EventStatus;
   requires_code: boolean;
 }
@@ -48,6 +55,7 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
   const [seats, setSeats] = useState("");
   const [minutes, setMinutes] = useState("");
   const [targetRounds, setTargetRounds] = useState("");
+  const [topics, setTopics] = useState<string[]>([]);
   const [autoArrive, setAutoArrive] = useState(true);
 
   const [saving, setSaving] = useState(false);
@@ -74,6 +82,7 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
         setSeats(String(ev.seats_per_table));
         setMinutes(String(Math.max(1, Math.round(ev.default_round_duration_seconds / 60))));
         setTargetRounds(ev.target_rounds ? String(ev.target_rounds) : "");
+        setTopics(ev.round_topics ?? []);
         setAutoArrive(ev.auto_arrive_on_register);
       })
       .catch((e) => {
@@ -101,6 +110,7 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
           default_round_duration_seconds: Math.max(1, Number(minutes)) * 60,
           auto_arrive_on_register: autoArrive,
           target_rounds: targetRounds.trim() ? Number(targetRounds) : null,
+          round_topics: topics.slice(0, agendaRows).map((t) => (t ?? "").trim()),
         }),
       });
       setEvent((prev) => (prev ? { ...prev, ...updated } : prev));
@@ -136,6 +146,18 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
   }
 
   const capacity = (Number(tables) || 0) * (Number(seats) || 0);
+  // How many agenda rows to edit: one per planned round, else a sensible default.
+  const agendaRows = Math.min(
+    MAX_AGENDA_ROWS,
+    targetRounds.trim() ? Math.max(1, Number(targetRounds)) : DEFAULT_AGENDA_ROWS,
+  );
+  const setTopicAt = (i: number, value: string) =>
+    setTopics((prev) => {
+      const next = [...prev];
+      while (next.length <= i) next.push("");
+      next[i] = value;
+      return next;
+    });
 
   return (
     <ConsoleShell>
@@ -196,6 +218,46 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
             </div>
             <Toggle checked={autoArrive} onChange={setAutoArrive} />
           </div>
+        </Section>
+
+        {/* Agenda */}
+        <Section
+          icon={ListChecks}
+          title="Round agenda"
+          subtitle="Name each round's theme. It shows on attendees' phones and steers the AI icebreakers for that round."
+        >
+          <div className="space-y-2.5">
+            {Array.from({ length: agendaRows }, (_, i) => {
+              const color = roundFor(i);
+              return (
+                <div key={i} className="flex items-center gap-3">
+                  <span
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-semibold"
+                    style={{ background: color.bg, color: color.ink }}
+                    aria-hidden
+                  >
+                    {i + 1}
+                  </span>
+                  <label className="sr-only" htmlFor={`topic-${i}`}>
+                    Round {i + 1} theme
+                  </label>
+                  <Input
+                    id={`topic-${i}`}
+                    value={topics[i] ?? ""}
+                    maxLength={80}
+                    onChange={(e) => setTopicAt(i, e.target.value)}
+                    placeholder={defaultRoundName(i)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Leave a row blank to use its default name ({defaultRoundName(0)}, {defaultRoundName(1)}…).
+            {targetRounds.trim()
+              ? ""
+              : " You haven't set a planned-round count, so themes cycle if the night runs longer."}
+          </p>
         </Section>
 
         {/* Access */}

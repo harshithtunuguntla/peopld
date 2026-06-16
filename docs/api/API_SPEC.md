@@ -319,6 +319,12 @@ The single authoritative snapshot that powers the attendee Live Dashboard.
   liked them), plus conversation seeds **`looking_for`, `interests`, and
   `shared_interests`** (tags you both picked) — but never contact info (that's the
   rolodex). The countdown is derived locally from `ends_at` + `server_time`.
+- **`round_topics`** (`string[]`, may be empty) — the organizer-authored agenda
+  (index `i` = round `i+1`'s theme; migration 012). Drives the waiting-room
+  "Tonight" card and the live round boarding pass, and is fed into the icebreaker
+  prompt so each round's questions lean on its theme. Empty = canonical default
+  names. Set/edited via the event create + `PATCH /events/{eventId}` config
+  (`round_topics`, owner-only; trimmed, ≤80 chars/topic, trailing blanks dropped).
 - **Errors:** `404` event not found **or** caller not registered (frontend routes
   the latter to the register page); `401` no/expired token.
 

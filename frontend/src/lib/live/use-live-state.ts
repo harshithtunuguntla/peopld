@@ -53,6 +53,7 @@ export interface LiveState {
   attendee_status: "registered" | "arrived" | "left";
   target_rounds: number | null;
   round_seconds: number;
+  round_topics: string[];
   seated: boolean;
   roster: WaitingRoster;
   round: LiveRound | null;

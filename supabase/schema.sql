@@ -17,6 +17,7 @@ CREATE TABLE events (
   default_round_duration_seconds INTEGER NOT NULL DEFAULT 300,
   auto_arrive_on_register       BOOLEAN NOT NULL DEFAULT TRUE,
   target_rounds                 INTEGER,        -- intended round count (planning horizon); NULL = engine picks
+  round_topics                  TEXT[] NOT NULL DEFAULT '{}',  -- organizer-authored agenda; index i = round i+1's theme (migration 012). Empty = canonical default names
   organizer_id                  UUID NOT NULL REFERENCES auth.users(id),
   status                        TEXT NOT NULL DEFAULT 'upcoming'
                                   CHECK (status IN ('upcoming', 'active', 'ended')),

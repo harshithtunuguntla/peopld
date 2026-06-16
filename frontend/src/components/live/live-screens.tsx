@@ -10,7 +10,7 @@ import { BoardingPass } from "@/components/brand/boarding-pass";
 import { Avatar } from "@/components/brand/avatar";
 import { IcebreakerCard } from "@/components/brand/icebreaker-card";
 import { buttonVariants } from "@/components/ui/button";
-import { ROUNDS, roundFor } from "@/lib/design/rounds";
+import { ROUNDS, agendaFor } from "@/lib/design/rounds";
 import { cn } from "@/lib/utils";
 import { Hourglass } from "./hourglass";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -199,12 +199,20 @@ function RoomRoster({ roster }: { roster: LiveState["roster"] }) {
   );
 }
 
-/** The "Tonight" agenda — the planned rounds and their themes. The topics are the
- * canonical round set for now; an organizer-authored agenda is a future hook. */
-function AgendaCard({ targetRounds, roundSeconds }: { targetRounds: number | null; roundSeconds: number }) {
+/** The "Tonight" agenda — the planned rounds and their themes. Names come from the
+ * organizer-authored agenda (event.round_topics) when set, else the canonical set. */
+function AgendaCard({
+  targetRounds,
+  roundSeconds,
+  topics,
+}: {
+  targetRounds: number | null;
+  roundSeconds: number;
+  topics?: string[];
+}) {
   const count = targetRounds && targetRounds > 0 ? targetRounds : ROUNDS.length;
   const minutes = Math.max(1, Math.round(roundSeconds / 60));
-  const rounds = Array.from({ length: count }, (_, i) => ({ n: i + 1, ...roundFor(i) }));
+  const rounds = Array.from({ length: count }, (_, i) => ({ n: i + 1, ...agendaFor(i, topics) }));
   return (
     <div className="rounded-2xl border border-border bg-card/60 p-4">
       <div className="flex items-center justify-between">
@@ -256,7 +264,11 @@ export function WaitingRoom({ state, eventId }: { state: LiveState; eventId?: st
         </p>
       </div>
 
-      <AgendaCard targetRounds={state.target_rounds ?? null} roundSeconds={state.round_seconds ?? 300} />
+      <AgendaCard
+        targetRounds={state.target_rounds ?? null}
+        roundSeconds={state.round_seconds ?? 300}
+        topics={state.round_topics}
+      />
       <RoomRoster roster={roster} />
       {eventId && <DirectoryLink eventId={eventId} />}
     </div>
@@ -445,7 +457,9 @@ export function RoundView({
   const round = state.round!;
   const seat = state.seat!;
   const remaining = useCountdown(round.ends_at, state.server_time, onExpire, round.paused_at);
-  const themed = { ...roundFor(round.round_number - 1), name: `Round ${round.round_number}` };
+  // The boarding pass carries the round's THEME (organizer agenda, else the
+  // canonical name); the heading above stays the plain "Round N".
+  const themed = agendaFor(round.round_number - 1, state.round_topics);
   const mates = seat.tablemates;
   const paused = Boolean(round.paused_at);
   const wantedHere = mates.filter((m) => m.wanted);

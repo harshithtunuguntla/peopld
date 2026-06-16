@@ -29,6 +29,20 @@ export const ROUNDS: Round[] = [
 /** Rounds repeat past the palette length — round 6 reuses the first color. */
 export const roundFor = (index: number): Round => ROUNDS[index % ROUNDS.length];
 
+/**
+ * A round resolved for a specific event: same canonical color identity, but the
+ * NAME comes from the organizer-authored agenda (`event.round_topics`) when set,
+ * falling back to the canonical placeholder name. `index` is 0-based.
+ */
+export const agendaFor = (index: number, topics?: string[] | null): Round => {
+  const base = roundFor(index);
+  const authored = topics?.[index]?.trim();
+  return authored ? { ...base, name: authored } : base;
+};
+
+/** The default agenda names (canonical), used as placeholders in the editor. */
+export const defaultRoundName = (index: number): string => roundFor(index).name;
+
 /** Light fills that need near-black text instead of white. */
 const LIGHT_FILLS = new Set<string>([
   COLORS.lime,

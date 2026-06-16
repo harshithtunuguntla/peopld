@@ -126,7 +126,7 @@ function LiveInner({ eventId }: { eventId: string }) {
     case "between_rounds":
       return (
         <LiveShell eventId={eventId} onRefresh={refetch}>
-          <BetweenRounds />
+          <BetweenRounds eventId={eventId} />
         </LiveShell>
       );
     case "in_round":

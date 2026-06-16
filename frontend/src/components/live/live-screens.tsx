@@ -17,6 +17,8 @@ import { Hourglass } from "./hourglass";
 import { apiFetch, ApiError } from "@/lib/api";
 import { CountdownPill, useCountdown } from "./countdown";
 import type { LiveState, Tablemate } from "@/lib/live/use-live-state";
+import { useEventBranding } from "@/lib/live/use-branding";
+import { SponsorShowcase, EventLogo } from "./sponsor-showcase";
 
 /** One tablemate, with a like (❤️) toggle and a private-note affordance. Likes
  * persist and surface in the rolodex later (mutual = a match); notes are
@@ -344,6 +346,8 @@ export function WaitingRoom({ state, eventId }: { state: LiveState; eventId?: st
   // Defensive: tolerate an older backend that doesn't yet send these fields.
   const firstName = (state.attendee_name ?? "").trim().split(/\s+/)[0] || "there";
   const roster = state.roster ?? { count: 0, preview: [] };
+  const branding = useEventBranding(eventId);
+  const sponsors = branding?.sponsors ?? [];
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -357,6 +361,7 @@ export function WaitingRoom({ state, eventId }: { state: LiveState; eventId?: st
       </div>
 
       <div className="flex flex-col items-center pt-2 text-center">
+        <EventLogo branding={branding} className="mb-4" />
         <Hourglass size={120} />
         <h1 className="mt-3 font-display text-2xl text-foreground">The room is filling up</h1>
         <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">
@@ -372,6 +377,11 @@ export function WaitingRoom({ state, eventId }: { state: LiveState; eventId?: st
       />
       <RoomRoster roster={roster} />
       {eventId && <DirectoryLink eventId={eventId} />}
+      {sponsors.length > 0 && (
+        <div className="rounded-2xl border border-border bg-card/40 p-4">
+          <SponsorShowcase sponsors={sponsors} />
+        </div>
+      )}
     </div>
   );
 }
@@ -509,15 +519,36 @@ export function RoomCodeCheckIn({
   );
 }
 
-export function BetweenRounds() {
+export function BetweenRounds({ eventId }: { eventId?: string }) {
+  const branding = useEventBranding(eventId);
+  const sponsors = branding?.sponsors ?? [];
+
+  // No sponsors authored → keep the original clean "setting up" screen. No empty
+  // ad boxes, ever.
+  if (sponsors.length === 0) {
+    return (
+      <StatusPanel
+        icon={<Clock3 className="h-7 w-7" />}
+        title="Round complete"
+        subtitle="Nice one. The next table is being set up — hang tight, you'll be moved in a few seconds."
+      >
+        <EventLogo branding={branding} className="mt-2 max-h-10" />
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+      </StatusPanel>
+    );
+  }
+
+  // Sponsors present → turn the dead time into a branded showcase around the hourglass.
   return (
-    <StatusPanel
-      icon={<Clock3 className="h-7 w-7" />}
-      title="Round complete"
-      subtitle="Nice one. The next table is being set up — hang tight, you'll be moved in a few seconds."
-    >
-      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
-    </StatusPanel>
+    <div className="flex flex-col items-center gap-6 pt-6 text-center">
+      <Hourglass size={84} />
+      <div>
+        <EventLogo branding={branding} className="mb-3 max-h-10" />
+        <h1 className="font-display text-2xl text-foreground">Setting up the next table</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Hang tight — you&apos;ll be moved in a few seconds.</p>
+      </div>
+      <SponsorShowcase sponsors={sponsors} />
+    </div>
   );
 }
 

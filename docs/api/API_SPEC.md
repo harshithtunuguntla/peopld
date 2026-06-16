@@ -424,6 +424,24 @@ only**). Surfaced back as the `saved` flag on each rolodex entry, powering the
 
 ---
 
+## Sponsors & branding
+
+Sponsors are shown to attendees between rounds + in the lobby (rotating around the
+hourglass). The event logo + show-logo toggle live on the event (`PATCH /events/:id`
+fields `logo_url`, `show_event_logo`). Sponsors reach phones via the backend
+(`sponsors` table is RLS-on, service-role only).
+
+### `GET /events/{eventId}/sponsors`
+- **Auth:** none (sponsors are promotional; nothing private). Powers the attendee branding block.
+- **Response `200`** (`SponsorsResponse`): `{ "event_name": "…", "logo_url": "…|null", "show_event_logo": true, "sponsors": [ { "id", "name", "image_url", "tagline", "url" } ] }`.
+
+### `PUT /events/{eventId}/sponsors`
+- **Auth:** **owner only** (organizer). Whole-list replace.
+- **Body** (`SponsorsPutRequest`): `{ "sponsors": [ { "name", "image_url?", "tagline?", "url?" } ] }`. Blank rows (no name + no image) are dropped; capped at 20; order preserved.
+- **Response `200`:** the saved `SponsorsResponse`.
+
+---
+
 ## Connections (post-event rolodex)
 
 ### `GET /events/{eventId}/connections`

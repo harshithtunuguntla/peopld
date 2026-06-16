@@ -40,6 +40,8 @@ class EventCreate(BaseModel):
     auto_arrive_on_register: bool = True  # on-site registration marks people arrived
     target_rounds: Optional[int] = Field(default=None, ge=1)  # intended round count (planning horizon)
     round_topics: List[str] = Field(default_factory=list)  # organizer-authored agenda; index i = round i+1's theme
+    logo_url: Optional[str] = None          # event/host brand logo (image URL); shown when show_event_logo
+    show_event_logo: bool = True            # organizer toggle: co-brand vs sponsors-only
     access_code: Optional[str] = None  # secret registration gate; None = open event. Stored in event_access_codes, never echoed back.
 
     @field_validator("round_topics")
@@ -62,6 +64,8 @@ class EventUpdate(BaseModel):
     auto_arrive_on_register: Optional[bool] = None
     target_rounds: Optional[int] = Field(default=None, ge=1)
     round_topics: Optional[List[str]] = None  # None = leave the agenda untouched; [] clears it to defaults
+    logo_url: Optional[str] = None            # None = leave untouched; "" clears the logo
+    show_event_logo: Optional[bool] = None    # None = leave untouched
     access_code: Optional[str] = None  # set "" to clear the gate, a value to (re)set it
 
     @field_validator("round_topics")
@@ -83,6 +87,8 @@ class EventResponse(BaseModel):
     auto_arrive_on_register: bool
     target_rounds: Optional[int] = None
     round_topics: List[str] = Field(default_factory=list)  # organizer-authored agenda (empty = canonical defaults)
+    logo_url: Optional[str] = None
+    show_event_logo: bool = True
     organizer_id: UUID
     status: Literal["upcoming", "active", "ended"]
     created_at: datetime
@@ -518,6 +524,38 @@ class NoteResponse(BaseModel):
 class BookmarkResponse(BaseModel):
     target_attendee_id: UUID
     saved: bool
+
+
+# --- Sponsors & event branding (shown between rounds + in the lobby) ---
+
+class SponsorInput(BaseModel):
+    """One sponsor as authored by the organizer. Logo is a hosted image URL."""
+    name: str = ""
+    image_url: Optional[str] = None
+    tagline: Optional[str] = None
+    url: Optional[str] = None
+
+
+class SponsorsPutRequest(BaseModel):
+    """Whole-list replace — the organizer saves the full sponsor set at once."""
+    sponsors: List[SponsorInput] = Field(default_factory=list)
+
+
+class SponsorItem(BaseModel):
+    """A sponsor as sent to attendees."""
+    id: UUID
+    name: str
+    image_url: Optional[str] = None
+    tagline: Optional[str] = None
+    url: Optional[str] = None
+
+
+class SponsorsResponse(BaseModel):
+    """Everything the between-rounds / lobby branding needs in one call."""
+    event_name: str
+    logo_url: Optional[str] = None
+    show_event_logo: bool = True
+    sponsors: List[SponsorItem] = Field(default_factory=list)
 
 
 # --- Analytics ---

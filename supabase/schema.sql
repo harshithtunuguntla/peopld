@@ -18,6 +18,8 @@ CREATE TABLE events (
   auto_arrive_on_register       BOOLEAN NOT NULL DEFAULT TRUE,
   target_rounds                 INTEGER,        -- intended round count (planning horizon); NULL = engine picks
   round_topics                  TEXT[] NOT NULL DEFAULT '{}',  -- organizer-authored agenda; index i = round i+1's theme (migration 012). Empty = canonical default names
+  logo_url                      TEXT,            -- event/host brand logo, shown to attendees when show_event_logo (migration 014)
+  show_event_logo               BOOLEAN NOT NULL DEFAULT TRUE,  -- organizer toggle: co-brand (logo + sponsors) vs sponsors-only (migration 014)
   organizer_id                  UUID NOT NULL REFERENCES auth.users(id),
   status                        TEXT NOT NULL DEFAULT 'upcoming'
                                   CHECK (status IN ('upcoming', 'active', 'ended')),
@@ -180,6 +182,21 @@ CREATE TABLE connection_bookmarks (
   UNIQUE (event_id, owner_attendee_id, target_attendee_id)
 );
 
+-- Sponsors (migration 014): shown to attendees between rounds + in the lobby,
+-- rotating around the hourglass. Served by the backend (GET /events/:id/sponsors),
+-- not client reads — so RLS is on with NO policies (service-role only).
+CREATE TABLE sponsors (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id      UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  image_url     TEXT,
+  tagline       TEXT,
+  url           TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX sponsors_event_idx ON sponsors(event_id);
+
 -- Audit trail (Step 4): every state-changing action. metadata holds
 -- UUIDs/enums/counts only, never PII.
 CREATE TABLE audit_log (
@@ -210,6 +227,7 @@ ALTER TABLE connection_likes ENABLE ROW LEVEL SECURITY;  -- no policies: service
 ALTER TABLE meeting_intents  ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE connection_notes ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE connection_bookmarks ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
+ALTER TABLE sponsors         ENABLE ROW LEVEL SECURITY;  -- no policies: served by the backend (service-role)
 ALTER TABLE audit_log        ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 
 -- SECURITY MODEL: all writes and all PII reads go through the FastAPI

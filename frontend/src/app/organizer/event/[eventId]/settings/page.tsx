@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
-import { Loader2, Check, Save, KeyRound, CalendarDays, SlidersHorizontal, ListChecks } from "lucide-react";
+import { Loader2, Check, Save, KeyRound, CalendarDays, SlidersHorizontal, ListChecks, Megaphone, Plus, Trash2 } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
@@ -14,6 +14,31 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
 import { ROUNDS, roundFor, defaultRoundName } from "@/lib/design/rounds";
+
+const MAX_SPONSORS = 20;
+
+/** A sponsor row being edited. `key` is a stable client id for React. */
+interface SponsorDraft {
+  key: string;
+  name: string;
+  image_url: string;
+  tagline: string;
+  url: string;
+}
+interface SponsorApi {
+  id: string;
+  name: string;
+  image_url: string | null;
+  tagline: string | null;
+  url: string | null;
+}
+const newSponsor = (): SponsorDraft => ({
+  key: crypto.randomUUID(),
+  name: "",
+  image_url: "",
+  tagline: "",
+  url: "",
+});
 
 // How many agenda rows to show when "Planned rounds" is left blank (auto-plan):
 // the canonical palette length is a sensible editing surface; names cycle past it.
@@ -33,6 +58,8 @@ interface OrgEvent {
   auto_arrive_on_register: boolean;
   target_rounds: number | null;
   round_topics: string[];
+  logo_url: string | null;
+  show_event_logo: boolean;
   status: EventStatus;
   requires_code: boolean;
 }
@@ -57,6 +84,9 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
   const [targetRounds, setTargetRounds] = useState("");
   const [topics, setTopics] = useState<string[]>([]);
   const [autoArrive, setAutoArrive] = useState(true);
+  const [logoUrl, setLogoUrl] = useState("");
+  const [showLogo, setShowLogo] = useState(true);
+  const [sponsors, setSponsors] = useState<SponsorDraft[]>([]);
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -84,6 +114,22 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
         setTargetRounds(ev.target_rounds ? String(ev.target_rounds) : "");
         setTopics(ev.round_topics ?? []);
         setAutoArrive(ev.auto_arrive_on_register);
+        setLogoUrl(ev.logo_url ?? "");
+        setShowLogo(ev.show_event_logo);
+        // Sponsors live in their own table — load them separately.
+        apiFetch<{ sponsors: SponsorApi[] }>(`/events/${eventId}/sponsors`)
+          .then((r) =>
+            setSponsors(
+              (r.sponsors ?? []).map((s) => ({
+                key: crypto.randomUUID(),
+                name: s.name ?? "",
+                image_url: s.image_url ?? "",
+                tagline: s.tagline ?? "",
+                url: s.url ?? "",
+              })),
+            ),
+          )
+          .catch(() => {});
       })
       .catch((e) => {
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) setDenied("forbidden");
@@ -111,6 +157,21 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
           auto_arrive_on_register: autoArrive,
           target_rounds: targetRounds.trim() ? Number(targetRounds) : null,
           round_topics: topics.slice(0, agendaRows).map((t) => (t ?? "").trim()),
+          logo_url: logoUrl.trim(), // "" clears the logo
+          show_event_logo: showLogo,
+        }),
+      });
+      // Sponsors live in their own table — saved as a whole-list replace. The
+      // backend drops blank rows and caps the count.
+      await apiFetch(`/events/${eventId}/sponsors`, {
+        method: "PUT",
+        body: JSON.stringify({
+          sponsors: sponsors.map((s) => ({
+            name: s.name.trim(),
+            image_url: s.image_url.trim() || null,
+            tagline: s.tagline.trim() || null,
+            url: s.url.trim() || null,
+          })),
         }),
       });
       setEvent((prev) => (prev ? { ...prev, ...updated } : prev));
@@ -158,6 +219,11 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
       next[i] = value;
       return next;
     });
+
+  const updateSponsor = (key: string, patch: Partial<SponsorDraft>) =>
+    setSponsors((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
+  const removeSponsor = (key: string) => setSponsors((prev) => prev.filter((s) => s.key !== key));
+  const addSponsor = () => setSponsors((prev) => (prev.length >= MAX_SPONSORS ? prev : [...prev, newSponsor()]));
 
   return (
     <ConsoleShell>
@@ -260,6 +326,91 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
           </p>
         </Section>
 
+        {/* Sponsors & branding */}
+        <Section
+          icon={Megaphone}
+          title="Sponsors & branding"
+          subtitle="Shown to attendees between rounds and in the lobby — rotating around the hourglass."
+        >
+          {/* Event logo + co-brand toggle */}
+          <div className="rounded-xl border border-border bg-background/40 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-sm font-medium text-foreground">Show your event logo</div>
+                <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                  On: attendees see <span className="font-medium text-foreground">your logo</span> alongside sponsors (co-branding).
+                  Off: sponsors only.
+                </p>
+              </div>
+              <Toggle checked={showLogo} onChange={setShowLogo} />
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+              <Field label="Logo image URL" name="logo-url" hint="Paste a hosted image link (PNG/SVG/JPG).">
+                {(p) => (
+                  <Input
+                    {...p}
+                    type="url"
+                    inputMode="url"
+                    placeholder="https://…/logo.png"
+                    value={logoUrl}
+                    onChange={(e) => setLogoUrl(e.target.value)}
+                  />
+                )}
+              </Field>
+              <LogoPreview url={logoUrl} />
+            </div>
+          </div>
+
+          {/* Sponsor list */}
+          <div className="mt-5 space-y-4">
+            {sponsors.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-border bg-background/30 px-4 py-6 text-center text-sm text-muted-foreground">
+                No sponsors yet. Add one to fill the between-rounds screen.
+              </p>
+            ) : (
+              sponsors.map((s, idx) => (
+                <div key={s.key} className="rounded-xl border border-border bg-background/40 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Sponsor {idx + 1}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeSponsor(s.key)}
+                      aria-label={`Remove sponsor ${idx + 1}`}
+                      className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden /> Remove
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Field label="Name" name={`sp-name-${s.key}`}>
+                      {(p) => <Input {...p} value={s.name} maxLength={80} onChange={(e) => updateSponsor(s.key, { name: e.target.value })} placeholder="Acme Corp" />}
+                    </Field>
+                    <Field label="Website (optional)" name={`sp-url-${s.key}`}>
+                      {(p) => <Input {...p} type="url" inputMode="url" value={s.url} onChange={(e) => updateSponsor(s.key, { url: e.target.value })} placeholder="https://acme.com" />}
+                    </Field>
+                    <div className="sm:col-span-2 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                      <Field label="Logo image URL" name={`sp-img-${s.key}`}>
+                        {(p) => <Input {...p} type="url" inputMode="url" value={s.image_url} onChange={(e) => updateSponsor(s.key, { image_url: e.target.value })} placeholder="https://…/acme.png" />}
+                      </Field>
+                      <LogoPreview url={s.image_url} />
+                    </div>
+                    <Field label="Tagline (optional)" name={`sp-tag-${s.key}`} className="sm:col-span-2">
+                      {(p) => <Input {...p} value={s.tagline} maxLength={160} onChange={(e) => updateSponsor(s.key, { tagline: e.target.value })} placeholder="Backing bold founders since 2019" />}
+                    </Field>
+                  </div>
+                </div>
+              ))
+            )}
+            {sponsors.length < MAX_SPONSORS && (
+              <Button type="button" variant="outline" onClick={addSponsor} className="gap-2">
+                <Plus className="h-4 w-4" aria-hidden /> Add sponsor
+              </Button>
+            )}
+          </div>
+        </Section>
+
         {/* Access */}
         <Section icon={KeyRound} title="Access code" subtitle="Attendees enter this to join. Share it in person — never link the code.">
           <AccessCodeControl eventId={eventId} initialHasCode={event.requires_code} />
@@ -281,6 +432,21 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
         </div>
       </form>
     </ConsoleShell>
+  );
+}
+
+/** Small live thumbnail of a pasted image URL; falls back to a placeholder. */
+function LogoPreview({ url }: { url: string }) {
+  const trimmed = url.trim();
+  return (
+    <div className="flex h-[42px] w-[84px] shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
+      {trimmed ? (
+        // eslint-disable-next-line @next/next/no-img-element -- arbitrary external URL
+        <img src={trimmed} alt="" className="max-h-full max-w-full object-contain" loading="lazy" />
+      ) : (
+        <span className="text-[10px] text-muted-foreground">preview</span>
+      )}
+    </div>
   );
 }
 

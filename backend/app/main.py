@@ -82,3 +82,16 @@ app.include_router(intents.router)
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/health/config")
+async def health_config():
+    """Debug endpoint: shows loaded config (secrets redacted)."""
+    return {
+        "supabase_url": settings.supabase_url if settings.supabase_url else "❌ NOT SET",
+        "supabase_key_set": bool(settings.supabase_service_role_key),
+        "frontend_url": settings.frontend_url,
+        "llm_provider": settings.llm_provider,
+        "vertex_project_id": settings.vertex_project_id,
+        "vertex_region": settings.vertex_region,
+    }

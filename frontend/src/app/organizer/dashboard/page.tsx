@@ -159,7 +159,7 @@ function CreateEventForm({ onCreated, onCancel }: { onCreated: () => void; onCan
     location: "",
     num_tables: "8",
     seats_per_table: "4",
-    default_round_duration_seconds: "300",
+    round_minutes: "5",
     access_code: "",
   });
   const [busy, setBusy] = useState(false);
@@ -181,7 +181,7 @@ function CreateEventForm({ onCreated, onCancel }: { onCreated: () => void; onCan
           location: form.location.trim(),
           num_tables: Number(form.num_tables),
           seats_per_table: Number(form.seats_per_table),
-          default_round_duration_seconds: Number(form.default_round_duration_seconds),
+          default_round_duration_seconds: Math.max(1, Number(form.round_minutes)) * 60,
           access_code: form.access_code.trim() || null,
         }),
       });
@@ -218,8 +218,8 @@ function CreateEventForm({ onCreated, onCancel }: { onCreated: () => void; onCan
         <Field label="Seats per table" name="ev-seats" required hint="Minimum 3.">
           {(p) => <Input {...p} type="number" min={3} required value={form.seats_per_table} onChange={set("seats_per_table")} />}
         </Field>
-        <Field label="Round length (seconds)" name="ev-dur" required>
-          {(p) => <Input {...p} type="number" min={30} required value={form.default_round_duration_seconds} onChange={set("default_round_duration_seconds")} />}
+        <Field label="Round length (minutes)" name="ev-dur" required hint="Minutes each round runs.">
+          {(p) => <Input {...p} type="number" min={1} required value={form.round_minutes} onChange={set("round_minutes")} />}
         </Field>
         <Field label="Access code" name="ev-code" hint="Optional — attendees enter it to register.">
           {(p) => <Input {...p} value={form.access_code} onChange={set("access_code")} placeholder="MIXER" />}

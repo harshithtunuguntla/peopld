@@ -167,6 +167,37 @@ def test_live_in_round_not_seated(client, db, event):
     assert body["seated"] is False
     assert body["seat"] is None
     assert body["round"]["round_number"] == 2  # phone still knows a round is running
+    # A normal attendee here is a late arrival → the "next round is yours" screen,
+    # so the tag must read 'attendee' (the default when no tag is set).
+    assert body["attendee_tag"] == "attendee"
+
+
+def test_live_guest_in_round_carries_tag_not_attendee(client, db, event):
+    """A speaker/host is in the room during a round but deliberately never seated.
+    The snapshot must surface their tag so the phone shows the guest message
+    ("you're not in the rotation") instead of falsely promising a seat next round."""
+    _me(db, event["id"], status="arrived", tag="speaker")
+    rnd = make_round(db, event["id"], round_number=2, status="active")
+    other = make_attendee(db, event["id"], name="Seated", status="arrived")
+    make_assignment(db, event["id"], rnd["id"], other["id"], table_number=1)
+
+    body = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH).json()
+    assert body["phase"] == "in_round"
+    assert body["seated"] is False
+    assert body["attendee_tag"] == "speaker"
+
+
+def test_live_left_attendee_reports_status_for_recheckin(client, db, event):
+    """An attendee marked 'left' still gets an authoritative snapshot (not a 404),
+    so the phone can offer the room-code screen again to rejoin the rotation."""
+    _me(db, event["id"], status="left")
+    make_round(db, event["id"], round_number=1, status="active")
+
+    r = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["attendee_status"] == "left"
+    assert body["seated"] is False  # never seated while 'left'
 
 
 def test_live_between_rounds(client, db, event):

@@ -433,6 +433,7 @@ class LiveStateResponse(BaseModel):
     attendee_id: UUID
     attendee_name: str  # so the waiting room can greet "Hi, <first name>"
     attendee_status: Literal["registered", "arrived", "left"]
+    attendee_tag: Literal["attendee", "speaker", "host"] = "attendee"  # guests (speaker/host) are never seated → the "not seated" screen must say so honestly
     target_rounds: Optional[int] = None  # planned rounds → drives the agenda preview
     round_seconds: int  # default round duration → "N rounds · M min"
     round_topics: List[str] = Field(default_factory=list)  # organizer-authored agenda; index i = round i+1's theme

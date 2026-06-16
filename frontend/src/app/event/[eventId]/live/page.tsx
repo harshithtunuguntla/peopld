@@ -107,8 +107,13 @@ function LiveInner({ eventId }: { eventId: string }) {
   // Pre-registered but not yet checked in: gate the whole live experience behind
   // self-service room-code check-in (status flips registered -> arrived). Only
   // 'arrived' people are ever seated, so until they check in there's nothing to
-  // show them. An ended event skips straight to the recap below.
-  if (state.attendee_status === "registered" && state.phase !== "ended") {
+  // show them. A 'left' attendee (organizer marked them gone, or they stepped
+  // out) gets the same gate so they can re-check-in and rejoin the rotation. An
+  // ended event skips straight to the recap below.
+  if (
+    (state.attendee_status === "registered" || state.attendee_status === "left") &&
+    state.phase !== "ended"
+  ) {
     return (
       <LiveShell eventId={eventId}>
         <RoomCodeCheckIn state={state} eventId={eventId} onArrived={refetch} />
@@ -132,7 +137,7 @@ function LiveInner({ eventId }: { eventId: string }) {
     case "in_round":
       return (
         <LiveShell eventId={eventId} onRefresh={refetch}>
-          {state.seated ? <RoundView state={state} eventId={eventId} onExpire={refetch} /> : <NotSeated />}
+          {state.seated ? <RoundView state={state} eventId={eventId} onExpire={refetch} /> : <NotSeated state={state} eventId={eventId} />}
         </LiveShell>
       );
     case "not_started":

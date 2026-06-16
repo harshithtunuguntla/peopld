@@ -52,6 +52,7 @@ export interface LiveState {
   attendee_id: string;
   attendee_name: string;
   attendee_status: "registered" | "arrived" | "left";
+  attendee_tag: "attendee" | "speaker" | "host";
   target_rounds: number | null;
   round_seconds: number;
   round_topics: string[];

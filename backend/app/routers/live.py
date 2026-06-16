@@ -259,6 +259,7 @@ async def get_live_state(
         attendee_id=attendee["id"],
         attendee_name=attendee["name"],
         attendee_status=attendee["status"],
+        attendee_tag=attendee.get("tag") or "attendee",
         target_rounds=event.get("target_rounds"),
         round_seconds=event.get("default_round_duration_seconds") or 300,
         round_topics=event.get("round_topics") or [],

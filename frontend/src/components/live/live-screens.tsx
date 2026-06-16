@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { Loader2, PartyPopper, Sparkles, Armchair, Clock3, Heart, UserRound, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check } from "lucide-react";
+import { Loader2, PartyPopper, Sparkles, Heart, UserRound, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star } from "lucide-react";
 
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Wordmark } from "@/components/brand/wordmark";
@@ -17,7 +17,7 @@ import { Hourglass } from "./hourglass";
 import { apiFetch, ApiError } from "@/lib/api";
 import { CountdownPill, useCountdown } from "./countdown";
 import type { LiveState, Tablemate } from "@/lib/live/use-live-state";
-import { useEventBranding } from "@/lib/live/use-branding";
+import { useEventBranding, type Sponsor } from "@/lib/live/use-branding";
 import { SponsorShowcase, EventLogo } from "./sponsor-showcase";
 
 /** One tablemate, with a like (❤️) toggle and a private-note affordance. Likes
@@ -342,6 +342,19 @@ function AgendaCard({
   );
 }
 
+/** The sponsor flip in its one consistent carded frame — used identically by every
+ * lobby / waiting / between-rounds screen so the brand moment looks the same all
+ * the way through the event. Renders nothing when no sponsors are authored (never
+ * an empty ad box). */
+function SponsorBlock({ sponsors }: { sponsors: Sponsor[] }) {
+  if (sponsors.length === 0) return null;
+  return (
+    <div className="rounded-2xl border border-border bg-card/40 p-4">
+      <SponsorShowcase sponsors={sponsors} />
+    </div>
+  );
+}
+
 export function WaitingRoom({ state, eventId }: { state: LiveState; eventId?: string }) {
   // Defensive: tolerate an older backend that doesn't yet send these fields.
   const firstName = (state.attendee_name ?? "").trim().split(/\s+/)[0] || "there";
@@ -377,11 +390,7 @@ export function WaitingRoom({ state, eventId }: { state: LiveState; eventId?: st
       />
       <RoomRoster roster={roster} />
       {eventId && <DirectoryLink eventId={eventId} />}
-      {sponsors.length > 0 && (
-        <div className="rounded-2xl border border-border bg-card/40 p-4">
-          <SponsorShowcase sponsors={sponsors} />
-        </div>
-      )}
+      <SponsorBlock sponsors={sponsors} />
     </div>
   );
 }
@@ -422,6 +431,7 @@ export function RoomCodeCheckIn({
   onArrived: () => void;
 }) {
   const firstName = (state.attendee_name ?? "").trim().split(/\s+/)[0] || "there";
+  const returning = state.attendee_status === "left"; // stepped out / marked gone → re-checking in
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -456,7 +466,7 @@ export function RoomCodeCheckIn({
       <div className="flex items-center justify-between">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-[11px] font-medium text-accent ring-1 ring-inset ring-accent/25">
           <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
-          You&apos;re registered
+          {returning ? "Welcome back" : "You're registered"}
         </span>
         <span className="truncate text-xs text-muted-foreground">Hi, {firstName}</span>
       </div>
@@ -468,10 +478,15 @@ export function RoomCodeCheckIn({
           </div>
           <span className="absolute inset-0 -z-10 rounded-2xl bg-accent/20 blur-xl" aria-hidden />
         </div>
-        <h1 className="mt-4 font-display text-2xl text-foreground">You&apos;re on the list</h1>
+        <h1 className="mt-4 font-display text-2xl text-foreground">
+          {returning ? "Ready to rejoin?" : "You're on the list"}
+        </h1>
         <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">
-          When you arrive, enter the <span className="text-foreground">room code</span> shown at the
-          venue to check in and join the first round.
+          {returning ? (
+            <>Enter the <span className="text-foreground">room code</span> shown at the venue to check back in and be seated in the next round.</>
+          ) : (
+            <>When you arrive, enter the <span className="text-foreground">room code</span> shown at the venue to check in and join the first round.</>
+          )}
         </p>
       </div>
 
@@ -523,42 +538,111 @@ export function BetweenRounds({ eventId }: { eventId?: string }) {
   const branding = useEventBranding(eventId);
   const sponsors = branding?.sponsors ?? [];
 
-  // No sponsors authored → keep the original clean "setting up" screen. No empty
-  // ad boxes, ever.
-  if (sponsors.length === 0) {
-    return (
-      <StatusPanel
-        icon={<Clock3 className="h-7 w-7" />}
-        title="Round complete"
-        subtitle="Nice one. The next table is being set up — hang tight, you'll be moved in a few seconds."
-      >
-        <EventLogo branding={branding} className="mt-2 max-h-10" />
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
-      </StatusPanel>
-    );
-  }
-
-  // Sponsors present → turn the dead time into a branded showcase around the hourglass.
+  // Same brand treatment as the waiting room and the "next round is yours" screen:
+  // logo → hourglass → message → the sponsor flip. The hourglass IS the waiting
+  // indicator, so it's always present (not only when sponsors exist) — the gap
+  // between rounds looks identical to every other wait, sponsors or not.
   return (
-    <div className="flex flex-col items-center gap-6 pt-6 text-center">
-      <Hourglass size={84} />
-      <div>
-        <EventLogo branding={branding} className="mb-3 max-h-10" />
-        <h1 className="font-display text-2xl text-foreground">Setting up the next table</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Hang tight — you&apos;ll be moved in a few seconds.</p>
+    <div className="space-y-5">
+      <div className="flex flex-col items-center pt-2 text-center">
+        <EventLogo branding={branding} className="mb-4" />
+        <Hourglass size={104} />
+        <h1 className="mt-3 font-display text-2xl text-foreground">Round complete</h1>
+        <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">
+          Nice one. The next table is being set up — hang tight, you&apos;ll be moved in a few seconds.
+        </p>
       </div>
-      <SponsorShowcase sponsors={sponsors} />
+      <SponsorBlock sponsors={sponsors} />
     </div>
   );
 }
 
-export function NotSeated() {
+/**
+ * Shown when a round is live but this attendee has no table for it. Two ways to
+ * land here:
+ *  - a LATE ARRIVAL who checked in mid-round (seating froze before they were in
+ *    the room) — they'll be placed when the organizer starts the next round; or
+ *  - a GUEST (speaker/host) who is deliberately never in the table rotation.
+ * The screen must tell these two apart so we never promise a seat to a guest who
+ * will never get one. For the late arrival, the dead wait becomes useful: a clear
+ * "you're next", who's in the room, the directory to browse now, and sponsors.
+ */
+export function NotSeated({ state, eventId }: { state: LiveState; eventId?: string }) {
+  const firstName = (state.attendee_name ?? "").trim().split(/\s+/)[0] || "there";
+  const isGuest = state.attendee_tag === "speaker" || state.attendee_tag === "host";
+  const branding = useEventBranding(eventId);
+  const sponsors = branding?.sponsors ?? [];
+  const roster = state.roster ?? { count: 0, preview: [] };
+
+  // Name the round everyone else is in right now, so the wait has context.
+  const currentRoundNumber = state.round?.round_number ?? null;
+  const currentTopic = currentRoundNumber
+    ? agendaFor(currentRoundNumber - 1, state.round_topics).name
+    : null;
+
+  // --- Guest (speaker / host): not in the rotation, so never promise a seat. ---
+  if (isGuest) {
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center justify-between">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-gold/15 px-2.5 py-1 text-[11px] font-medium text-gold ring-1 ring-inset ring-gold/25">
+            <Star className="h-3 w-3" aria-hidden />
+            You&apos;re a {state.attendee_tag}
+          </span>
+          <span className="truncate text-xs text-muted-foreground">Hi, {firstName}</span>
+        </div>
+        <StatusPanel
+          icon={<Star className="h-7 w-7" />}
+          title="You're here as a guest"
+          subtitle={`As a ${state.attendee_tag} you're not in the table rotation, so you won't be shuffled between tables — the floor is yours. Mingle freely and enjoy the event.`}
+        >
+          <EventLogo branding={branding} className="mt-2 max-h-10" />
+        </StatusPanel>
+        {eventId && <DirectoryLink eventId={eventId} />}
+        <SponsorBlock sponsors={sponsors} />
+      </div>
+    );
+  }
+
+  // --- Late arrival: checked in mid-round, will be seated next round. ---
   return (
-    <StatusPanel
-      icon={<Armchair className="h-7 w-7" />}
-      title="Sit tight for this round"
-      subtitle="You're not seated this round, but you'll be placed in the next one. Stay close and keep this screen open."
-    />
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-2.5 py-1 text-[11px] font-medium text-success ring-1 ring-inset ring-success/25 shadow-[0_0_16px_-4px_hsl(var(--success)/0.55)]">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" aria-hidden />
+          You&apos;re checked in
+        </span>
+        <span className="truncate text-xs text-muted-foreground">Hi, {firstName}</span>
+      </div>
+
+      <div className="flex flex-col items-center pt-2 text-center">
+        <EventLogo branding={branding} className="mb-4" />
+        <Hourglass size={104} />
+        <h1 className="mt-3 font-display text-2xl text-foreground">Next round is yours</h1>
+        <p className="mt-2 max-w-[320px] text-sm leading-relaxed text-muted-foreground">
+          {currentTopic ? (
+            <>&ldquo;{currentTopic}&rdquo; is underway right now. The moment it wraps, we&apos;ll seat you for the next one. </>
+          ) : (
+            <>A round&apos;s in progress right now. The moment it wraps, we&apos;ll seat you for the next one. </>
+          )}
+          Keep this screen open.
+        </p>
+      </div>
+
+      {/* Reassurance that they aren't forgotten — the host's console lists them. */}
+      <div className="flex items-center gap-3 rounded-2xl border border-accent/30 bg-accent/[0.06] p-4">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent">
+          <UserCheck className="h-4 w-4" aria-hidden />
+        </span>
+        <p className="text-sm text-muted-foreground">
+          <span className="text-foreground">You&apos;re on the floor list.</span> The host can see you&apos;re here and will place you in the next round.
+        </p>
+      </div>
+
+      <RoomRoster roster={roster} />
+      {eventId && <DirectoryLink eventId={eventId} />}
+      <SponsorBlock sponsors={sponsors} />
+    </div>
   );
 }
 

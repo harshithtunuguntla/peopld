@@ -1,0 +1,715 @@
+import hashlib
+import logging
+from datetime import datetime, timezone
+from math import ceil
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
+from supabase import Client
+
+from app.algorithm import (
+    PairCounts,
+    RotationError,
+    draft_snapshot_hash,
+    generate_rotation,
+    plan_rounds,
+)
+from app.audit import record_audit
+from app.icebreakers import engine as icebreaker_engine
+from app.database import get_supabase
+from app.deps import fetch_event_or_404, get_current_organizer_id, require_event_owner
+from app.models.schemas import (
+    RoundCancelResponse,
+    RoundDraftResponse,
+    RoundResponse,
+    RoundWithAssignmentsResponse,
+    TableAssignmentResponse,
+)
+
+logger = logging.getLogger("app.rounds")
+
+router = APIRouter(prefix="/events/{event_id}/rounds", tags=["rounds"])
+
+
+def _parse_iso(value: str) -> datetime:
+    """Parse a Postgres/Supabase ISO timestamp into an aware datetime."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _fetch_active_round(db: Client, event_id: str) -> dict:
+    result = (
+        db.table("rounds")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="No active round")
+    return result.data[0]
+
+
+def _get_active_round(db: Client, event_id: str) -> dict | None:
+    """The active round if there is one, else None (non-raising)."""
+    result = (
+        db.table("rounds")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+def _has_active_round(db: Client, event_id: str) -> bool:
+    return _get_active_round(db, event_id) is not None
+
+
+def _round_with_assignments(db: Client, round_row: dict) -> dict:
+    """A round row plus all its table assignments (the publish/current shape)."""
+    assignments = (
+        db.table("table_assignments")
+        .select("*")
+        .eq("round_id", round_row["id"])
+        .execute()
+        .data
+        or []
+    )
+    result = dict(round_row)
+    result["assignments"] = assignments
+    return result
+
+
+def _fetch_draft(db: Client, event_id: str) -> dict | None:
+    result = (
+        db.table("round_drafts").select("*").eq("event_id", event_id).limit(1).execute()
+    )
+    return result.data[0] if result.data else None
+
+
+# Guests who attend but never join the rotation. A speaker/host is there to
+# present, not to be shuffled between tables — they're excluded from seating
+# (and, per Phase 3a, can't be picked either). Default 'attendee' is always seated.
+NON_SEATED_TAGS = ("speaker", "host")
+
+
+def _arrived_pool(db: Client, event_id: str) -> list[dict]:
+    """The seated pool: status='arrived' attendees, minus non-seated guests
+    (speakers/hosts). Only these people are ever placed at tables."""
+    result = (
+        db.table("attendees")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("status", "arrived")
+        .execute()
+    )
+    rows = result.data or []
+    return [a for a in rows if (a.get("tag") or "attendee") not in NON_SEATED_TAGS]
+
+
+def _pair_counts(db: Client, event_id: str) -> PairCounts:
+    """History from ALL published rounds (active + completed). People who
+    shared a table count as met even if the round was ended early."""
+    assignments = (
+        db.table("table_assignments").select("*").eq("event_id", event_id).execute().data
+        or []
+    )
+    groups: dict[tuple, list[str]] = {}
+    for a in assignments:
+        groups.setdefault((a["round_id"], a["table_number"]), []).append(
+            str(a["attendee_id"])
+        )
+    counts: PairCounts = {}
+    for group in groups.values():
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                pair = frozenset((group[i], group[j]))
+                counts[pair] = counts.get(pair, 0) + 1
+    return counts
+
+
+def _meeting_intents(db: Client, event_id: str, seated_ids: set[str]) -> set[tuple[str, str]]:
+    """Directed "want to meet" picks (liker -> liked), restricted to the SEATED
+    pool. A pick whose liker or liked person isn't arrived (a no-show, or a guest
+    not in the rotation) leaves the seating problem entirely and is dropped — so
+    the planner only ever tries to honor picks it can physically place."""
+    rows = (
+        db.table("meeting_intents")
+        .select("liker_attendee_id, liked_attendee_id")
+        .eq("event_id", event_id)
+        .execute()
+        .data
+        or []
+    )
+    intents: set[tuple[str, str]] = set()
+    for r in rows:
+        liker, liked = str(r["liker_attendee_id"]), str(r["liked_attendee_id"])
+        if liker in seated_ids and liked in seated_ids:
+            intents.add((liker, liked))
+    return intents
+
+
+def _plan_cache_hash(arrived_hash: str, intents: set[tuple[str, str]]) -> str:
+    """Cache key for the multi-round plan: attendance/config AND the seated picks.
+
+    The draft's own `arrived_hash` stays attendance-only (the stale-publish guard
+    is about who's in the room). The PLAN, though, is also a function of the picks
+    it honored — so when an attendee changes a pick mid-event, this key changes,
+    the cached plan is treated as stale, and the next /start re-plans the remaining
+    rounds from the fixed history (live re-planning, validated in simulate_intent).
+    """
+    fingerprint = "none"
+    if intents:
+        fingerprint = hashlib.sha256(
+            ",".join(sorted(f"{a}>{b}" for a, b in intents)).encode()
+        ).hexdigest()
+    return hashlib.sha256(f"{arrived_hash}|{fingerprint}".encode()).hexdigest()
+
+
+def _next_round_number(db: Client, event_id: str) -> int:
+    rounds = db.table("rounds").select("*").eq("event_id", event_id).execute().data or []
+    return max((r["round_number"] for r in rounds), default=0) + 1
+
+
+def _fetch_plan(db: Client, event_id: str) -> dict | None:
+    result = db.table("round_plans").select("*").eq("event_id", event_id).limit(1).execute()
+    return result.data[0] if result.data else None
+
+
+def _store_plan(db: Client, event_id: str, planned_for_hash: str,
+                horizon_start_round: int, plan: list[dict]) -> None:
+    """Upsert the cached plan (UNIQUE(event_id) -> at most one per event)."""
+    payload = {
+        "event_id": event_id,
+        "planned_for_hash": planned_for_hash,
+        "horizon_start_round": horizon_start_round,
+        "plan": plan,
+    }
+    if _fetch_plan(db, event_id):
+        db.table("round_plans").update(payload).eq("event_id", event_id).execute()
+    else:
+        db.table("round_plans").insert(payload).execute()
+
+
+def _resolve_horizon(event: dict, arrived_count: int, next_round_number: int) -> int:
+    """How many rounds to plan ahead from here.
+
+    Uses the organizer's intended round count (target_rounds) when set, else the
+    room's novelty ceiling. Always at least 1 (the round being started).
+    """
+    seats = event["seats_per_table"]
+    target = event.get("target_rounds")
+    if not target:
+        ceiling = ceil((arrived_count - 1) / max(seats - 1, 1)) if arrived_count > 1 else 1
+        target = min(max(ceiling, 1), 12)
+    return max(1, int(target) - (next_round_number - 1))
+
+
+def _round_repeat_pairings(seating: dict[str, int], pair_counts: PairCounts) -> int:
+    """Seated pairs in this one round that have already met in a published round."""
+    groups: dict[int, list[str]] = {}
+    for attendee_id, table_number in seating.items():
+        groups.setdefault(table_number, []).append(attendee_id)
+    repeats = 0
+    for group in groups.values():
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                if pair_counts.get(frozenset((group[i], group[j])), 0) > 0:
+                    repeats += 1
+    return repeats
+
+
+def _seating_for_next_round(
+    db: Client, event: dict, event_id: str, force_replan: bool = False
+) -> tuple[dict[str, int], str, PairCounts]:
+    """Next round's seating: follow the cached plan, or re-plan if it's stale.
+
+    Re-plans (and re-caches) when: there is no plan, the arrived set / table
+    config changed since the plan was made (hash mismatch), the plan doesn't
+    cover this round number, or a regenerate forced it. Otherwise the cached
+    plan is followed (this is what preserves the lookahead benefit).
+
+    Returns (seating, current_hash, pair_counts). Raises 422 on impossible config.
+    """
+    pool = _arrived_pool(db, event_id)
+    arrived_ids = sorted(str(a["id"]) for a in pool)
+    num_tables, seats = event["num_tables"], event["seats_per_table"]
+    # The draft hash is attendance-only (stale-publish guard); the plan cache key
+    # also folds in the seated picks so a mid-event pick change re-plans the tail.
+    arrived_hash = draft_snapshot_hash(arrived_ids, num_tables, seats)
+    intents = _meeting_intents(db, event_id, set(arrived_ids))
+    plan_hash = _plan_cache_hash(arrived_hash, intents)
+    next_number = _next_round_number(db, event_id)
+    pair_counts = _pair_counts(db, event_id)
+
+    if not force_replan:
+        cached = _fetch_plan(db, event_id)
+        if cached and cached["planned_for_hash"] == plan_hash:
+            idx = next_number - cached["horizon_start_round"]
+            plan = cached["plan"]
+            if 0 <= idx < len(plan):
+                return plan[idx], arrived_hash, pair_counts
+
+    horizon = _resolve_horizon(event, len(arrived_ids), next_number)
+    try:
+        result = plan_rounds(arrived_ids, pair_counts, num_tables, seats, horizon,
+                             intents=intents)
+        seatings = result.rounds
+    except RotationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        # Reliability over cleverness: if the planner ever fails unexpectedly,
+        # fall back to greedy for this round so the event never stalls.
+        logger.exception("planner failed — falling back to greedy", extra={"event_id": event_id})
+        try:
+            rotation = generate_rotation(arrived_ids, pair_counts, num_tables, seats)
+        except RotationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        return rotation.tables, arrived_hash, pair_counts
+
+    _store_plan(db, event_id, plan_hash, next_number, seatings)
+    return seatings[0], arrived_hash, pair_counts
+
+
+def _build_draft_row(db: Client, event: dict, event_id: str,
+                     force_replan: bool = False) -> tuple[dict, dict[str, dict]]:
+    """Materialize the next round's seating (from the plan) into a draft row.
+
+    Returns (draft row ready to store, attendee lookup for the preview).
+    Raises 422 with an organizer-readable message when no valid seating exists.
+    """
+    pool = _arrived_pool(db, event_id)
+    seating, current_hash, pair_counts = _seating_for_next_round(
+        db, event, event_id, force_replan=force_replan
+    )
+    row = {
+        "event_id": event_id,
+        "round_number": _next_round_number(db, event_id),
+        "duration_seconds": event["default_round_duration_seconds"],
+        "assignments": [
+            {"attendee_id": attendee_id, "table_number": table_number}
+            for attendee_id, table_number in seating.items()
+        ],
+        "arrived_hash": current_hash,
+        "repeat_pairings": _round_repeat_pairings(seating, pair_counts),
+    }
+    return row, {str(a["id"]): a for a in pool}
+
+
+def _draft_response(draft: dict, attendees_by_id: dict[str, dict]) -> dict:
+    assignments = [
+        {
+            "attendee_id": a["attendee_id"],
+            "name": attendees_by_id.get(str(a["attendee_id"]), {}).get("name", "(unknown)"),
+            "table_number": a["table_number"],
+        }
+        for a in draft["assignments"]
+    ]
+    return {
+        "id": draft["id"],
+        "event_id": draft["event_id"],
+        "round_number": draft["round_number"],
+        "duration_seconds": draft["duration_seconds"],
+        "arrived_count": len(assignments),
+        "table_count": len({a["table_number"] for a in assignments}),
+        "repeat_pairings": draft.get("repeat_pairings", 0),
+        "assignments": assignments,
+        "created_at": draft["created_at"],
+    }
+
+
+@router.post("/start", response_model=RoundDraftResponse, status_code=201)
+async def start_round(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Generate a seating DRAFT for the organizer to preview.
+
+    Attendee phones see nothing until /publish — drafts live in round_drafts,
+    which has no client RLS access and is not in the realtime publication.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    if _has_active_round(db, event_id):
+        raise HTTPException(status_code=409, detail="End the current round first")
+    if _fetch_draft(db, event_id):
+        raise HTTPException(
+            status_code=409,
+            detail="A draft already exists — publish or regenerate it",
+        )
+
+    row, attendees_by_id = _build_draft_row(db, event, event_id)
+    try:
+        stored = db.table("round_drafts").insert(row).execute().data[0]
+    except Exception:
+        # Race on double-click: the UNIQUE(event_id) constraint caught it.
+        logger.warning("draft insert conflict", extra={"event_id": event_id})
+        raise HTTPException(
+            status_code=409,
+            detail="A draft already exists — publish or regenerate it",
+        )
+
+    record_audit(
+        db,
+        action="round.draft_created",
+        entity_type="round_draft",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=stored["id"],
+        metadata={
+            "round_number": stored["round_number"],
+            "arrived_count": len(attendees_by_id),
+            "repeat_pairings": stored["repeat_pairings"],
+        },
+    )
+    return _draft_response(stored, attendees_by_id)
+
+
+@router.post("/regenerate", response_model=RoundDraftResponse)
+async def regenerate_draft(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Replace the pending draft with a fresh one (re-reads the arrived pool)."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    draft = _fetch_draft(db, event_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="No draft to regenerate — start a round first")
+
+    # Force a fresh plan: regenerating only this round would desync the cached
+    # plan (later rounds were optimized around the seating we're discarding).
+    row, attendees_by_id = _build_draft_row(db, event, event_id, force_replan=True)
+    changes = {k: row[k] for k in
+               ("round_number", "duration_seconds", "assignments", "arrived_hash", "repeat_pairings")}
+    updated = db.table("round_drafts").update(changes).eq("id", draft["id"]).execute().data[0]
+
+    record_audit(
+        db,
+        action="round.draft_regenerated",
+        entity_type="round_draft",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=draft["id"],
+        metadata={
+            "round_number": updated["round_number"],
+            "arrived_count": len(attendees_by_id),
+            "repeat_pairings": updated["repeat_pairings"],
+        },
+    )
+    return _draft_response(updated, attendees_by_id)
+
+
+@router.get("/draft", response_model=RoundDraftResponse)
+async def get_draft(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Re-fetch the pending preview (e.g., after the organizer reloads the page)."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    draft = _fetch_draft(db, event_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="No pending draft")
+    attendees = (
+        db.table("attendees").select("*").eq("event_id", event_id).execute().data or []
+    )
+    return _draft_response(draft, {str(a["id"]): a for a in attendees})
+
+
+@router.post("/publish", response_model=RoundWithAssignmentsResponse, status_code=201)
+async def publish_round(
+    event_id: str,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Make the draft live: create the round + assignments (Realtime fires here),
+    then delete the draft. Blocked if attendance or table config changed since
+    the preview was generated (stale-draft guard)."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    draft = _fetch_draft(db, event_id)
+    if not draft:
+        # Idempotency (REQ-RT-03): a publish whose response was lost (timeout)
+        # may have actually succeeded — the draft is already consumed. If a round
+        # is now active, return it instead of a confusing 404, so a retry is safe.
+        existing = _get_active_round(db, event_id)
+        if existing:
+            response.status_code = 200  # idempotent retry — not a fresh create
+            # Self-heal: if the first publish's generation was interrupted, retry it
+            # (generate_for_round is a no-op when icebreakers already exist).
+            background_tasks.add_task(
+                icebreaker_engine.generate_for_round, db, event_id, existing["id"]
+            )
+            return _round_with_assignments(db, existing)
+        raise HTTPException(status_code=404, detail="No draft to publish — start a round first")
+    if _has_active_round(db, event_id):
+        raise HTTPException(status_code=409, detail="End the current round first")
+
+    pool_ids = [str(a["id"]) for a in _arrived_pool(db, event_id)]
+    current_hash = draft_snapshot_hash(
+        pool_ids, event["num_tables"], event["seats_per_table"]
+    )
+    if current_hash != draft["arrived_hash"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Attendance or table settings changed since this preview — regenerate the draft",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        round_row = (
+            db.table("rounds")
+            .insert(
+                {
+                    "event_id": event_id,
+                    "round_number": _next_round_number(db, event_id),
+                    "duration_seconds": draft["duration_seconds"],
+                    "started_at": now,
+                    "ended_at": None,
+                    "status": "active",
+                }
+            )
+            .execute()
+            .data[0]
+        )
+    except Exception:
+        # Lost a concurrent publish race: UNIQUE(event_id, round_number) rejected
+        # the duplicate. The winner already created this round — return it rather
+        # than 500, so double-clicks resolve to one round (REQ-RT-03 idempotency).
+        existing = _get_active_round(db, event_id)
+        if existing:
+            logger.warning("publish race resolved to existing round", extra={"event_id": event_id})
+            response.status_code = 200  # idempotent — the winner already created it
+            background_tasks.add_task(
+                icebreaker_engine.generate_for_round, db, event_id, existing["id"]
+            )
+            return _round_with_assignments(db, existing)
+        logger.exception("publish failed creating round", extra={"event_id": event_id})
+        raise HTTPException(status_code=500, detail="Failed to publish the round — try again")
+
+    assignment_rows = [
+        {
+            "round_id": round_row["id"],
+            "event_id": event_id,
+            "attendee_id": a["attendee_id"],
+            "table_number": a["table_number"],
+        }
+        for a in draft["assignments"]
+    ]
+    try:
+        assignments = db.table("table_assignments").insert(assignment_rows).execute().data
+    except Exception:
+        # Never leave an active round with no seating behind — roll it back.
+        db.table("rounds").delete().eq("id", round_row["id"]).execute()
+        logger.exception(
+            "publish failed writing assignments", extra={"event_id": event_id}
+        )
+        raise HTTPException(status_code=500, detail="Failed to publish the round — try again")
+
+    db.table("round_drafts").delete().eq("id", draft["id"]).execute()
+
+    record_audit(
+        db,
+        action="round.published",
+        entity_type="round",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=round_row["id"],
+        metadata={
+            "round_number": round_row["round_number"],
+            "attendee_count": len(assignment_rows),
+            "repeat_pairings": draft.get("repeat_pairings", 0),
+        },
+    )
+
+    # Async (spec §9): phones see the table now; icebreakers arrive seconds later,
+    # each INSERT a Step-5 realtime doorbell. Publish never waits on the LLM.
+    background_tasks.add_task(
+        icebreaker_engine.generate_for_round, db, event_id, round_row["id"]
+    )
+
+    result = dict(round_row)
+    result["assignments"] = assignments
+    return result
+
+
+@router.post("/end", response_model=RoundResponse)
+async def end_round(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    active = _fetch_active_round(db, event_id)
+    now = datetime.now(timezone.utc).isoformat()
+    result = (
+        db.table("rounds")
+        .update({"status": "completed", "ended_at": now})
+        .eq("id", active["id"])
+        .execute()
+    )
+    record_audit(
+        db,
+        action="round.ended",
+        entity_type="round",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=active["id"],
+        metadata={"round_number": active["round_number"]},
+    )
+    return result.data[0]
+
+
+@router.post("/pause", response_model=RoundResponse)
+async def pause_round(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Freeze the active round's countdown (e.g. for a host announcement).
+
+    Sets paused_at=now. The effective end shifts forward by the paused span on
+    resume, so no round time is lost. Idempotent: pausing an already-paused round
+    is a no-op that returns the current state.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    active = _fetch_active_round(db, event_id)
+    if active.get("paused_at"):
+        return active  # already paused — idempotent
+    now = datetime.now(timezone.utc).isoformat()
+    result = (
+        db.table("rounds")
+        .update({"paused_at": now})
+        .eq("id", active["id"])
+        .execute()
+    )
+    record_audit(
+        db,
+        action="round.paused",
+        entity_type="round",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=active["id"],
+        metadata={"round_number": active["round_number"]},
+    )
+    return result.data[0]
+
+
+@router.post("/resume", response_model=RoundResponse)
+async def resume_round(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Resume a paused round, banking the paused span into total_paused_seconds
+    so the timer picks up exactly where it left off. Idempotent: resuming a
+    running round is a no-op."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    active = _fetch_active_round(db, event_id)
+    paused_at = active.get("paused_at")
+    if not paused_at:
+        return active  # not paused — idempotent
+    elapsed = int((datetime.now(timezone.utc) - _parse_iso(paused_at)).total_seconds())
+    new_total = int(active.get("total_paused_seconds") or 0) + max(0, elapsed)
+    result = (
+        db.table("rounds")
+        .update({"paused_at": None, "total_paused_seconds": new_total})
+        .eq("id", active["id"])
+        .execute()
+    )
+    record_audit(
+        db,
+        action="round.resumed",
+        entity_type="round",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=active["id"],
+        metadata={"round_number": active["round_number"], "total_paused_seconds": new_total},
+    )
+    return result.data[0]
+
+
+@router.post("/cancel", response_model=RoundCancelResponse)
+async def cancel_round(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Roll back a mistakenly published round (REQ-RT-02).
+
+    Unlike /end (which marks the round completed and keeps it in history), cancel
+    DELETES the active round and its assignments + icebreakers so the bad seating
+    leaves no trace — it never happened, and it never pollutes pairing history or
+    future planning. Attendee phones re-fetch /live and fall back to between-rounds.
+    The freed round_number is reused by the next start.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    active = _fetch_active_round(db, event_id)  # 404 if nothing to cancel
+
+    # Count what we're wiping for the audit trail (UUIDs/counts only, no PII).
+    seated_count = len(
+        db.table("table_assignments").select("id").eq("round_id", active["id"]).execute().data or []
+    )
+
+    # Delete children first — robust whether or not ON DELETE CASCADE is present.
+    db.table("icebreakers").delete().eq("round_id", active["id"]).execute()
+    db.table("table_assignments").delete().eq("round_id", active["id"]).execute()
+    db.table("rounds").delete().eq("id", active["id"]).execute()
+
+    record_audit(
+        db,
+        action="round.cancelled",
+        entity_type="round",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=active["id"],
+        metadata={"round_number": active["round_number"], "seated_count": seated_count},
+    )
+    return RoundCancelResponse(event_id=event_id, round_number=active["round_number"])
+
+
+@router.get("/current", response_model=RoundWithAssignmentsResponse)
+async def get_current_round(event_id: str, db: Client = Depends(get_supabase)):
+    """Active round + all table assignments — powers the organizer grid view."""
+    round_data = dict(_fetch_active_round(db, event_id))
+    assignments = (
+        db.table("table_assignments")
+        .select("*")
+        .eq("round_id", round_data["id"])
+        .execute()
+    )
+    round_data["assignments"] = assignments.data or []
+    return round_data
+
+
+@router.get(
+    "/{round_id}/tables/{table_number}",
+    response_model=list[TableAssignmentResponse],
+)
+async def get_table(
+    event_id: str,
+    round_id: str,
+    table_number: int,
+    db: Client = Depends(get_supabase),
+):
+    """All attendee assignments at one table — powers the attendee Live Dashboard."""
+    result = (
+        db.table("table_assignments")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("round_id", round_id)
+        .eq("table_number", table_number)
+        .execute()
+    )
+    return result.data or []

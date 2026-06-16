@@ -1,0 +1,186 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light (landing) — shadcn semantic tokens */
+    --background: 43 33% 93%;        /* warm cream canvas (matches landing) */
+    --foreground: 252 16% 7%;
+    --card: 43 55% 96%;              /* warm porcelain — cream, NEVER stark white (demo --surface) */
+    --card-foreground: 252 16% 7%;
+    --popover: 0 0% 100%;            /* rare pure white, reserved for floating popovers/tooltips */
+    --popover-foreground: 252 16% 7%;
+    --elevated: 0 0% 100%;           /* rare pure white for dialogs/menus that must lift hard */
+    --primary: 252 16% 7%;
+    --primary-foreground: 43 33% 93%;
+    --secondary: 40 25% 88%;
+    --secondary-foreground: 252 16% 7%;
+    --muted: 40 20% 85%;
+    --muted-foreground: 252 8% 38%;
+    --accent: 10 88% 52%;            /* deepened coral so accent TEXT reads on cream */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 80% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 40 15% 80%;
+    --input: 40 15% 80%;
+    --ring: 10 88% 52%;
+    --radius: 1rem;
+
+    /* Theme-aware status colors — light values are darkened for contrast on cream.
+       Use these (success/warning/info) for small colored text + chips, NOT the raw
+       bright brand colors (chlorine/gold/ice) which are unreadable on light. */
+    --success: 146 52% 34%;
+    --warning: 30 80% 38%;
+    --info: 207 70% 40%;
+
+    /* Extended app neutrals (richer ramp for console surfaces — see
+       docs/design/UI_IMPORT_HANDOFF.md §6). Additive over the shadcn base. */
+    --surface-2: 42 36% 88%;          /* deeper cream for hover/inset fills (demo --surface-2) */
+    --foreground-subtle: 252 8% 52%;  /* third text tier, below muted-foreground */
+    --line-strong: 40 12% 72%;        /* emphasized hairline (inputs, dividers) */
+    --panel: 252 16% 9%;              /* dramatic dark sub-panel shown on light */
+    --panel-foreground: 43 33% 93%;
+    --shadow-card: 0 1px 2px rgba(21, 19, 14, 0.05), 0 16px 40px -20px rgba(21, 19, 14, 0.2);
+  }
+
+  .dark {
+    /* Dark (app) */
+    --background: 240 25% 5%;
+    --foreground: 40 30% 95%;
+    --card: 240 20% 9%;
+    --card-foreground: 40 30% 95%;
+    --popover: 240 20% 9%;
+    --popover-foreground: 40 30% 95%;
+    --elevated: 240 16% 10%;         /* dark elevated surface for dialogs/menus */
+    --primary: 40 30% 95%;
+    --primary-foreground: 240 25% 5%;
+    --secondary: 240 15% 14%;
+    --secondary-foreground: 40 30% 95%;
+    --muted: 240 15% 12%;
+    --muted-foreground: 240 8% 65%;
+    --accent: 11 100% 58%;
+    --accent-foreground: 0 0% 100%;
+    --border: 240 12% 18%;
+    --input: 240 12% 18%;
+    --ring: 11 100% 58%;
+
+    /* Status colors — dark variants stay bright (readable on ink). */
+    --success: 96 58% 62%;
+    --warning: 38 88% 64%;
+    --info: 205 80% 72%;
+
+    /* Extended app neutrals — dark variants. */
+    --surface-2: 240 14% 16%;
+    --foreground-subtle: 240 8% 52%;
+    --line-strong: 240 12% 26%;
+    --panel: 240 14% 16%;
+    --panel-foreground: 40 30% 95%;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 18px 44px -18px rgba(0, 0, 0, 0.7);
+  }
+
+  * {
+    @apply border-border;
+  }
+  html {
+    @apply bg-background text-foreground antialiased;
+    scroll-behavior: smooth;
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+  body {
+    font-family: var(--font-inter), system-ui, sans-serif;
+  }
+  ::selection {
+    background: #ff5a3c;
+    color: #fff;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-fraunces), serif;
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  .text-pretty {
+    text-wrap: pretty;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Fade the left/right edges of a marquee row. */
+  .mask-fade-edges {
+    mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+  }
+
+  /* Ember glow for primary CTAs on dark. */
+  .glow-ember {
+    box-shadow: 0 0 60px -8px rgba(255, 78, 43, 0.6), 0 0 120px -30px rgba(255, 78, 43, 0.4);
+  }
+
+  /* Faint horizontal/grid rules behind hero/sections. */
+  .grid-paper {
+    background-image: linear-gradient(to right, rgba(15, 14, 20, 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(15, 14, 20, 0.04) 1px, transparent 1px);
+    background-size: 64px 64px;
+  }
+  .grid-paper-light {
+    background-image: linear-gradient(to right, rgba(11, 15, 30, 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(11, 15, 30, 0.06) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+
+  /* Soft elevation for console cards, driven by the theme-aware shadow token. */
+  .card-shadow {
+    box-shadow: var(--shadow-card);
+  }
+
+  /* Token-aware dotted / ruled backgrounds for app surfaces (adapt to theme). */
+  .app-dots {
+    background-image: radial-gradient(hsl(var(--border)) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .app-grid-bg {
+    background-image: linear-gradient(to right, hsl(var(--border)) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border)) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+
+  /* Smooth the light↔dark flip. Disabled under reduced-motion (see below). */
+  .theme-transition,
+  .theme-transition * {
+    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.2s ease;
+  }
+
+  /* Film-grain overlay (apply to a fixed/absolute layer). */
+  .grain-bg::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0.04;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+  }
+}
+
+/* Reduced-motion safety net. Components also guard JS animations via
+   useReducedMotion() / a media check. See DESIGN_SYSTEM §5. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,115 @@
+import Link from "next/link";
+import { ArrowRight, Clock, Lock, MapPin, Check } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+export interface EventCardData {
+  id: string;
+  name: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:MM:SS
+  location: string;
+  status: "upcoming" | "active" | "ended";
+  requires_code: boolean;
+  attendee_count: number;
+  registered: boolean;
+}
+
+/** "18:00:00" -> "6:00 PM" (locale-aware, no date dependency). */
+function formatTime(time: string): string {
+  const [h, m] = time.split(":");
+  const d = new Date();
+  d.setHours(Number(h), Number(m), 0, 0);
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+type Phase = "now" | "upcoming" | "ended";
+
+function phaseOf(e: EventCardData, todayStr: string): Phase {
+  if (e.status === "ended" || e.date < todayStr) return "ended";
+  if (e.status === "active" || e.date === todayStr) return "now";
+  return "upcoming";
+}
+
+/**
+ * One event on the attendee home feed. The whole card is a link; where it goes
+ * and what the CTA says depend on the caller's own state (registered?) and the
+ * event phase. Live links carry only the event id — the attendee is resolved
+ * from the session, never the URL (PRODUCT.md hard rule).
+ */
+export function EventCard({ event, todayStr }: { event: EventCardData; todayStr: string }) {
+  const phase = phaseOf(event, todayStr);
+
+  const href =
+    phase === "ended" && event.registered
+      ? `/event/${event.id}/connections`
+      : event.registered
+        ? `/event/${event.id}/live`
+        : `/event/${event.id}/register`;
+
+  const cta =
+    phase === "ended"
+      ? event.registered
+        ? "View recap"
+        : "View"
+      : event.registered
+        ? "Enter"
+        : "Join";
+
+  return (
+    <Link
+      href={href}
+      className="group block rounded-2xl border border-border bg-card/60 p-4 transition-colors hover:border-foreground/20 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <StatusBadge phase={phase} />
+          <h3 className="mt-2 truncate font-display text-lg leading-tight text-foreground">
+            {event.name}
+          </h3>
+          <p className="mt-1.5 flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden /> {formatTime(event.time)}
+            </span>
+            <span className="inline-flex min-w-0 items-center gap-1">
+              <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span className="truncate">{event.location}</span>
+            </span>
+          </p>
+        </div>
+        {event.registered && (
+          <span
+            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/15 px-2 py-1 text-[11px] font-medium text-success"
+            title="You're registered"
+          >
+            <Check className="h-3 w-3" aria-hidden /> Registered
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3.5 flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          {event.requires_code && <Lock className="h-3.5 w-3.5" aria-hidden />}
+          <span className="font-medium text-foreground">{event.attendee_count}</span> going
+        </span>
+        <span className="inline-flex items-center gap-1 text-sm font-medium text-accent transition-transform group-hover:translate-x-0.5">
+          {cta} <ArrowRight className="h-4 w-4" aria-hidden />
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+function StatusBadge({ phase }: { phase: Phase }) {
+  const map = {
+    now: { label: "Happening now", cls: "bg-accent/15 text-accent" },
+    upcoming: { label: "Upcoming", cls: "bg-info/15 text-info" },
+    ended: { label: "Ended", cls: "bg-muted text-muted-foreground" },
+  } as const;
+  const { label, cls } = map[phase];
+  return (
+    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide", cls)}>
+      {phase === "now" && <span className="mr-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />}
+      {label}
+    </span>
+  );
+}

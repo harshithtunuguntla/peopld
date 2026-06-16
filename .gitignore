@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js
+frontend/.next/
+frontend/out/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Env files
+.env
+.env.local
+.env.*.local
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
+*.tsbuildinfo
+
+# Generated validation reports (each run saved locally, not committed)
+backend/reports/
+report.html
+
+# Gemini CLI local tool config (personal, not part of the app)
+.gemini/

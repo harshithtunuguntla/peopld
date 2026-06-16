@@ -1,244 +1,127 @@
 # PRODUCT.md — Event Networking Platform
 
-> This document is the single source of truth for anyone building this product — developers, designers, or AI coding assistants. Read this before writing a single line of code.
+> This file tells any agent exactly where the project stands right now.
+> Read `AGENTS.md` first for vision and philosophy.
 
 ---
 
-## 1. What Are We Building?
+## Current Status
 
-A **mobile-first web application** that helps event organizers run structured, AI-assisted networking at in-person events. Attendees get a personal experience on their phone — they know exactly where to sit each round, and they get smart icebreaker questions tailored to the people at their table.
-
-No app download required. Works in the browser on any smartphone.
-
----
-
-## 2. The Problem We're Solving
-
-Networking at in-person events is broken in three ways:
-
-**During the event:**
-- People end up talking to the same one or two people they already know
-- Introverts struggle to start conversations
-- Organizers manually call out names or move people around — it's chaotic and doesn't scale
-- People arrive late or leave early and get left out of the rotation
-
-**At the event (structured format attempt):**
-- Current workaround: 4 people per table, swap 2 people every 5 minutes
-- Problems: the same pair always moves together, repetition is high, people scramble to wrong tables, no system to handle dynamic attendance
-
-**After the event:**
-- No record of who you met, where you met them, or why they mattered
-- Follow-ups are manual WhatsApp messages with no context layer
+| Item | Value |
+|---|---|
+| **Phase** | Pre-MVP Prototype Build |
+| **Target** | Live pilot event (~40 attendees, Hyderabad) |
+| **Build Spec** | [`docs/product/releases/pre-mvp.md`](docs/product/releases/pre-mvp.md) |
+| **Stack** | Next.js + FastAPI + Supabase + Claude API |
+| **Progress** | Steps 1–6 complete (scaffold, CRUD, auth, rotation algorithm, realtime/recovery, icebreaker engine — all tested). Next: Step 7 (Next.js frontend) |
+| **Working Branch** | `feat/step-1-scaffold` — do NOT merge to main without team agreement |
 
 ---
 
-## 3. Who Is This For?
+## Build Order
 
-**Primary user: Event Organizer**
-- Hosts recurring in-person events: founder meetups, tech community events, creator gatherings
-- Event size: 30 to 300 people (MVP target: ~40 people)
-- Currently based in India (Hyderabad-first pilot)
-- Pain: managing structured networking manually is hard, doesn't scale, and produces inconsistent results
+> **Every agent and teammate must follow this sequence. Do not skip steps. Do not build features out of order.**
+>
+> **Rule: brainstorm before code.** Each step starts with a short design/requirements session
+> (agree on approach, data flow, and edge cases with the team) BEFORE any implementation.
+> Steps 4 and 5 especially require an explicit design session — see notes below.
 
-**Secondary user: Event Attendee**
-- Professionals, founders, students, creators attending community events
-- Uses the platform on their phone during the event
-- Pain: meets too few people, doesn't know how to start conversations, loses context of who they met
-
-**Business model:**
-- Organizers pay per event to use the platform (B2B)
-- Attendees use it for free
-- Post-MVP: attendees may pay a monthly fee to maintain their cross-event connection graph
-
----
-
-## 4. MVP Scope (Target: June 27, 2025 Pilot)
-
-### What's IN the MVP
-
-1. **Event landing page** — shareable link per event with event name, date, description
-2. **Attendee sign-up flow** — name, what they do, who they're looking to meet (2–3 fields max)
-3. **Rotation algorithm** — assigns every attendee to a table each round, maximizing unique pairings
-4. **Personal round notifications** — each attendee's phone shows their table number for the current round
-5. **AI icebreaker engine** — at the start of each round, each person at the table gets a targeted question directed at a specific tablemate
-6. **Organizer dashboard** — start/stop rounds, view current table assignments, handle late joiners and early exits
-
-### What's NOT in the MVP (post-MVP backlog)
-
-- Post-event connection memory
-- Pre-event intent-based matching (feeding into the algorithm)
-- Cross-event attendee profiles
-- Per-round feedback collection
-- Hackathon team formation mode
-- Mobile app (native iOS/Android)
-- Sponsor or analytics features
-
----
-
-## 5. Tech Stack
-
-| Layer | Technology | Reason |
+| Step | What | Status |
 |---|---|---|
-| Frontend | React (Vite) | Fast, component-based, mobile-friendly |
-| Backend | FastAPI (Python) | Fast to build, async-ready, auto API docs |
-| Database | Supabase (Postgres) | Real-time subscriptions built-in — needed for live round updates |
-| LLM (Icebreakers) | Claude API (claude-sonnet-4-20250514) | Generates personalized icebreaker questions per table |
-| Hosting | TBD (Vercel for frontend, Railway or Render for backend) | Fast deployment, free tier available |
-
-**Key constraint:** The app must work on mobile browsers without any installation. All real-time updates (round starts, table assignments) must push to the attendee's phone automatically — no manual refresh.
-
----
-
-## 6. Frontend Pages & Components
-
-### 6.1 Attendee-Facing Pages
-
-#### `/event/:eventId` — Event Landing Page
-- Shows event name, date, time, location, brief description
-- CTA button: "Join this event"
-- If registration is already open, leads directly to sign-up
-
-#### `/event/:eventId/register` — Attendee Registration
-- Form fields:
-  - Full name
-  - What do you do? (one line — e.g. "Founder at XYZ", "Software Engineer at ABC")
-  - Who are you hoping to meet? (one line — e.g. "investors", "designers", "other founders")
-- On submit: attendee is created in the database and receives a unique attendee link
-
-#### `/event/:eventId/attend/:attendeeId` — Attendee Live View (Main Screen)
-- This is the screen attendees keep open during the event
-- Shows:
-  - Current round number
-  - **Their assigned table number** (large, prominent)
-  - Names + one-liner of the other 3 people at their table this round
-  - **Their personal icebreaker question** for this round
-- Auto-updates in real time when a new round starts (no refresh needed)
-- Status states: "Event not started yet", "Round X in progress — go to Table Y", "Event ended"
-
-### 6.2 Organizer-Facing Pages
-
-#### `/organizer/login` — Organizer Auth
-- Simple email/password login
-- No social login needed for MVP
-
-#### `/organizer/dashboard` — Event Management
-- Create a new event (name, date, time, location, description, number of tables, seats per table)
-- View list of created events
-
-#### `/organizer/event/:eventId/live` — Live Event Control Panel
-- See all registered attendees and their status (present / left early)
-- Mark attendees as "arrived" or "left"
-- Add a walk-in attendee on the spot
-- Current round number and timer
-- Buttons: "Start Round", "End Round", "Next Round"
-- Table view: see who is sitting where in the current round
-- Override: manually reassign an attendee to a different table if needed
+| 1 | **Repo + Foundation** — GitHub monorepo (`/frontend` Next.js, `/backend` FastAPI), Supabase project + SQL schema (`supabase/schema.sql`, 5 tables) | ✅ Done |
+| 2 | **FastAPI scaffold + core CRUD** — Events, Attendees, Rounds, Connections, Icebreakers endpoints; 34 unit tests (`backend/tests/`) + live smoke test (`backend/scripts/smoke_live.py`) | ✅ Done |
+| 3 | **Auth (deliberately EARLY, not last)** — Attendees: Google sign-in + Email OTP (see Decision Log — phone OTP deferred to MVP); organizers: email/password (manual account, `role=organizer`); replace temporary `X-Organizer-Id` header in `backend/app/deps.py` with Supabase JWT verification; link `attendees.user_id` + dedupe registration | ⏳ Next |
+| 4 | **Rotation Algorithm** — draft→preview→publish lifecycle (drafts in non-realtime `round_drafts` so phones see nothing until publish); `auto_arrive_on_register`; audit trail + structured logging. **v2 engine = re-planning optimizer** (`plan_rounds`, simulated annealing): plans the remaining rounds, follows them, re-plans only when the arrived set changes; greedy kept as fallback. Plan cached in `round_plans` (migration 003). Designs: `docs/design/rotation-algorithm.md` (v1 greedy) + `docs/design/rotation-replanning.md` (v2). Validation: `backend/scripts/compare_algorithms.py`. Impl: `backend/app/algorithm.py`, `routers/rounds.py` | ✅ Done |
+| 5 | **Supabase Realtime** — principle: *realtime = doorbell, REST = source of truth*. Channel structure agreed = one channel per event (event bus). Backend recovery endpoint `GET /events/:id/live` returns the whole Live Dashboard state in one round-trip. Three reliability requirements: **REQ-RT-01** recover within 3 s on reconnect/refresh/wake/network-regain; **REQ-RT-02** round cancel/rollback (`POST /rounds/cancel` deletes round+assignments, no history pollution); **REQ-RT-03** idempotent publish (retry/double-click → one round). Idempotent publication via migration 004 (rounds + table_assignments + icebreakers; drafts/plans/attendees kept out). Offline viewing supported, offline sync explicitly NOT. Design: `docs/design/realtime.md`. Impl: `backend/app/routers/live.py` + `rounds.py`. Frontend subscription wiring lands in Step 7 against this contract | ✅ Done |
+| 6 | **Claude Icebreaker Engine** — 1 LLM call per table per round (batch), **async via BackgroundTasks** (publish never waits; each icebreaker INSERT is a Step-5 doorbell, question pops into `/live`). Claude on **Vertex AI** behind a provider abstraction (`app/icebreakers/provider.py`: vertex/stub/disabled). **All prompts in one place** (`app/icebreakers/prompts.py`) incl. guardrails + curated fallback bank. Per-person fallback on any LLM error/timeout/junk; idempotent batch (retried publish = no-op); synchronous "Generate Another" refresh. People referenced to the model by index, not UUID. No new migration (icebreakers table/publication already existed). Audit `icebreaker.generated/refreshed` (counts only, no PII). Design: `docs/design/icebreakers.md`. Impl: `app/icebreakers/`, `routers/icebreakers.py`, publish seam in `rounds.py`. Provider/model/tunables all env-driven | ✅ Done |
+| 7 | **Next.js Frontend** — all 7 pages (4 attendee + 3 organizer), mobile-first 375px; UI design + error states decided just-in-time per page | ⏳ Next |
 
 ---
 
-## 7. Backend API Endpoints
+## Where to Find Everything
 
-### Events
-- `POST /events` — create a new event
-- `GET /events/:eventId` — get event details
-- `GET /events/:eventId/attendees` — list all attendees
+### 🔨 What We're Building Right Now
+| Document | Purpose |
+|---|---|
+| [`docs/product/releases/pre-mvp.md`](docs/product/releases/pre-mvp.md) | **START HERE.** Complete build spec: features, data models, endpoints, tech stack |
+| [`GETTING_STARTED.md`](GETTING_STARTED.md) | Dev onboarding: fresh-clone setup, env files, tests, and how auth works |
+| [`docs/testing/rotation-validation.md`](docs/testing/rotation-validation.md) | Step-by-step: validate the rotation algorithm + see latency (shareable runbook) |
 
-### Attendees
-- `POST /events/:eventId/attendees` — register a new attendee
-- `PATCH /events/:eventId/attendees/:attendeeId` — update status (arrived, left)
-- `GET /events/:eventId/attendees/:attendeeId` — get individual attendee + current assignment
+### 📋 Release Roadmap
+| Document | Purpose |
+|---|---|
+| [`docs/product/releases/pre-mvp.md`](docs/product/releases/pre-mvp.md) | Prototype for live pilot (CURRENT) |
+| [`docs/product/releases/mvp.md`](docs/product/releases/mvp.md) | India-first Event Intelligence Platform |
+| [`docs/product/releases/v1.md`](docs/product/releases/v1.md) | Predictive scoring, CRM integrations, multilingual |
+| [`docs/product/releases/v2.md`](docs/product/releases/v2.md) | Autonomous AI agents, self-serve sponsor portal |
 
-### Rounds
-- `POST /events/:eventId/rounds/start` — start a new round (triggers algorithm, pushes assignments)
-- `POST /events/:eventId/rounds/end` — end current round
-- `GET /events/:eventId/rounds/current` — get current round assignments
+### 🔍 Discovery & Research (Completed)
+| Document | Purpose |
+|---|---|
+| [`docs/product/discovery/assumptions.md`](docs/product/discovery/assumptions.md) | Validated and unvalidated assumptions |
+| [`docs/product/discovery/risks.md`](docs/product/discovery/risks.md) | Known risks and mitigations |
+| [`docs/product/discovery/open_questions.md`](docs/product/discovery/open_questions.md) | Unresolved product questions |
+| [`docs/product/personas.md`](docs/product/personas.md) | Core persona definitions |
+| [`docs/product/event_lifecycle.md`](docs/product/event_lifecycle.md) | Event lifecycle index |
+| [`docs/product/lifecycle/`](docs/product/lifecycle/) | Detailed persona journey maps |
 
-### Icebreakers
-- `GET /events/:eventId/rounds/:roundId/icebreaker/:attendeeId` — get this attendee's icebreaker question for this round
+### 📦 Features & Prioritization
+| Document | Purpose |
+|---|---|
+| [`docs/product/features/feature_inventory.md`](docs/product/features/feature_inventory.md) | Priority lists (MVP, Revenue, AI, Differentiation) |
+| [`docs/product/features/feature_dictionary.md`](docs/product/features/feature_dictionary.md) | Full 13-point feature definitions |
+| [`docs/product/features/feature_rationalization.md`](docs/product/features/feature_rationalization.md) | Why features were included, deferred, or rejected |
 
----
-
-## 8. Data Models
-
-### Event
-```
-id, name, date, time, location, description,
-num_tables, seats_per_table, organizer_id,
-status (upcoming / active / ended),
-created_at
-```
-
-### Attendee
-```
-id, event_id, name, role (what they do),
-looking_for (who they want to meet),
-status (registered / arrived / left),
-unique_link_token,
-created_at
-```
-
-### Round
-```
-id, event_id, round_number,
-started_at, ended_at,
-status (active / completed)
-```
-
-### TableAssignment
-```
-id, round_id, event_id,
-attendee_id, table_number
-```
-
-### Icebreaker
-```
-id, round_id, table_number,
-recipient_attendee_id, target_attendee_id,
-question_text,
-generated_at
-```
+### 🏗️ Architecture (Discovery Phase)
+| Document | Purpose |
+|---|---|
+| [`docs/architecture/domains/`](docs/architecture/domains/) | 15 DDD domain specifications |
+| [`docs/architecture/requirements/mvp_requirements.md`](docs/architecture/requirements/mvp_requirements.md) | MVP architecture requirements |
+| [`docs/knowledge/domain_dictionary.md`](docs/knowledge/domain_dictionary.md) | Ubiquitous language definitions |
 
 ---
 
-## 9. Real-Time Behavior
+## Decision Log
 
-Supabase real-time subscriptions are used so that when the organizer clicks "Start Round", every attendee's phone updates instantly without them refreshing.
-
-- Attendee screen subscribes to: changes on `Round` (for their event) and `TableAssignment` (for their attendee ID)
-- When a new round starts, the attendee screen re-renders with the new table number and new icebreaker question automatically
-
----
-
-## 10. First Pilot Details
-
-- **Event:** Founder Meetup, Hyderabad
-- **Date:** June 27, 2025
-- **Expected attendees:** ~40 people
-- **Format:** 4 people per table, 5-minute rounds
-- **Number of tables needed:** 10 tables
-- **Estimated rounds:** 8–10 rounds
-
----
-
-## 11. Success Criteria for Pilot
-
-- Every attendee can open their link on their phone and see their table assignment
-- Algorithm produces zero repeated pairings for at least the first 6 rounds
-- Organizer can run the entire event from one screen without calling out any names
-- Icebreaker questions feel relevant and personal (not generic)
-- No crashes or loading failures during the live event
-
----
-
-## 12. Product Name Ideas
-
-A few directions worth considering:
-
-- **Orbits** — people move around each other, every round is a new orbit
-- **Roundly** — clean, describes the round-based format, easy to say
-- **Tablemate** — literal, friendly, immediately understood
-- **Circl** — short for circle/circulation, modern spelling
-- **Mixr** — mixing people together, simple
-- **Nestly** — nesting connections at events
-
-No name is final. Pick what feels right for the founder meetup audience.
+| Date | Decision | Context |
+|---|---|---|
+| 2025-06 | Pre-MVP is an OTT intelligence layer, not an event management platform | We integrate with existing tools instead of building ticketing/registration ops |
+| 2025-06 | WhatsApp-first, not WhatsApp-only | Email retained for reporting, exports, organizer workflows |
+| 2025-06 | English-only for Pre-MVP | Multilingual deferred to V1 |
+| 2025-06 | Phone OTP is MVP identity bootstrap | Long-term identity model may require sophistication |
+| 2025-06 | Pre-MVP prototype pivots to structured round-based networking | Fastest path to validate AI + Event Memory hypotheses with a live audience |
+| 2026-06 | 7-step build order locked; Auth moved to Step 3 (early, not last) | Avoids retrofitting auth into every endpoint later; see Build Order section above |
+| 2026-06 | Brainstorm-before-code rule for every step | Each step opens with a short design/requirements session; Steps 4 & 5 require explicit design alignment before implementation |
+| 2026-06 | Pilot attendee auth = attendee's choice of Google sign-in OR Email OTP (via Brevo SMTP), shown as two equal options; phone OTP deferred to MVP | Considered single-method (Google-only) to cut complexity; deliberately chose both so attendees pick what suits them. Phone OTP in India needs DLT registration (weeks) or paid providers. Phone/WhatsApp still collected on the registration form as profile data. |
+| 2026-06 | Organizer account created manually in Supabase dashboard with `app_metadata.role = "organizer"`; no signup flow for pilot | One known organizer; building signup UI adds code and attack surface for no benefit |
+| 2026-06 | Backend deploys to **Google Cloud Run** (min-instances=1), not Render | Team has GCP credits; Render free tier sleeps after 15 min idle (~50s cold start = event-day risk). Cloud Run stays warm, paid by credits |
+| 2026-06 | OTP email via **Gmail SMTP** (app password), not Brevo | Free 500/day; sent from Google's servers so best Gmail inbox delivery for a Gmail-heavy audience |
+| 2026-06 | Supabase stays on **free tier** through the pilot | Capacity math: ~70 realtime connections vs 200 limit, tiny DB. Trade-off accepted: must verify project is unpaused the week before the event; no daily backups |
+| 2026-06 | Step 6 icebreakers: prefer Claude via **Vertex AI** (GCP credits) — final call at Step 6 | Anthropic SDK has native AnthropicVertex client; credits cover LLM costs |
+| 2026-06 | **Step 6 LLM = Claude on Vertex AI, CONFIRMED** (not direct Anthropic API) | Uses existing GCP credits (≈free for pilot) + ADC auth, no `sk-ant-` key to manage. Claude Pro subscription ≠ API access (separate product) — Vertex sidesteps it entirely. Built behind a provider abstraction so direct-Anthropic is a one-line swap if ever needed. `LLM_PROVIDER` env selects vertex/stub/disabled |
+| 2026-06 | **Icebreakers async via FastAPI BackgroundTasks, not inline** | Spec forbids blocking the UI on the LLM. Publish returns the round instantly; generation runs after, and each icebreaker INSERT is a Step-5 realtime doorbell so the question appears in `/live` seconds later. Any LLM failure degrades per-person to a curated fallback bank — the room never sees a blank icebreaker. Idempotent (retried publish is a no-op). All prompts centralized in `app/icebreakers/prompts.py`. See `docs/design/icebreakers.md` |
+| 2026-06 | **Rotation engine upgraded greedy → re-planning optimizer (simulated annealing)** | Benchmarked greedy against a real optimizer (not naive-random): greedy left up to ~50% more overlap in the mid-size band where real events live, and missed zero-overlap schedules at pilot length. Validated the candidate across 14 shapes (12–1000 people) × stable+churn in `compare_algorithms.py`: re-plan ≥ greedy everywhere, scales to 1000p in seconds. Strategy = plan once / follow / re-plan only on roster change (commit-first MPC was proven *worse* than greedy). Greedy kept as fallback; planner is time-bounded so it can never hang the console. Migration 003 required |
+| 2026-06-16 | **Scope expanded beyond Pre-MVP: pre-event experience promoted into the build.** Phase 1 = pre-event registration + a public "who's coming" attendee directory (search/filter by role, tag, interests) with a per-attendee visibility toggle and attendee tags (attendee/speaker/host). Phase 2 = self-service day-of room code (separate from the join code). Phase 3 = pre-event intent "likes" + the algorithm honoring them + a round-start nudge. | `pre-mvp.md` listed "pre-event intent-based matching" as explicitly out of scope; the product is being deliberately grown past the pilot spec. Phases 1–2 ship for the pilot; Phase 3 (the headline differentiator) is designed separately once the matching-algorithm direction is settled. Reverses the earlier "WhatsApp-first" stance (below). |
+| 2026-06-16 | **Phase 2 shipped: self-service day-of room check-in.** A SECOND per-event secret — the "room code" — separate from the join/access code. Pre-registered guests (status `registered`, set when `auto_arrive_on_register` is off) flip themselves to `arrived` by typing the room code at the venue (`POST /events/:id/attendees/me/arrive`), joining the seating pool with no door queue. Owner-only manage (`GET` / `regenerate` / `DELETE` `/events/:id/room-code`); revealed only on the organizer control-room screen. | The join code is shareable in advance (it's in the invite); the arrival signal must NOT be, or a no-show could mark themselves present from home. So it's a distinct secret in its own service-role-only table `event_room_codes` (migration 010) — never on the anon-readable `events` row, never in a link/QR, never in the audit log. Mirrors the access-code security posture exactly. Companion to `auto_arrive_on_register=off`. |
+| 2026-06-16 | **Phase 3 algorithm validated by simulation — GREEN LIGHT.** A pure offline harness (`backend/scripts/simulate_intent.py`, production `algorithm.py` untouched) prototyped the candidate objective across 15 scenarios (n=30→160; uniform/hub/clique/bipartite/sparse/saturated/few-rounds; +no-show, +speaker-exclusion, +live mid-event). Result: pure novelty satisfies only 25–54% of likes by luck; **guaranteeing MUTUAL likes is FREE — 100% at +0 novelty cost in every scenario** (cliques cost +2); one-way tunable to 95–100% for tiny meeting-cost; excluding speakers removes the capacity cliff; live re-plan recovers 100% late mutual; runtime <2s at n=160. Confirmed decisions: mutual guaranteed first + one-way soft bonus; per-person pick cap = planned rounds; privacy = mutual-only reveal (post-event), one-sided at-table nudge; speakers excluded from rotation; picks editable live. Findings: `docs/design/phase3-intent-findings.md`. | The matching algorithm is the headline differentiator and the riskiest piece, so it was proven on data before any product code — per the standing rule "only build at 100% algo confidence." |
+| 2026-06-16 | **Phase 3a shipped: pre-event meeting intents + at-table nudge + mutual-only reveal (no seating change yet).** Browsing the directory, an attendee picks people to meet (capped at planned rounds). Picks live in their own service-role-only table `meeting_intents` (migration 011) — deliberately NOT reusing `connection_likes` (that's the post-meeting rolodex signal; conflating them corrupts rolodex meaning). Endpoints `POST/DELETE/GET me/GET matches /events/:id/intents`; directory returns `wanted_by_me`+cap; live snapshot flags `wanted` tablemates. Privacy: you see only your own picks; the nudge is one-sided (the picked person is never told); unrequited interest is never disclosed — only mutual picks, only after the event. Speakers/hosts can't be picked (not seated). 269+21 backend tests + tsc green. | Staged ahead of the objective change (3b) so the data/UX ships and is testable with zero risk to the live seating engine. 3b will extend the objective to honor mutual (free) + one-way (soft) and re-plan the tail on live pick changes. |
+| 2026-06-16 | **Phase 3b shipped: the seating engine now HONORS meeting picks (the headline feature).** `app/algorithm.py`'s `plan_rounds(..., intents=...)` folds the validated objective `repeats − λ·(satisfied-pick weight)` (λ=3, mutual=4, one-way=1: `INTENT_LAMBDA`/`INTENT_W_MUTUAL`/`INTENT_W_ONEWAY`) into the SAME greedy + simulated-annealing delta loops as novelty — honoring picks is asymptotically free. With no picks the reward is identically zero, so seating is byte-for-byte the old pure-novelty result (determinism + all prior tests intact). `rounds.py` reads `meeting_intents` restricted to the seated pool (picks toward no-shows/non-seated guests dropped) and the plan-cache key folds in a fingerprint of those picks, so a mid-event pick change re-plans the remaining rounds from fixed history ("stay live"); the draft's `arrived_hash` stays attendance-only. `RotationPlan` reports `intent_pairs_satisfied`/`_requested`. Production cross-check at pilot scale (n=40, 6 rounds): **mutual 100% every seed**, one-way 96–97%, ~0.2s — matching the offline study. 270+9 backend tests green; `simulate_intent.py` stays the regression gate. | The riskiest, highest-value piece, staged after 3a so data/UX shipped first. Built only after the algorithm was proven at 100% confidence (per the standing rule). Mutual is guaranteed-when-feasible and weighted ≫ one-way (a soft bonus); the greedy fallback stays pure-novelty for reliability. |
+| 2026-06-16 | **Phase 6 shipped: organizer-authored round agenda.** Round themes were hardcoded client-side placeholders (`rounds.ts` ROUNDS: "Origins", "What you're building"…). Organizers can now name each round in event Settings; stored as an ordered array `events.round_topics TEXT[]` (migration 012; index i = round i+1, empty = canonical default names, so pre-existing events are unchanged). Surfaced on the attendee waiting-room "Tonight" card and the live round boarding pass via `agendaFor(i, topics)`, and — the real payoff — **the round's theme is threaded into the icebreaker prompt** (`build_user_prompt(roster, histories, theme)` via `engine._round_theme`), so the agenda actually steers the AI conversation for that round instead of being a label. Validated (trim, ≤80 chars/topic, ≤24 topics, trailing-blanks dropped); EventCreate/Update/Response + LiveStateResponse carry it. 295 backend tests + tsc green. | Lowest-risk grain (a column on events, like `target_rounds`): the agenda is tiny, authored and read as a unit. Graceful default preserves current behavior; theming the icebreaker is what turns a cosmetic label into a product feature. |
+| 2026-06-16 | **WhatsApp removed entirely; never collected.** The attendee profile is now name, role, company, description ("what they're doing"), website, LinkedIn, interests, avatar. `whatsapp_number` dropped from the schema and every surface; the rolodex "tap-to-WhatsApp" becomes tap-to-LinkedIn / tap-to-website. | Supersedes the 2025-06 "WhatsApp-first" and 2026-06 "Phone/WhatsApp collected as profile data" entries. A public pre-event directory makes a phone number the wrong default contact channel; professional links (LinkedIn/website) fit the founder/startup audience and avoid exposing personal numbers. Migration 009 required. |
+| 2026-06 | **Realtime architecture = "doorbell, not the meal"; recovery is guaranteed (REQ-RT-01)** | Realtime messages are best-effort and can be missed (phone asleep, network loss). Rather than parsing payloads to mutate client state (out-of-order/partial-data bugs), a realtime event is only a *ping to re-fetch*. The phone fetches one authoritative snapshot (`GET /events/:id/live`) on load, reconnect, wake, and every ping — same code path — and must recover within 3 s. Channel structure = one event-scoped channel per phone (≈70 vs ~200 free-tier cap). Countdown derived locally from server `started_at`+`duration`+`server_time` (never streamed). Polling fallback (~10–15 s) covers websockets being blocked entirely. PII never on the wire: `attendees` not published; `round_drafts`/`round_plans` kept out. Announcements / 1:1-match / presence explicitly out of Pre-MVP scope. See `docs/design/realtime.md` |
+| 2026-06 | **Deploy Cloud Run in the same region as the Supabase project** | Live validation (`validate_rotation.py`) measured ~700–900ms per organizer action from dev — dominated by network distance + one `auth.get_user` round-trip per request, not the algorithm (sub-ms). Co-location is the main latency lever. Acceptable for organizer console actions regardless; attendees are on Realtime, not this path. If latency ever bites, local JWT verification (vs `get_user`) is the fallback lever — deliberately not done now (reliability over speed) |
+| 2026-06-15 | **Attendee flow extended beyond pre-mvp.md: attendee home dashboard + per-event access code** (Step 7) | Spec defined a single shareable event link → register. Product owner chose the industry-standard pattern (Luma/Eventbrite/Partiful): a personal **home** (today / upcoming) AND a working **deep link** to a single event — the deep link stays the reliable in-room mechanic, the dashboard is the product surface. Registration now sits behind a **per-event access code** the organizer announces ("the code is MIXER"). Code is a SECRET in its own service-role-only table (`event_access_codes`, migration 005) — never on the anon-readable `events` row; public API exposes only `requires_code`. Verified case-insensitively server-side on `POST /attendees` (the real gate); `verify-code` is a UX pre-check. Built page-by-page: registration experience first (this change), then the home dashboard |
+| 2026-06-15 | **Likes → matches added (one-directional, surfaced as "match" when mutual)** | Attendees ❤️ tablemates live; a mutual like is a *match*. Stored in `connection_likes` with **RLS-on/no-policies = service-role only** (migration 006) — who-liked-whom is never client-readable; it returns only as flags on the liker's own snapshot (`liked`) and rolodex (`liked`/`mutual` + `matches_count`). Idempotent like/unlike, self-like blocked. Consistent with the strict PII posture: no new readable surface, contact info still only in `/connections`. |
+| 2026-06-15 | **Profile avatars everywhere (Google photo, initials fallback)** | Capture `user_metadata.avatar_url`/`picture` at registration → `attendees.avatar_url` (migration 006); rendered via a token-driven `Avatar` (photo with `referrerPolicy="no-referrer"` + `onError` → colored-initials fallback) across live tablemates, rolodex, organizer people + control-room grid. Better recognition in the room; degrades gracefully for email-OTP / walk-in attendees with no photo. |
+| 2026-06-15 | **Walk-in attendees (organizer adds someone with no account)** | `POST /events/:id/attendees/walkin` (owner-only) creates an attendee with `user_id=null`, `status="arrived"`, seated by the planner like everyone else. Covers the door reality of a live event — people show up unregistered and still need a table. They have no login and won't get a personal rolodex, but they fully participate in rounds. |
+| 2026-06-15 | **Theme is pinned per route-segment, not toggled** | Landing stays LIGHT (locked, DESIGN_SYSTEM §1.5); every app surface (`/event/*`, `/organizer/*`, `/home`) is pinned DARK via segment layouts. Components are semantic-token-driven so they render correctly in either theme; routes choose the theme. No user toggle in Pre-MVP — intentional, not a gap. |
+| 2026-06-15 | **Avatars are multi-color gradients, from one source** | No-photo avatars render a deterministic two-distinct-color brand gradient (seeded by attendee id) + luminance-correct initials, via the single `lib/design/avatar.ts` helper — replacing a `colorFor` hash that was copy-pasted in 4 files. More vivid + recognizable than a flat tile; identical for the same person everywhere. |
+| 2026-06-15 | **Shared-interest tags + private notes (migration 007)** | Attendees pick interest tags at registration (`attendees.interests TEXT[]`); the live tablemate card and rolodex highlight tags you **both** picked as instant conversation openers. Attendees can also jot a private one-line note about anyone they met (`connection_notes`, service-role-only like likes) — surfaced only in their own rolodex. Also surfaced the long-captured-but-never-shown `looking_for`. |
+| 2026-06-15 | **Attendee self-service profile editing** | `PATCH /events/:id/attendees/me` (identity from JWT) + a `/event/:id/profile` page let attendees fix contacts / interests after registering — those fields are exactly what the rolodex depends on. Status stays organizer-only. |
+| 2026-06-15 | **Organizer day-of + post-event tooling** | QR invite + copyable register link (QR rendered locally — works on flaky venue wifi), client-side CSV export of the roster with contacts, a live "room pulse" (arrived / seated / likes / matches, polled ~12s) in the control room, and an enriched post-event analytics panel (`total_likes`, `total_matches`, % of room met) on the existing `/analytics`. |
+| 2026-06-15 | **Join-first hub replaces the event feed** | After sign-in, the attendee hub (`/home`) leads with three actions — **Join via access code**, **Join via QR**, **My connections** — instead of a browsable event list (the list is kept as a "Your events" section below, for re-entry). Rationale: attendees come to a *specific* event with a code/QR the organizer gave them; they shouldn't have to find it in a list. Reverse lookup is `POST /events/join` (code → event); both join buttons and the `/join?code=` deep link share one resolver (`lib/join.ts`), then route to the event's registration → waiting room. |
+| 2026-06-15 | **In-app QR scanner (not just native camera)** | "Join via QR" opens an in-app camera scanner (`html5-qrcode`, lazy-loaded, decodes locally — no network, works on venue wifi). The organizer's QR encodes a `/join?code=` deep link, so a *native* camera scan and a shared link work too (the `/join` page signs the user in if needed, then resolves). Belt-and-suspenders: one QR serves the in-app scanner, the phone camera, and a pasteable link. |
+| 2026-06-15 | **Organizer-managed access codes (generate / regenerate / remove)** | Codes are now first-class on the organizer dashboard: view, copy, **regenerate** (rotate a leaked code), or remove (make the event open). Generated codes are 6 chars from an unambiguous alphabet (no I/L/O/0/1) and **globally unique** so the code→event reverse lookup is unambiguous. The value is returned only to the owning organizer (`GET /events/:id/access-code`); attendee phones still can never read it (secret table, service-role only). |
+| 2026-06-15 | **Cross-event connections (`GET /me/connections`)** | "My connections" aggregates everyone the caller has met across **all** their events into one rolodex, each card tagged with its event. Reuses the per-event connection builder (likes/notes/shared-interests identical). A personal address book that outlives any single event. |
+| 2026-06-15 | **Responsive: laptop as a first-class width** | App surfaces were phone-only (`max-w-md`). The hub/rolodex/people now use `max-w-3xl`/`2xl` with `sm:`/`lg:` grids (mobile-first → widen, no logic change). Live table surfaces stay column-centered (a single table is inherently narrow). Verified at 375px and ≥1024px. |
+| 2026-06-15 | **HARD RULE — Live screen state comes from the session + server, never the URL** | The attendee identity on `/event/:id/live` is resolved from the Supabase JWT (`GET /attendees/me`), **not** from a `?attendee=` query param. Rationale: (1) security — an attendee id in a shareable URL invites the "can I just change it?" question (answer is no, the backend authorizes by token with `is_self or is_organizer` → 403, but it shouldn't be in the URL at all); (2) privacy — query params leak into browser history, server logs, referrer headers, analytics, and shared screenshots, all of which happen at a live event. **Resume guarantee:** on load / refresh / reconnect / wake the page re-fetches one authoritative snapshot (`GET /events/:id/live`, REQ-RT-01) and reconstructs the attendee mid-round (their current round + table come from the server, not client/URL state) — so a refresh during Round 3 lands back on Round 3, their table, their icebreaker. Only `:eventId` lives in the path (public, anon-readable, standard). Applies to every post-auth attendee redirect (register success, already-registered, AlreadyIn) — they target `/event/:id/live` with no attendee param |

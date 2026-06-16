@@ -1,0 +1,152 @@
+"""Tests for the join-first hub: reverse code -> event lookup, organizer
+access-code management (view / regenerate / clear, owner-only), and the
+cross-event /me/connections rolodex."""
+
+from tests.conftest import (
+    ATTENDEE_AUTH,
+    ATTENDEE_USER_ID,
+    AUTH,
+    OTHER_AUTH,
+    OTHER_ATTENDEE_AUTH,
+    make_assignment,
+    make_attendee,
+    make_round,
+)
+
+
+def _set_code(db, event_id, code):
+    db.seed("event_access_codes", {"event_id": event_id, "code": code})
+
+
+# --- POST /events/join (reverse code lookup) ---
+
+def test_join_resolves_event_by_code(client, db, event):
+    _set_code(db, event["id"], "MIXER7")
+    res = client.post("/events/join", json={"code": "MIXER7"}, headers=ATTENDEE_AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["event_id"] == str(event["id"])
+    assert body["name"] == event["name"]
+    assert body["requires_code"] is True
+
+
+def test_join_is_case_and_space_insensitive(client, db, event):
+    _set_code(db, event["id"], "MIXER7")
+    res = client.post("/events/join", json={"code": "  mixer7 "}, headers=ATTENDEE_AUTH)
+    assert res.status_code == 200
+    assert res.json()["event_id"] == str(event["id"])
+
+
+def test_join_unknown_code_is_404(client, db, event):
+    _set_code(db, event["id"], "MIXER7")
+    res = client.post("/events/join", json={"code": "NOPE99"}, headers=ATTENDEE_AUTH)
+    assert res.status_code == 404
+
+
+def test_join_works_without_auth(client, db, event):
+    """The hub requires sign-in, but the lookup itself is public (the event id is
+    already public) — so a shared /join?code= link resolves before sign-in too."""
+    _set_code(db, event["id"], "OPEN42")
+    res = client.post("/events/join", json={"code": "OPEN42"})
+    assert res.status_code == 200
+
+
+# --- Access-code management (owner only) ---
+
+def test_owner_can_view_access_code(client, db, event):
+    _set_code(db, event["id"], "MIXER7")
+    res = client.get(f"/events/{event['id']}/access-code", headers=AUTH)
+    assert res.status_code == 200
+    assert res.json()["code"] == "MIXER7"
+
+
+def test_view_access_code_is_null_when_open(client, db, event):
+    res = client.get(f"/events/{event['id']}/access-code", headers=AUTH)
+    assert res.status_code == 200
+    assert res.json()["code"] is None
+
+
+def test_other_organizer_cannot_view_code(client, db, event):
+    _set_code(db, event["id"], "MIXER7")
+    res = client.get(f"/events/{event['id']}/access-code", headers=OTHER_AUTH)
+    assert res.status_code == 403
+
+
+def test_attendee_cannot_view_code(client, db, event):
+    _set_code(db, event["id"], "MIXER7")
+    res = client.get(f"/events/{event['id']}/access-code", headers=ATTENDEE_AUTH)
+    assert res.status_code in (401, 403)
+
+
+def test_regenerate_mints_new_unique_code(client, db, event):
+    _set_code(db, event["id"], "OLD123")
+    res = client.post(f"/events/{event['id']}/access-code/regenerate", headers=AUTH)
+    assert res.status_code == 200
+    new_code = res.json()["code"]
+    assert new_code and new_code != "OLD123"
+    # old code stops working, new one resolves
+    assert client.post("/events/join", json={"code": "OLD123"}).status_code == 404
+    assert client.post("/events/join", json={"code": new_code}).status_code == 200
+
+
+def test_other_organizer_cannot_regenerate(client, db, event):
+    res = client.post(f"/events/{event['id']}/access-code/regenerate", headers=OTHER_AUTH)
+    assert res.status_code == 403
+
+
+def test_clear_code_opens_event(client, db, event):
+    _set_code(db, event["id"], "MIXER7")
+    res = client.delete(f"/events/{event['id']}/access-code", headers=AUTH)
+    assert res.status_code == 200
+    assert res.json()["code"] is None
+    assert client.get(f"/events/{event['id']}/access-code", headers=AUTH).json()["code"] is None
+    assert client.post("/events/join", json={"code": "MIXER7"}).status_code == 404
+
+
+# --- GET /me/connections (cross-event rolodex) ---
+
+def _met_in(db, event_id, other_name):
+    """Seed me (the attendee user) + someone, sharing a completed round."""
+    me = make_attendee(db, event_id, name="Me", user_id=ATTENDEE_USER_ID, interests=["AI"])
+    other = make_attendee(db, event_id, name=other_name, interests=["AI", "Climate"])
+    r = make_round(db, event_id, round_number=1, status="completed")
+    make_assignment(db, event_id, r["id"], me["id"], 1)
+    make_assignment(db, event_id, r["id"], other["id"], 1)
+    return me, other
+
+
+def test_me_connections_aggregates_across_events(client, db, event):
+    # second event owned by the same organizer
+    event2 = db.seed(
+        "events",
+        {**{k: v for k, v in event.items() if k != "id"}, "name": "DevHouse Demo"},
+    )[0]
+    _met_in(db, event["id"], "Maya")
+    _met_in(db, event2["id"], "Arjun")
+
+    res = client.get("/me/connections", headers=ATTENDEE_AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["events_count"] == 2
+    assert body["total_people_met"] == 2
+    names = {c["name"] for c in body["connections"]}
+    assert names == {"Maya", "Arjun"}
+    # each entry is tagged with its event + shared interests are computed
+    by_name = {c["name"]: c for c in body["connections"]}
+    assert by_name["Maya"]["event_name"] == "Founder Meetup"
+    assert "AI" in by_name["Maya"]["shared_interests"]
+
+
+def test_me_connections_excludes_other_users(client, db, event):
+    _met_in(db, event["id"], "Maya")
+    res = client.get("/me/connections", headers=OTHER_ATTENDEE_AUTH)
+    assert res.status_code == 200
+    assert res.json()["connections"] == []
+
+
+def test_me_connections_empty_when_never_attended(client, db, event):
+    res = client.get("/me/connections", headers=ATTENDEE_AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["total_people_met"] == 0
+    assert body["events_count"] == 0

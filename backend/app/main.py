@@ -17,9 +17,18 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# CORS: allow frontend origin (dev and production)
+# In development: allow localhost variants (localhost + 127.0.0.1 on any port)
+# In production: allow only frontend_url (e.g. Vercel domain)
+ALLOW_ORIGINS = (
+    ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173"]
+    if settings.frontend_url in ["http://localhost:3000", "http://127.0.0.1:3000"]
+    else [settings.frontend_url]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url],
+    allow_origins=ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

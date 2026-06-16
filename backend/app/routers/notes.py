@@ -40,7 +40,7 @@ def _me_or_404(db: Client, event_id: str, user: AuthUser) -> dict:
 
 
 @router.put("/{target_attendee_id}", response_model=NoteResponse)
-async def upsert_note(
+def upsert_note(
     event_id: str,
     target_attendee_id: str,
     body: NoteRequest,
@@ -87,7 +87,7 @@ async def upsert_note(
 
 
 @router.delete("/{target_attendee_id}", response_model=NoteResponse)
-async def delete_note(
+def delete_note(
     event_id: str,
     target_attendee_id: str,
     user: AuthUser = Depends(get_current_user),

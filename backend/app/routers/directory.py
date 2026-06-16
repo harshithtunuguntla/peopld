@@ -29,7 +29,7 @@ router = APIRouter(prefix="/events/{event_id}/directory", tags=["directory"])
 
 
 @router.get("", response_model=DirectoryResponse)
-async def get_directory(
+def get_directory(
     event_id: str,
     user: AuthUser = Depends(get_current_user),
     db: Client = Depends(get_supabase),

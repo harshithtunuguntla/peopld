@@ -43,7 +43,7 @@ def _fetch_attendee(db: Client, event_id: str, attendee_id: str) -> dict:
 
 
 @router.post("", response_model=AttendeeResponse, status_code=201)
-async def register_attendee(
+def register_attendee(
     event_id: str,
     body: AttendeeCreate,
     response: Response,
@@ -102,7 +102,7 @@ async def register_attendee(
 
 
 @router.post("/walkin", response_model=AttendeeResponse, status_code=201)
-async def add_walkin(
+def add_walkin(
     event_id: str,
     body: WalkInCreate,
     organizer_id: str = Depends(get_current_organizer_id),
@@ -134,7 +134,7 @@ async def add_walkin(
 
 
 @router.post("/check-in-all", response_model=BulkCheckInResponse)
-async def check_in_all(
+def check_in_all(
     event_id: str,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
@@ -172,7 +172,7 @@ async def check_in_all(
 
 
 @router.get("/me", response_model=AttendeeResponse)
-async def get_my_registration(
+def get_my_registration(
     event_id: str,
     user: AuthUser = Depends(get_current_user),
     db: Client = Depends(get_supabase),
@@ -197,7 +197,7 @@ async def get_my_registration(
 
 
 @router.patch("/me", response_model=AttendeeResponse)
-async def update_my_registration(
+def update_my_registration(
     event_id: str,
     body: AttendeeSelfUpdate,
     user: AuthUser = Depends(get_current_user),
@@ -240,7 +240,7 @@ async def update_my_registration(
 
 
 @router.post("/me/arrive", response_model=AttendeeResponse)
-async def self_arrive(
+def self_arrive(
     event_id: str,
     body: ArriveRequest,
     user: AuthUser = Depends(get_current_user),
@@ -293,7 +293,7 @@ async def self_arrive(
 
 
 @router.get("/{attendee_id}", response_model=AttendeeWithAssignmentResponse)
-async def get_attendee(
+def get_attendee(
     event_id: str,
     attendee_id: str,
     user: AuthUser = Depends(get_current_user),
@@ -341,7 +341,7 @@ async def get_attendee(
 
 
 @router.patch("/{attendee_id}", response_model=AttendeeResponse)
-async def update_attendee(
+def update_attendee(
     event_id: str,
     attendee_id: str,
     body: AttendeeUpdate,

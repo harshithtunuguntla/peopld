@@ -12,7 +12,7 @@ router = APIRouter(
 
 
 @router.get("", response_model=ConnectionsResponse)
-async def get_connections(
+def get_connections(
     event_id: str,
     attendee_id: str,
     user: AuthUser = Depends(get_current_user),

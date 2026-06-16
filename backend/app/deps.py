@@ -1,9 +1,11 @@
 import secrets
 from dataclasses import dataclass
 
+import jwt
 from fastapi import Depends, Header, HTTPException, Request
 from supabase import Client
 
+from app.config import settings
 from app.database import get_supabase
 
 ORGANIZER_ROLE = "organizer"
@@ -18,37 +20,67 @@ class AuthUser:
     role: str | None  # app_metadata.role — "organizer" or None (attendee)
 
 
-async def get_current_user(
-    request: Request,
-    authorization: str | None = Header(default=None),
-    db: Client = Depends(get_supabase),
-) -> AuthUser:
-    """Verify the Supabase JWT from the Authorization header.
+def _decode_local(token: str) -> AuthUser:
+    """Verify a Supabase JWT locally using the project JWT secret (HS256).
 
-    Uses auth.get_user() (one round-trip) over local JWKS verification:
-    reliability over cleverness at pilot scale. Swap internals here if
-    request volume ever makes it matter — callers won't change.
+    The fast path: ~0.1 ms of CPU vs a ~100 ms Supabase Auth round-trip per
+    request. Used whenever SUPABASE_JWT_SECRET is configured.
     """
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Missing bearer token")
-    token = authorization.split(" ", 1)[1].strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing bearer token")
+    try:
+        payload = jwt.decode(
+            token,
+            settings.supabase_jwt_secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    role = (payload.get("app_metadata") or {}).get("role")
+    return AuthUser(id=str(payload["sub"]), email=payload.get("email"), role=role)
 
+
+def _verify_remote(token: str, db: Client) -> AuthUser:
+    """Fallback: ask Supabase Auth to verify the token (one round-trip).
+
+    Kept so the service still works if SUPABASE_JWT_SECRET hasn't been set yet
+    (safe, gradual rollout) — reliability over cleverness. Slower, so set the
+    secret to get the local fast path.
+    """
     try:
         result = db.auth.get_user(token)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     if result is None or result.user is None:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-
     user = result.user
     role = (user.app_metadata or {}).get("role")
-    request.state.user_id = str(user.id)  # picked up by the request-log middleware
     return AuthUser(id=str(user.id), email=user.email, role=role)
 
 
-async def get_optional_user(
+def get_current_user(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    db: Client = Depends(get_supabase),
+) -> AuthUser:
+    """Resolve the signed-in user from the Bearer JWT.
+
+    Fast path: local HS256 verification (no Supabase round-trip) when
+    SUPABASE_JWT_SECRET is set. Otherwise falls back to a remote auth check so
+    the service keeps working before the secret is configured.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    user = _decode_local(token) if settings.supabase_jwt_secret else _verify_remote(token, db)
+    request.state.user_id = user.id  # picked up by the request-log middleware
+    return user
+
+
+def get_optional_user(
     request: Request,
     authorization: str | None = Header(default=None),
     db: Client = Depends(get_supabase),
@@ -61,7 +93,7 @@ async def get_optional_user(
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
     try:
-        return await get_current_user(request, authorization, db)
+        return get_current_user(request, authorization, db)
     except HTTPException:
         return None
 

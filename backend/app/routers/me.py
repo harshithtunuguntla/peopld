@@ -10,7 +10,7 @@ router = APIRouter(prefix="/me", tags=["me"])
 
 
 @router.get("/connections", response_model=MyConnectionsResponse)
-async def my_connections(
+def my_connections(
     user: AuthUser = Depends(get_current_user),
     db: Client = Depends(get_supabase),
 ):

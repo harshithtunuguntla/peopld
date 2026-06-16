@@ -63,7 +63,7 @@ def _fetch_target(db: Client, event_id: str, target_id: str) -> dict | None:
 
 
 @router.post("", response_model=IntentResponse, status_code=201)
-async def set_intent(
+def set_intent(
     event_id: str,
     body: IntentRequest,
     user: AuthUser = Depends(get_current_user),
@@ -124,7 +124,7 @@ async def set_intent(
 
 
 @router.delete("/{target_attendee_id}", response_model=IntentResponse)
-async def clear_intent(
+def clear_intent(
     event_id: str,
     target_attendee_id: str,
     user: AuthUser = Depends(get_current_user),
@@ -147,7 +147,7 @@ async def clear_intent(
 
 
 @router.get("/me", response_model=MyIntentsResponse)
-async def my_intents(
+def my_intents(
     event_id: str,
     user: AuthUser = Depends(get_current_user),
     db: Client = Depends(get_supabase),
@@ -172,7 +172,7 @@ async def my_intents(
 
 
 @router.get("/matches", response_model=IntentMatchesResponse)
-async def my_matches(
+def my_matches(
     event_id: str,
     user: AuthUser = Depends(get_current_user),
     db: Client = Depends(get_supabase),

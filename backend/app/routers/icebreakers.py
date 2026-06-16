@@ -39,7 +39,7 @@ def _require_self_or_organizer(
 
 
 @router.get("/{attendee_id}", response_model=IcebreakerResponse)
-async def get_icebreaker(
+def get_icebreaker(
     event_id: str,
     round_id: str,
     attendee_id: str,
@@ -63,7 +63,7 @@ async def get_icebreaker(
 
 
 @router.post("/{attendee_id}/refresh", response_model=IcebreakerResponse)
-async def refresh_icebreaker(
+def refresh_icebreaker(
     event_id: str,
     round_id: str,
     attendee_id: str,

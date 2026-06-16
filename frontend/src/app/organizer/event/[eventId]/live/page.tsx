@@ -24,6 +24,7 @@ import {
   Copy,
   Check,
   DoorOpen,
+  Star,
 } from "lucide-react";
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -53,6 +54,7 @@ interface Attendee {
   name: string;
   role: string;
   status: "registered" | "arrived" | "left";
+  tag: "attendee" | "speaker" | "host";
   avatar_url: string | null;
 }
 interface DraftAssignment {
@@ -223,6 +225,9 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
 
   const byId = new Map(attendees.map((a) => [a.id, a]));
   const arrivedCount = attendees.filter((a) => a.status === "arrived").length;
+  // Only non-guest attendees are seated, so the "ready to seat" count and the
+  // start-round gate must exclude speakers/hosts (they're arrived but off the floor).
+  const seatableCount = attendees.filter((a) => a.status === "arrived" && a.tag === "attendee").length;
 
   if (denied) {
     return (
@@ -271,10 +276,10 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
 
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="Arrived" value={stats?.arrived.toString() || arrivedCount.toString()} icon={Users} />
-        <StatCard 
-          label={phase.kind === "active" ? "Seated Now" : "Ready to Seat"} 
-          value={phase.kind === "active" ? (stats?.seated_now.toString() || "0") : (stats?.arrived.toString() || arrivedCount.toString())} 
-          icon={Armchair} 
+        <StatCard
+          label={phase.kind === "active" ? "Seated Now" : "Ready to Seat"}
+          value={phase.kind === "active" ? (stats?.seated_now.toString() || "0") : seatableCount.toString()}
+          icon={Armchair}
         />
         <StatCard label="Likes" value={stats?.likes_count.toString() || "0"} icon={Heart} />
         <StatCard label="Matches" value={stats?.matches_count.toString() || "0"} icon={Sparkles} />
@@ -292,7 +297,7 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
         {phase.kind === "ended" && <EndedView eventId={eventId} />}
         {phase.kind === "idle" && (
           <IdleView
-            arrivedCount={arrivedCount}
+            arrivedCount={seatableCount}
             busy={busy}
             onStart={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/start`, { method: "POST" }); })}
             onEndEvent={() => act(async () => { await apiFetch(`/events/${eventId}/end`, { method: "POST" }); })}
@@ -548,6 +553,7 @@ function DraftView({
         </Card>
 
         <NotSeated byId={byId} seatedIds={new Set(draft.assignments.map((a) => a.attendee_id))} />
+        <Guests byId={byId} />
 
         <div className="flex flex-col gap-3 sm:flex-row lg:flex-col">
           <Button variant="accent" size="lg" onClick={onPublish} disabled={busy} className="flex-1">
@@ -720,6 +726,7 @@ function ActiveView({
         </Card>
 
         <NotSeated byId={byId} seatedIds={new Set(round.assignments.map((a) => a.attendee_id))} />
+        <Guests byId={byId} />
 
         <div className="flex flex-col gap-3">
           <Button variant="accent" size="lg" onClick={onEnd} disabled={busy} className="w-full">
@@ -967,10 +974,12 @@ function FloorMap({
 }
 
 // --- Shared: people who've arrived but aren't seated this round ---
-// Gives the organizer a glanceable rail of who to walk over to a table.
+// Gives the organizer a glanceable rail of who to walk over to a table. Speakers
+// and hosts are guests (excluded from the rotation), so they are NOT stragglers —
+// they're surfaced separately in <Guests/> so this list stays an honest chase-list.
 function NotSeated({ byId, seatedIds }: { byId: Map<string, Attendee>; seatedIds: Set<string> }) {
   const stragglers = [...byId.values()].filter(
-    (a) => a.status === "arrived" && !seatedIds.has(a.id),
+    (a) => a.status === "arrived" && a.tag === "attendee" && !seatedIds.has(a.id),
   );
   if (stragglers.length === 0) return null;
   return (
@@ -989,6 +998,42 @@ function NotSeated({ byId, seatedIds }: { byId: Map<string, Attendee>; seatedIds
           >
             <Avatar name={a.name} seed={a.id} src={a.avatar_url} size={20} />
             <span className="text-xs text-foreground">{a.name}</span>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+// --- Shared: VIP guests in the room but intentionally off the floor ---
+// Speakers/hosts attend but aren't shuffled between tables. Showing them here
+// (rather than letting them vanish) tells the organizer "your keynote is here —
+// and yes, deliberately not seated", so the floor map's missing faces make sense.
+function Guests({ byId }: { byId: Map<string, Attendee> }) {
+  const guests = [...byId.values()].filter(
+    (a) => a.status === "arrived" && a.tag !== "attendee",
+  );
+  if (guests.length === 0) return null;
+  return (
+    <Card className="p-4">
+      <div className="mb-2.5 flex items-center gap-2 text-sm font-medium text-foreground">
+        <Star className="h-4 w-4 text-gold" aria-hidden /> Guests
+        <span className="ml-auto rounded-full bg-gold/20 px-2 py-0.5 text-xs font-medium text-foreground">
+          {guests.length}
+        </span>
+      </div>
+      <p className="mb-2.5 text-xs text-muted-foreground">In the room — not seated in the rotation.</p>
+      <ul className="flex flex-wrap gap-1.5">
+        {guests.map((a) => (
+          <li
+            key={a.id}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 py-1 pl-1 pr-2.5"
+          >
+            <Avatar name={a.name} seed={a.id} src={a.avatar_url} size={20} />
+            <span className="text-xs text-foreground">{a.name}</span>
+            <span className="rounded-full bg-gold/20 px-1.5 text-[9px] font-semibold uppercase tracking-wide text-foreground">
+              {a.tag}
+            </span>
           </li>
         ))}
       </ul>

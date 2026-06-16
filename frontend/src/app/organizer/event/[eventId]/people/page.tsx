@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Loader2, Plus, UserCheck, UserMinus, Undo2, QrCode, Download, Search, UsersRound, ArrowDownUp } from "lucide-react";
+import { Loader2, Plus, UserCheck, UserMinus, Undo2, QrCode, Download, Search, UsersRound, ArrowDownUp, Star } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
@@ -380,6 +380,11 @@ function PersonCard({
               )}
             </div>
             <div className="truncate text-xs text-muted-foreground">{roleLine}</div>
+            {person.tag !== "attendee" && (
+              <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-foreground-subtle">
+                <Star className="h-3 w-3 text-gold" aria-hidden /> Guest · not seated in rounds
+              </div>
+            )}
           </div>
         </div>
 

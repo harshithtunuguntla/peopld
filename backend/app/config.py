@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -6,6 +7,11 @@ class Settings(BaseSettings):
 
     supabase_url: str
     supabase_service_role_key: str
+
+    @field_validator("supabase_url", "supabase_service_role_key", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v: str) -> str:
+        return v.strip()
     frontend_url: str = "http://localhost:3000"
     log_format: str = "text"  # set LOG_FORMAT=json on Cloud Run (Cloud Logging parses it)
 

@@ -12,6 +12,7 @@ import { AccessCodeControl } from "@/components/organizer/access-code-control";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
+import { EVENT_PHASE } from "@/lib/design/status";
 
 interface OrgEvent {
   id: string;
@@ -117,9 +118,16 @@ function EventCard({ event }: { event: OrgEvent }) {
     day: "numeric",
     month: "short",
   });
+  const glow = EVENT_PHASE[event.status === "active" ? "now" : event.status].glow;
   return (
-    <Card className="flex flex-col p-5">
-      <div className="flex items-start justify-between gap-3">
+    <Card className="relative flex flex-col overflow-hidden p-5">
+      {/* phase-keyed brand glow so the card reads alive, not flat cream */}
+      <span
+        className="pointer-events-none absolute -right-12 -top-14 h-32 w-32 rounded-full opacity-25 blur-3xl"
+        style={{ background: glow }}
+        aria-hidden
+      />
+      <div className="relative flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <StatusChip status={event.status} />
@@ -133,7 +141,7 @@ function EventCard({ event }: { event: OrgEvent }) {
         </div>
       </div>
       
-      <div className="mt-auto">
+      <div className="relative mt-auto">
         <div className="mt-3.5">
           <AccessCodeControl eventId={event.id} initialHasCode={event.requires_code} />
         </div>

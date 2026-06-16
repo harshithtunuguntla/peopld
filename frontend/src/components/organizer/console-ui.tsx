@@ -145,27 +145,30 @@ export function StatCard({
 
 /* ----------------------------- Status chip ----------------------------- */
 
+// Solid brand fills (not faint tints) so a status reads vividly in BOTH themes —
+// each pairs a fixed brand hex with a fixed contrast ink. Mirrors EVENT_PHASE in
+// lib/design/status.ts (the attendee-side source). "Completed" stays quiet.
 const STATUS_STYLE: Record<
   EventStatus,
   { label: string; dot: string; fg: string; bg: string }
 > = {
   active: {
     label: "Live",
-    dot: "hsl(var(--success))",
-    fg: "hsl(var(--success))",
-    bg: "hsl(var(--success) / 0.14)",
+    dot: "#FFFFFF",
+    fg: "#FFFFFF",
+    bg: COLORS.ember,
   },
   upcoming: {
     label: "Upcoming",
-    dot: "hsl(var(--accent))",
-    fg: "hsl(var(--accent))",
-    bg: "hsl(var(--accent) / 0.14)",
+    dot: COLORS.ink900,
+    fg: COLORS.ink900,
+    bg: COLORS.sky,
   },
   ended: {
     label: "Completed",
-    dot: "hsl(var(--info))",
-    fg: "hsl(var(--info))",
-    bg: "hsl(var(--info) / 0.14)",
+    dot: "hsl(var(--muted-foreground))",
+    fg: "hsl(var(--muted-foreground))",
+    bg: "hsl(var(--muted))",
   },
 };
 

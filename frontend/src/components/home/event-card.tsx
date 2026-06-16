@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Clock, Lock, MapPin, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EVENT_PHASE, REGISTERED_CHIP } from "@/lib/design/status";
 
 export interface EventCardData {
   id: string;
@@ -58,9 +59,15 @@ export function EventCard({ event, todayStr }: { event: EventCardData; todayStr:
   return (
     <Link
       href={href}
-      className="group block rounded-2xl border border-border bg-card/60 p-4 transition-colors hover:border-foreground/20 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      className="group relative block overflow-hidden rounded-2xl border border-border bg-card/60 p-4 transition-colors hover:border-foreground/20 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
-      <div className="flex items-start justify-between gap-3">
+      {/* phase-keyed brand glow so the card reads alive, not flat cream */}
+      <span
+        className="pointer-events-none absolute -right-10 -top-12 h-28 w-28 rounded-full opacity-25 blur-2xl transition-opacity group-hover:opacity-40"
+        style={{ background: EVENT_PHASE[phase].glow }}
+        aria-hidden
+      />
+      <div className="relative flex items-start justify-between gap-3">
         <div className="min-w-0">
           <StatusBadge phase={phase} />
           <h3 className="mt-2 truncate font-display text-lg leading-tight text-foreground">
@@ -78,7 +85,7 @@ export function EventCard({ event, todayStr }: { event: EventCardData; todayStr:
         </div>
         {event.registered && (
           <span
-            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/15 px-2 py-1 text-[11px] font-medium text-success"
+            className={cn("inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium", REGISTERED_CHIP)}
             title="You're registered"
           >
             <Check className="h-3 w-3" aria-hidden /> Registered
@@ -86,7 +93,7 @@ export function EventCard({ event, todayStr }: { event: EventCardData; todayStr:
         )}
       </div>
 
-      <div className="mt-3.5 flex items-center justify-between">
+      <div className="relative mt-3.5 flex items-center justify-between">
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           {event.requires_code && <Lock className="h-3.5 w-3.5" aria-hidden />}
           <span className="font-medium text-foreground">{event.attendee_count}</span> going
@@ -100,15 +107,10 @@ export function EventCard({ event, todayStr }: { event: EventCardData; todayStr:
 }
 
 function StatusBadge({ phase }: { phase: Phase }) {
-  const map = {
-    now: { label: "Happening now", cls: "bg-accent/15 text-accent" },
-    upcoming: { label: "Upcoming", cls: "bg-info/15 text-info" },
-    ended: { label: "Ended", cls: "bg-muted text-muted-foreground" },
-  } as const;
-  const { label, cls } = map[phase];
+  const { label, pill } = EVENT_PHASE[phase];
   return (
-    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide", cls)}>
-      {phase === "now" && <span className="mr-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />}
+    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide", pill)}>
+      {phase === "now" && <span className="mr-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-current" aria-hidden />}
       {label}
     </span>
   );

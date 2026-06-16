@@ -3,18 +3,18 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { inkOn } from "@/lib/design/rounds";
-import { avatarGradient } from "@/lib/design/avatar";
+import { avatarColor } from "@/lib/design/avatar";
 
 type AvatarProps = {
   name: string;
   /**
    * Solid brand hex (landing demo data). Foreground derived for contrast.
-   * For real attendees prefer `seed` instead — it yields a multi-color gradient.
+   * For real attendees prefer `seed` instead — it picks a stable brand color.
    */
   color?: string;
   /**
    * Stable identity (usually the attendee id). When provided and there's no
-   * photo, the initials sit on a deterministic two-color brand gradient.
+   * photo, the initials sit on a deterministic single brand color.
    */
   seed?: string;
   /** Optional profile photo (e.g. Google). Falls back to initials if absent/broken. */
@@ -28,7 +28,7 @@ type AvatarProps = {
 
 /** Initials avatar, or a profile photo when `src` is provided (with graceful
  * fallback to initials if the image fails to load). Pass `seed` for a stable
- * multi-color gradient, or `color` for a solid landing fill. */
+ * single brand color, or `color` for an explicit landing fill. */
 export function Avatar({ name, color, seed, src, size = 36, ring = false, className }: AvatarProps) {
   const [broken, setBroken] = useState(false);
   const initials = name
@@ -37,11 +37,11 @@ export function Avatar({ name, color, seed, src, size = 36, ring = false, classN
     .slice(0, 2)
     .join("");
   const showImage = src && !broken;
-  // Gradient (real attendees) takes precedence; fall back to a solid color
-  // (landing demo); finally derive a gradient from the name so we're never blank.
-  const grad = seed ? avatarGradient(seed) : color ? null : avatarGradient(name);
-  const background = grad ? grad.css : color;
-  const fg = grad ? grad.ink : inkOn(color ?? "#000000");
+  // A seeded solid brand color (real attendees) takes precedence; fall back to an
+  // explicit landing `color`; finally derive one from the name so we're never blank.
+  const swatch = seed ? avatarColor(seed) : color ? null : avatarColor(name);
+  const background = swatch ? swatch.css : color;
+  const fg = swatch ? swatch.ink : inkOn(color ?? "#000000");
   return (
     <div
       className={cn(

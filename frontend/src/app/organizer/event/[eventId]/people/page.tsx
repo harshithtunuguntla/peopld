@@ -14,8 +14,8 @@ import { InviteDialog } from "@/components/organizer/invite-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
-import { COLORS } from "@/lib/design/colors";
 import { inkOn } from "@/lib/design/rounds";
+import { ATTENDEE_STATUS_HEX, ATTENDEE_STATUS_PILL } from "@/lib/design/status";
 import { cn } from "@/lib/utils";
 
 type Tag = "attendee" | "speaker" | "host";
@@ -195,9 +195,9 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
 
       {/* KPI strip — real, live counts. Tapping one filters the list (chase-list). */}
       <div className="mb-6 grid grid-cols-3 gap-3 sm:gap-4">
-        <Kpi value={counts.arrived} label="arrived" bg={COLORS.coral} active={filter === "arrived"} onClick={() => setFilter(filter === "arrived" ? "all" : "arrived")} />
-        <Kpi value={counts.registered} label="not here yet" bg={COLORS.gold} active={filter === "registered"} onClick={() => setFilter(filter === "registered" ? "all" : "registered")} />
-        <Kpi value={counts.total} label="registered" bg={COLORS.ice} active={filter === "all"} onClick={() => setFilter("all")} />
+        <Kpi value={counts.arrived} label="arrived" bg={ATTENDEE_STATUS_HEX.arrived} active={filter === "arrived"} onClick={() => setFilter(filter === "arrived" ? "all" : "arrived")} />
+        <Kpi value={counts.registered} label="not here yet" bg={ATTENDEE_STATUS_HEX.registered} active={filter === "registered"} onClick={() => setFilter(filter === "registered" ? "all" : "registered")} />
+        <Kpi value={counts.total} label="registered" bg={ATTENDEE_STATUS_HEX.total} active={filter === "all"} onClick={() => setFilter("all")} />
       </div>
 
       {/* Toolbar: search · filters · invite/export */}
@@ -423,11 +423,7 @@ function PersonCard({
 }
 
 function StatusControls({ status, onSet }: { status: Attendee["status"]; onSet: (s: Attendee["status"]) => void }) {
-  const badge = {
-    registered: "bg-muted text-muted-foreground",
-    arrived: "bg-success/15 text-success",
-    left: "bg-muted text-muted-foreground line-through",
-  }[status];
+  const badge = ATTENDEE_STATUS_PILL[status];
   return (
     <div className="flex shrink-0 items-center gap-2">
       <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", badge)}>{status}</span>

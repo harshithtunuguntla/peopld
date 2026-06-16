@@ -467,6 +467,7 @@ class ConnectionEntry(BaseModel):
     table_number: int
     liked: bool = False   # I liked them
     mutual: bool = False  # ...and they liked me back → a match
+    saved: bool = False   # I explicitly bookmarked them (my saved-contacts shortlist)
 
 
 class ConnectionsResponse(BaseModel):
@@ -510,6 +511,13 @@ class NoteRequest(BaseModel):
 class NoteResponse(BaseModel):
     target_attendee_id: UUID
     note: Optional[str] = None  # null after a delete / when cleared
+
+
+# --- Saved contacts (explicit bookmark shortlist) ---
+
+class BookmarkResponse(BaseModel):
+    target_attendee_id: UUID
+    saved: bool
 
 
 # --- Analytics ---

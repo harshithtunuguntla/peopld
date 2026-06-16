@@ -168,6 +168,18 @@ CREATE TABLE connection_notes (
   UNIQUE (event_id, author_attendee_id, target_attendee_id)
 );
 
+-- Saved contacts (migration 013): an explicit "save" bookmark, SEPARATE from the
+-- auto-rolodex and the like signal — a deliberate shortlist the saver filters to
+-- later. Owner-only — its own table with NO RLS policies (service-role only).
+CREATE TABLE connection_bookmarks (
+  id                  UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id            UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  owner_attendee_id   UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
+  target_attendee_id  UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (event_id, owner_attendee_id, target_attendee_id)
+);
+
 -- Audit trail (Step 4): every state-changing action. metadata holds
 -- UUIDs/enums/counts only, never PII.
 CREATE TABLE audit_log (
@@ -197,6 +209,7 @@ ALTER TABLE event_room_codes   ENABLE ROW LEVEL SECURITY; -- no policies: servic
 ALTER TABLE connection_likes ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE meeting_intents  ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE connection_notes ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
+ALTER TABLE connection_bookmarks ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE audit_log        ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 
 -- SECURITY MODEL: all writes and all PII reads go through the FastAPI

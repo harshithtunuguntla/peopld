@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Heart, Globe, Linkedin, StickyNote, Loader2, Check, CalendarDays } from "lucide-react";
+import { Heart, Globe, Linkedin, StickyNote, Loader2, Check, CalendarDays, Bookmark } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
 import { Avatar } from "@/components/brand/avatar";
@@ -24,6 +24,7 @@ export interface Connection {
   table_number: number;
   liked: boolean;
   mutual: boolean;
+  saved: boolean;
 }
 
 /** A person, de-duplicated across the rounds you shared with them. */
@@ -42,6 +43,7 @@ export interface Person {
   rounds: number[];
   liked: boolean;
   mutual: boolean;
+  saved: boolean;
   /** Which event this connection came from — shown only on the cross-event rolodex. */
   eventLabel?: string;
 }
@@ -55,6 +57,7 @@ export function groupByPerson(rows: Connection[]): Person[] {
       if (!p.rounds.includes(c.round_number)) p.rounds.push(c.round_number);
       p.liked = p.liked || c.liked;
       p.mutual = p.mutual || c.mutual;
+      p.saved = p.saved || c.saved;
     } else {
       map.set(c.attendee_id, {
         attendee_id: c.attendee_id,
@@ -71,6 +74,7 @@ export function groupByPerson(rows: Connection[]): Person[] {
         rounds: [c.round_number],
         liked: c.liked,
         mutual: c.mutual,
+        saved: c.saved,
       });
     }
   }
@@ -85,11 +89,42 @@ export function groupByPerson(rows: Connection[]): Person[] {
  * the cross-event "My connections" page. `eventId` scopes the private note save
  * (on the cross-event page it's that connection's own event).
  */
-export function PersonCard({ person, eventId }: { person: Person; eventId: string }) {
+export function PersonCard({
+  person,
+  eventId,
+  onSavedChange,
+}: {
+  person: Person;
+  eventId: string;
+  /** Notifies a parent (e.g. the Saved filter) when this card's saved state flips. */
+  onSavedChange?: (attendeeId: string, saved: boolean) => void;
+}) {
   const roleLine = [person.role, person.company].filter(Boolean).join(" · ");
   const sharedSet = new Set(person.shared_interests.map((s) => s.toLowerCase()));
   const otherInterests = person.interests.filter((t) => !sharedSet.has(t.toLowerCase()));
   const rounds = [...person.rounds].sort((a, b) => a - b);
+
+  const [saved, setSaved] = useState(person.saved);
+  const [saveBusy, setSaveBusy] = useState(false);
+
+  async function toggleSave() {
+    if (saveBusy) return;
+    const next = !saved;
+    setSaved(next); // optimistic
+    onSavedChange?.(person.attendee_id, next);
+    setSaveBusy(true);
+    try {
+      await apiFetch(`/events/${eventId}/bookmarks/${person.attendee_id}`, {
+        method: next ? "PUT" : "DELETE",
+      });
+    } catch {
+      setSaved(!next); // revert on failure
+      onSavedChange?.(person.attendee_id, !next);
+    } finally {
+      setSaveBusy(false);
+    }
+  }
+
   return (
     <li className={cn("rounded-2xl border p-4", person.mutual ? "border-accent/40 bg-accent/[0.07]" : "border-border bg-card/50")}>
       <div className="flex items-start gap-3">
@@ -116,6 +151,19 @@ export function PersonCard({ person, eventId }: { person: Person; eventId: strin
             </p>
           )}
         </div>
+        <button
+          type="button"
+          onClick={toggleSave}
+          aria-pressed={saved}
+          aria-label={saved ? `Remove ${person.name} from saved` : `Save ${person.name}`}
+          title={saved ? "Saved — tap to remove" : "Save contact"}
+          className={cn(
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-all active:scale-90 disabled:opacity-60",
+            saved ? "border-accent/50 bg-accent/15 text-accent" : "border-border text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Bookmark className={cn("h-4 w-4", saved && "fill-current")} aria-hidden />
+        </button>
       </div>
 
       {person.looking_for && (

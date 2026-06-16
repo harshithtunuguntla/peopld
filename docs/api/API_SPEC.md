@@ -406,6 +406,24 @@ re: hiring"). Author-private, stored in `connection_notes` (**RLS on, no policie
 
 ---
 
+## Saved contacts (bookmarks)
+
+An explicit "save this person" shortlist — **separate** from likes and from the
+auto rolodex. Owner-private (`connection_bookmarks`, RLS on → **service-role
+only**). Surfaced back as the `saved` flag on each rolodex entry, powering the
+"Saved" filter.
+
+### `PUT /events/{eventId}/bookmarks/{targetAttendeeId}`
+- **Auth:** required (attendee — owner resolved from JWT). No body.
+- **Response `200`** (`BookmarkResponse`): `{ "target_attendee_id": "uuid", "saved": true }`. Idempotent — saving twice is a no-op.
+- **Errors:** `400` saving yourself; `404` caller not registered **or** target unknown.
+
+### `DELETE /events/{eventId}/bookmarks/{targetAttendeeId}`
+- **Auth:** required (attendee). Idempotent — unsaving what you never saved still `200`.
+- **Response `200`:** `{ "target_attendee_id": "uuid", "saved": false }`.
+
+---
+
 ## Connections (post-event rolodex)
 
 ### `GET /events/{eventId}/connections`

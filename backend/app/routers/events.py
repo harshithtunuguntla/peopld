@@ -10,8 +10,10 @@ from app.deps import (
     code_matches,
     fetch_access_code,
     fetch_event_or_404,
+    fetch_room_code,
     find_event_by_code,
     generate_access_code,
+    generate_room_code,
     get_current_organizer_id,
     get_optional_user,
     require_event_owner,
@@ -28,6 +30,7 @@ from app.models.schemas import (
     JoinRequest,
     JoinResponse,
     LiveStats,
+    RoomCodeResponse,
     VerifyCodeRequest,
     VerifyCodeResponse,
 )
@@ -248,7 +251,7 @@ async def update_event(
     event = fetch_event_or_404(db, event_id)
     require_event_owner(event, organizer_id)
 
-    changes = body.model_dump(exclude_none=True)
+    changes = body.model_dump(mode="json", exclude_none=True)
     # access_code is a secret in its own table — pull it out of the events update.
     access_code = changes.pop("access_code", None)
     if access_code is not None:
@@ -353,6 +356,72 @@ async def clear_access_code(
         entity_id=event_id,
     )
     return AccessCodeResponse(code=None)
+
+
+# --- Room code (Phase 2 — self-service day-of check-in) ---
+# A SECOND secret, separate from the access code above. Owner-only at every step;
+# the value is revealed only in the control room and never goes in a link/QR.
+
+
+@router.get("/{event_id}/room-code", response_model=RoomCodeResponse)
+async def get_room_code(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """The event's room code, returned ONLY to the owning organizer so they can
+    reveal it in the room. None until they open check-in. Attendee phones can
+    never reach this value (service-role-only table)."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    return RoomCodeResponse(code=fetch_room_code(db, event_id))
+
+
+@router.post("/{event_id}/room-code/regenerate", response_model=RoomCodeResponse)
+async def regenerate_room_code(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Open check-in / mint a fresh room code (owner only). Doubles as the first
+    'generate' when none exists. Any previously shown code stops working."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    code = generate_room_code()
+    db.table("event_room_codes").upsert(
+        {"event_id": event_id, "code": code}, on_conflict="event_id"
+    ).execute()
+    record_audit(
+        db,
+        action="event.room_code_regenerated",
+        entity_type="event",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=event_id,
+        # never log the code value itself
+    )
+    return RoomCodeResponse(code=code)
+
+
+@router.delete("/{event_id}/room-code", response_model=RoomCodeResponse)
+async def clear_room_code(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Close check-in — no one can self-arrive until a new code is opened (owner only)."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    db.table("event_room_codes").delete().eq("event_id", event_id).execute()
+    record_audit(
+        db,
+        action="event.room_code_cleared",
+        entity_type="event",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=event_id,
+    )
+    return RoomCodeResponse(code=None)
 
 
 @router.get("/{event_id}/attendees", response_model=list[AttendeeResponse])

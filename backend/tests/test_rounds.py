@@ -322,6 +322,57 @@ def test_end_round_completes_active(client, db, event):
     assert response.json()["ended_at"] is not None
 
 
+# --- pause / resume (migration 008) ---
+
+
+def test_pause_requires_organizer(client, db, event):
+    make_round(db, event["id"], round_number=1, status="active")
+    assert client.post(f"/events/{event['id']}/rounds/pause").status_code == 401
+    assert client.post(f"/events/{event['id']}/rounds/pause", headers=ATTENDEE_AUTH).status_code == 403
+    assert client.post(f"/events/{event['id']}/rounds/pause", headers=OTHER_AUTH).status_code == 403
+
+
+def test_pause_and_resume_no_active_round_is_404(client, event):
+    assert client.post(f"/events/{event['id']}/rounds/pause", headers=AUTH).status_code == 404
+    assert client.post(f"/events/{event['id']}/rounds/resume", headers=AUTH).status_code == 404
+
+
+def test_pause_sets_paused_at(client, db, event):
+    make_round(db, event["id"], round_number=1, status="active")
+    r = client.post(f"/events/{event['id']}/rounds/pause", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["paused_at"] is not None
+    assert "round.paused" in audit_actions(db)
+
+
+def test_pause_is_idempotent(client, db, event):
+    make_round(db, event["id"], round_number=1, status="active")
+    first = client.post(f"/events/{event['id']}/rounds/pause", headers=AUTH).json()
+    second = client.post(f"/events/{event['id']}/rounds/pause", headers=AUTH).json()
+    assert first["paused_at"] == second["paused_at"]  # second pause doesn't move the clock
+
+
+def test_resume_banks_paused_time_and_clears_flag(client, db, event):
+    make_round(
+        db, event["id"], round_number=1, status="active",
+        paused_at="2026-07-01T18:00:00+00:00", total_paused_seconds=0,
+    )
+    r = client.post(f"/events/{event['id']}/rounds/resume", headers=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["paused_at"] is None  # running again
+    assert body["total_paused_seconds"] >= 0  # paused span banked
+    assert "round.resumed" in audit_actions(db)
+
+
+def test_resume_when_running_is_noop(client, db, event):
+    make_round(db, event["id"], round_number=1, status="active")
+    r = client.post(f"/events/{event['id']}/rounds/resume", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["paused_at"] is None
+    assert "round.resumed" not in audit_actions(db)  # nothing to resume
+
+
 # --- multi-round flow: novelty, leavers, returns, numbering ---
 
 

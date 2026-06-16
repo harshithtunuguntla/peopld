@@ -16,6 +16,19 @@ MIN_TABLE_SIZE = 3
 DEFAULT_RESTARTS = 20
 DEFAULT_TIME_BUDGET_S = 3.0  # hard wall-clock cap on the planner — never hang the console
 
+# Intent-aware seating (Phase 3b). The objective becomes
+#   repeats − λ·(weight of newly-satisfied "want to meet" picks)
+# folded into the SAME delta loops as novelty, so honoring picks costs nothing
+# asymptotically. These weights were validated offline across 15 scenarios
+# (n=30→160) in scripts/simulate_intent.py — see docs/design/phase3-intent-findings.md.
+# A pair is MUTUAL when both people picked each other (weighted heavily so it is
+# effectively guaranteed when feasible); a one-way pick is a softer bonus.
+# With no intents the reward is identically zero, so seating is byte-for-byte the
+# pure-novelty result (deterministic for a seeded rng).
+INTENT_LAMBDA = 3
+INTENT_W_MUTUAL = 4
+INTENT_W_ONEWAY = 1
+
 # frozenset({attendee_id_a, attendee_id_b}) -> number of rounds they shared a table
 PairCounts = dict[frozenset, int]
 
@@ -187,6 +200,37 @@ class RotationPlan:
     table_sizes: list[int]
     horizon: int
     total_repeat_pairings: int  # planned repeat-pairings across the horizon (future overlap)
+    intent_pairs_satisfied: int = 0  # requested "want to meet" pairs seated together over the horizon
+    intent_pairs_requested: int = 0  # distinct requested pairs among the seated pool (the denominator)
+
+
+def _build_want_matrix(
+    intents: set[tuple[str, str]] | None, index: dict[str, int], n: int
+) -> tuple[list[int], set[frozenset]]:
+    """Flat n*n symmetric like-weight matrix + the set of requested pairs.
+
+    Each directed pick (a wants b) contributes a weight on the {a,b} cell:
+    INTENT_W_MUTUAL when both directions exist, else INTENT_W_ONEWAY. Picks that
+    touch someone outside the seated pool (a no-show, or a never-seated guest)
+    are dropped — they leave the seating problem entirely. The matrix is all
+    zeros (and `requested` empty) when there are no intents, which makes the
+    objective collapse to pure novelty.
+    """
+    want = [0] * (n * n)
+    requested: set[frozenset] = set()
+    if not intents:
+        return want, requested
+    directed = {(a, b) for (a, b) in intents if a in index and b in index}
+    for a, b in directed:
+        pair = frozenset((a, b))
+        if pair in requested:
+            continue
+        requested.add(pair)
+        ia, ib = index[a], index[b]
+        w = INTENT_W_MUTUAL if (b, a) in directed else INTENT_W_ONEWAY
+        want[ia * n + ib] = w
+        want[ib * n + ia] = w
+    return want, requested
 
 
 def plan_rounds(
@@ -199,12 +243,16 @@ def plan_rounds(
     warm_restarts: int = DEFAULT_RESTARTS,
     sa_iters: int | None = None,
     time_budget_s: float = DEFAULT_TIME_BUDGET_S,
+    intents: set[tuple[str, str]] | None = None,
 ) -> RotationPlan:
     """Plan up to `horizon` rounds for the arrived pool, minimizing future overlap.
 
     `pair_counts` is the history from already-published rounds (who has already
-    met). The returned plan's first round is the one to play next. Raises
-    RotationError when no valid seating exists (same guard as greedy).
+    met). `intents` are directed "want to meet" picks (liker_id, liked_id); the
+    planner honors them (mutual ≫ one-way) without sacrificing novelty beyond the
+    validated cost — see docs/design/phase3-intent-findings.md. The returned
+    plan's first round is the one to play next. Raises RotationError when no valid
+    seating exists (same guard as greedy).
     """
     rng = rng or random.Random()
     if horizon < 1:
@@ -225,29 +273,64 @@ def plan_rounds(
             base[ia * n + ib] = count
             base[ib * n + ia] = count
 
+    want, requested = _build_want_matrix(intents, index, n)
+    lam = INTENT_LAMBDA if requested else 0
+
     present = list(range(n))
     deadline = time.perf_counter() + max(0.05, time_budget_s)
 
     # 1) Greedy warm start over the horizon — guarantees the plan is never worse
     #    than greedy, and gives SA a strong starting point.
-    sched = _greedy_plan_int(present, base, n, sizes, horizon, rng, warm_restarts, deadline)
+    sched = _greedy_plan_int(present, base, n, sizes, want, lam, horizon, rng,
+                             warm_restarts, deadline)
 
     # 2) Anneal: polish the whole plan toward the minimum-overlap schedule.
-    sched, cost = _anneal_plan_int(present, base, n, sizes, sched, rng, sa_iters, deadline)
+    sched, cost = _anneal_plan_int(present, base, n, sizes, want, lam, sched, rng,
+                                   sa_iters, deadline)
 
     rounds = [
         {arrived_ids[member]: t + 1 for t, table in enumerate(rnd) for member in table}
         for rnd in sched
     ]
+    satisfied = _count_satisfied(sched, base, requested, index, n) if requested else 0
     return RotationPlan(rounds=rounds, table_sizes=sizes, horizon=horizon,
-                        total_repeat_pairings=cost)
+                        total_repeat_pairings=cost,
+                        intent_pairs_satisfied=satisfied,
+                        intent_pairs_requested=len(requested))
+
+
+def _count_satisfied(sched: list[list[list[int]]], base: list[int],
+                     requested: set[frozenset], index: dict[str, int], n: int) -> int:
+    """How many requested pairs have met — already in history (`base`) OR seated
+    together at least once in the plan. A pick whose pair met in an already-played
+    round is satisfied: the planner spends no novelty re-seating them (the reward
+    only fires on the first co-seating), and the meeting still counts here."""
+    met: set[int] = set()
+    for rnd in sched:
+        for tbl in rnd:
+            for a, b in combinations(tbl, 2):
+                met.add(a * n + b)
+                met.add(b * n + a)
+    count = 0
+    for pair in requested:
+        a, b = tuple(pair)
+        cell = index[a] * n + index[b]
+        if cell in met or base[cell] >= 1:
+            count += 1
+    return count
 
 
 def _seat_greedy_int(present: list[int], cnt: list[int], n: int, sizes: list[int],
+                     want: list[int], lam: int,
                      rng: random.Random, restarts: int) -> list[list[int]]:
-    """One round, greedy-with-restarts in integer space (mirrors _greedy_fill)."""
+    """One round, greedy-with-restarts in integer space (mirrors _greedy_fill).
+
+    Minimizes repeats − λ·(weight of newly-satisfied picks). A pick is "newly
+    satisfied" only when the pair has not yet shared a table (cnt == 0). With
+    `lam == 0` / all-zero `want` this is identical to pure-novelty greedy.
+    """
     best: list[list[int]] | None = None
-    best_cost: int | None = None
+    best_obj: int | None = None
     for _ in range(max(1, restarts)):
         order = list(present)
         rng.shuffle(order)
@@ -259,36 +342,45 @@ def _seat_greedy_int(present: list[int], cnt: list[int], n: int, sizes: list[int
             for idx, group in enumerate(members):
                 if len(group) >= sizes[idx]:
                     continue
-                cost = 0
+                rep = 0
+                rew = 0
                 for m in group:
-                    cost += cnt[pb + m]
+                    c = cnt[pb + m]
+                    rep += c
+                    if c == 0 and want[pb + m]:
+                        rew += want[pb + m]
+                cost = rep - lam * rew
                 if low is None or cost < low:
                     low, cands = cost, [idx]
                 elif cost == low:
                     cands.append(idx)
             members[rng.choice(cands)].append(p)
-        rc = 0
+        obj = 0
         for group in members:
             for i in range(len(group)):
                 gi = group[i] * n
                 for j in range(i + 1, len(group)):
-                    rc += cnt[gi + group[j]]
-        if best_cost is None or rc < best_cost:
-            best_cost, best = rc, members
-        if best_cost == 0:
+                    m = group[j]
+                    c = cnt[gi + m]
+                    obj += c
+                    if c == 0 and want[gi + m]:
+                        obj -= lam * want[gi + m]
+        if best_obj is None or obj < best_obj:
+            best_obj, best = obj, members
+        if best_obj == 0:
             break
     return best or [[] for _ in sizes]
 
 
 def _greedy_plan_int(present: list[int], base: list[int], n: int, sizes: list[int],
-                     horizon: int, rng: random.Random, restarts: int,
-                     deadline: float) -> list[list[list[int]]]:
+                     want: list[int], lam: int, horizon: int, rng: random.Random,
+                     restarts: int, deadline: float) -> list[list[list[int]]]:
     """Greedy plan for the whole horizon (warm start), counting history `base`."""
     cnt = base[:]
     plan: list[list[list[int]]] = []
     for _ in range(horizon):
         r = restarts if time.perf_counter() < deadline else 1
-        rnd = _seat_greedy_int(present, cnt, n, sizes, rng, r)
+        rnd = _seat_greedy_int(present, cnt, n, sizes, want, lam, rng, r)
         plan.append(rnd)
         for tbl in rnd:
             for a, b in combinations(tbl, 2):
@@ -298,13 +390,16 @@ def _greedy_plan_int(present: list[int], base: list[int], n: int, sizes: list[in
 
 
 def _anneal_plan_int(present: list[int], base: list[int], n: int, sizes: list[int],
+                     want: list[int], lam: int,
                      warm: list[list[list[int]]], rng: random.Random,
                      iters: int | None, deadline: float) -> tuple[list[list[list[int]]], int]:
     """Simulated annealing over the warm-start plan; returns (best_plan, future_repeats).
 
     Swaps two people at different tables within a round (sizes preserved).
-    Counts history `base` as fixed; only planned rounds are mutated. Stops at the
-    iteration cap or the wall-clock deadline, whichever comes first.
+    Minimizes the objective repeats − λ·(satisfied-pick weight); the returned
+    cost is the plan's pure future repeat-pairings (novelty), independent of
+    intents. Counts history `base` as fixed; only planned rounds are mutated.
+    Stops at the iteration cap or the wall-clock deadline, whichever comes first.
     """
     horizon = len(warm)
     sched = [[tbl[:] for tbl in rnd] for rnd in warm]
@@ -335,11 +430,18 @@ def _anneal_plan_int(present: list[int], base: list[int], n: int, sizes: list[in
                     hist_rep += v - 1
         return plan_rep - hist_rep
 
-    cur = sum(
-        cnt[present[ii] * n + present[jj]] - 1
-        for ii in range(len(present)) for jj in range(ii + 1, len(present))
-        if cnt[present[ii] * n + present[jj]] > 1
-    )
+    # Current objective = repeats − λ·(weight of satisfied picks). The history
+    # offset is constant across swaps, so it does not affect the argmin; what
+    # matters is that the reward term tracks the same value the delta loop moves.
+    cur = 0
+    for ii in range(len(present)):
+        pb = present[ii] * n
+        for jj in range(ii + 1, len(present)):
+            v = cnt[pb + present[jj]]
+            if v > 1:
+                cur += v - 1
+            if v >= 1 and want[pb + present[jj]]:
+                cur -= lam * want[pb + present[jj]]
 
     if iters is None:
         iters = min(200_000, max(25_000, len(present) * horizon * 120))
@@ -361,24 +463,38 @@ def _anneal_plan_int(present: list[int], base: list[int], n: int, sizes: list[in
         x, y = a_tbl[ia], b_tbl[ib]
         xb, yb = x * n, y * n
 
-        delta = 0
+        # Objective delta = repeat delta − λ·(reward delta). A pick's reward flips
+        # only when its pair crosses the 0↔1 co-seating boundary.
+        d_rep = 0
+        d_rew = 0
         for k in range(len(a_tbl)):
             if k == ia:
                 continue
             m = a_tbl[k]
-            if cnt[xb + m] >= 2:
-                delta -= 1
-            if cnt[yb + m] >= 1:
-                delta += 1
+            cxm, cym = cnt[xb + m], cnt[yb + m]
+            if cxm >= 2:
+                d_rep -= 1
+            if cxm == 1 and want[xb + m]:
+                d_rew -= want[xb + m]
+            if cym >= 1:
+                d_rep += 1
+            if cym == 0 and want[yb + m]:
+                d_rew += want[yb + m]
         for k in range(len(b_tbl)):
             if k == ib:
                 continue
             m = b_tbl[k]
-            if cnt[xb + m] >= 1:
-                delta += 1
-            if cnt[yb + m] >= 2:
-                delta -= 1
+            cxm, cym = cnt[xb + m], cnt[yb + m]
+            if cym >= 2:
+                d_rep -= 1
+            if cym == 1 and want[yb + m]:
+                d_rew -= want[yb + m]
+            if cxm >= 1:
+                d_rep += 1
+            if cxm == 0 and want[xb + m]:
+                d_rew += want[xb + m]
 
+        delta = d_rep - lam * d_rew
         if delta <= 0 or rrandom() < exp(-delta / (temp if temp > 1e-9 else 1e-9)):
             a_tbl[ia], b_tbl[ib] = y, x
             for k in range(len(a_tbl)):

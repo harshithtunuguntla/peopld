@@ -4,7 +4,7 @@ import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
-import { ArrowLeft, Check, Loader2 } from "lucide-react";
+import { ArrowLeft, Check, Globe, Eye, EyeOff, Loader2 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
@@ -14,16 +14,20 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
 import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
-import { LinkedInGlyph, WhatsAppGlyph } from "@/components/brand/glyphs";
+import { LinkedInGlyph } from "@/components/brand/glyphs";
+import { cn } from "@/lib/utils";
 
 interface Me {
   id: string;
   name: string;
   role: string;
+  company: string | null;
+  description: string | null;
   looking_for: string | null;
   linkedin_url: string | null;
-  whatsapp_number: string | null;
+  website_url: string | null;
   interests: string[];
+  show_in_directory: boolean;
 }
 
 export default function ProfileEditPage({ params }: { params: Promise<{ eventId: string }> }) {
@@ -98,10 +102,13 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
   const [form, setForm] = useState({
     name: me.name ?? "",
     role: me.role ?? "",
+    company: me.company ?? "",
+    description: me.description ?? "",
     looking_for: me.looking_for ?? "",
     linkedin_url: me.linkedin_url ?? "",
-    whatsapp_number: me.whatsapp_number ?? "",
+    website_url: me.website_url ?? "",
     interests: me.interests ?? [],
+    show_in_directory: me.show_in_directory ?? true,
   });
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -112,14 +119,22 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
     setSaved(false);
   };
 
+  function isUrl(v: string) {
+    return /^https?:\/\/.+/i.test(v.trim());
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim() || !form.role.trim()) {
       setError("Name and role can't be empty.");
       return;
     }
-    if (form.linkedin_url.trim() && !/^https?:\/\/.+/i.test(form.linkedin_url.trim())) {
+    if (form.linkedin_url.trim() && !isUrl(form.linkedin_url)) {
       setError("Include the full LinkedIn link (starting with https://).");
+      return;
+    }
+    if (form.website_url.trim() && !isUrl(form.website_url)) {
+      setError("Include the full website link (starting with https://).");
       return;
     }
     setBusy(true);
@@ -130,10 +145,13 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
         body: JSON.stringify({
           name: form.name.trim(),
           role: form.role.trim(),
+          company: form.company.trim() || null,
+          description: form.description.trim() || null,
           looking_for: form.looking_for.trim() || null,
           linkedin_url: form.linkedin_url.trim() || null,
-          whatsapp_number: form.whatsapp_number.trim() || null,
+          website_url: form.website_url.trim() || null,
           interests: form.interests,
+          show_in_directory: form.show_in_directory,
         }),
       });
       setSaved(true);
@@ -150,8 +168,19 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
         {(p) => <Input {...p} value={form.name} onChange={set("name")} placeholder="Maya Sharma" />}
       </Field>
 
-      <Field label="Role" name="p-role" required hint="What you do, in a few words.">
-        {(p) => <Input {...p} value={form.role} onChange={set("role")} placeholder="Founder at Acme" />}
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <Field label="Role" name="p-role" required hint="What you do.">
+          {(p) => <Input {...p} value={form.role} onChange={set("role")} placeholder="Founder" />}
+        </Field>
+        <Field label="Company" name="p-company" hint="Where you work / build.">
+          {(p) => <Input {...p} value={form.company} onChange={set("company")} placeholder="Acme" />}
+        </Field>
+      </div>
+
+      <Field label="What are you working on?" name="p-description" hint="A line about what you're building right now.">
+        {(p) => (
+          <Textarea {...p} value={form.description} onChange={set("description")} placeholder="Building an AI copilot for warehouse ops…" />
+        )}
       </Field>
 
       <Field label="Looking for" name="p-looking" hint="Who would you love to meet?">
@@ -182,11 +211,42 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
         )}
       </Field>
 
-      <Field label="WhatsApp" name="p-whatsapp" hint="Shared only with people you actually meet, after the event.">
+      <Field label="Website" name="p-website" hint="Your site or product link.">
         {(p) => (
-          <Input {...p} type="tel" inputMode="tel" startIcon={<WhatsAppGlyph />} value={form.whatsapp_number} onChange={set("whatsapp_number")} placeholder="+91 98765 43210" />
+          <Input {...p} type="url" inputMode="url" startIcon={<Globe className="h-4 w-4" aria-hidden />} value={form.website_url} onChange={set("website_url")} placeholder="https://yourproduct.com" />
         )}
       </Field>
+
+      {/* Directory visibility — your one control over the public "who's coming" list. */}
+      <button
+        type="button"
+        onClick={() => {
+          setForm((f) => ({ ...f, show_in_directory: !f.show_in_directory }));
+          setSaved(false);
+        }}
+        aria-pressed={form.show_in_directory}
+        className={cn(
+          "flex items-start gap-3 rounded-2xl border p-4 text-left transition-colors",
+          form.show_in_directory ? "border-accent/40 bg-accent/[0.06]" : "border-border bg-card/40",
+        )}
+      >
+        <span className={cn("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", form.show_in_directory ? "bg-accent/15 text-accent" : "bg-muted text-muted-foreground")}>
+          {form.show_in_directory ? <Eye className="h-4 w-4" aria-hidden /> : <EyeOff className="h-4 w-4" aria-hidden />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-foreground">
+            {form.show_in_directory ? "Visible on the guest list" : "Hidden from the guest list"}
+          </span>
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            {form.show_in_directory
+              ? "Other attendees can find you on “Who's coming” before the event. Tap to hide."
+              : "You won't appear on the public attendee list. Tap to show yourself."}
+          </span>
+        </span>
+        <span className={cn("relative mt-1 h-6 w-10 shrink-0 rounded-full transition-colors", form.show_in_directory ? "bg-accent" : "bg-muted")}>
+          <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-background shadow transition-all", form.show_in_directory ? "left-[1.125rem]" : "left-0.5")} />
+        </span>
+      </button>
 
       {error && (
         <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">

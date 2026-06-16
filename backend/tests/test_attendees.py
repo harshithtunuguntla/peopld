@@ -12,9 +12,11 @@ from tests.conftest import (
 REGISTER_PAYLOAD = {
     "name": "Asha",
     "role": "Founder at XYZ",
+    "company": "XYZ Labs",
+    "description": "Building an AI scheduling tool",
     "looking_for": "investors, designers",
     "linkedin_url": "https://linkedin.com/in/asha",
-    "whatsapp_number": "+919999999999",
+    "website_url": "https://asha.dev",
 }
 
 
@@ -197,7 +199,10 @@ def test_register_optional_fields_omitted(client, event):
     assert response.status_code == 201
     body = response.json()
     assert body["linkedin_url"] is None
-    assert body["whatsapp_number"] is None
+    assert body["website_url"] is None
+    assert body["company"] is None
+    assert body["show_in_directory"] is True
+    assert body["tag"] == "attendee"
 
 
 def test_get_attendee_requires_auth(client, db, event):
@@ -372,3 +377,37 @@ def test_already_registered_skips_code_gate(client, db, event):
     assert first.status_code == 201
     again = client.post(f"/events/{eid}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH)
     assert again.status_code == 200  # dedupe, no code needed
+
+
+# --- bulk check-in (one-tap door action) ---
+
+
+def test_check_in_all_requires_organizer(client, db, event):
+    make_attendee(db, event["id"], name="R", status="registered")
+    assert client.post(f"/events/{event['id']}/attendees/check-in-all").status_code == 401
+    assert client.post(f"/events/{event['id']}/attendees/check-in-all", headers=ATTENDEE_AUTH).status_code == 403
+    assert client.post(f"/events/{event['id']}/attendees/check-in-all", headers=OTHER_AUTH).status_code == 403
+
+
+def test_check_in_all_moves_only_registered(client, db, event):
+    make_attendee(db, event["id"], name="R1", status="registered")
+    make_attendee(db, event["id"], name="R2", status="registered")
+    make_attendee(db, event["id"], name="A1", status="arrived")
+    make_attendee(db, event["id"], name="L1", status="left")
+
+    r = client.post(f"/events/{event['id']}/attendees/check-in-all", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["arrived"] == 2  # only the two registered moved
+
+    rows = {a["name"]: a["status"] for a in db.store["attendees"] if a["event_id"] == event["id"]}
+    assert rows["R1"] == "arrived"
+    assert rows["R2"] == "arrived"
+    assert rows["A1"] == "arrived"  # unchanged
+    assert rows["L1"] == "left"  # never resurrected
+
+
+def test_check_in_all_with_nobody_registered_is_noop(client, db, event):
+    make_attendee(db, event["id"], name="L1", status="left")
+    r = client.post(f"/events/{event['id']}/attendees/check-in-all", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["arrived"] == 0

@@ -8,16 +8,20 @@ from app.deps import (
     code_matches,
     fetch_access_code,
     fetch_event_or_404,
+    fetch_my_attendee,
+    fetch_room_code,
     get_current_organizer_id,
     get_current_user,
     require_event_owner,
 )
 from app.models.schemas import (
+    ArriveRequest,
     AttendeeCreate,
     AttendeeResponse,
     AttendeeSelfUpdate,
     AttendeeUpdate,
     AttendeeWithAssignmentResponse,
+    BulkCheckInResponse,
     WalkInCreate,
 )
 
@@ -129,6 +133,44 @@ async def add_walkin(
     return created
 
 
+@router.post("/check-in-all", response_model=BulkCheckInResponse)
+async def check_in_all(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """One-tap door action: mark every 'registered' attendee 'arrived'.
+
+    Saves the organizer tapping each person at a busy door. Only touches
+    registered people (never resurrects someone who 'left'). Event owner only.
+    Declared before /{attendee_id} so the literal path isn't matched as an id.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    registered = (
+        db.table("attendees")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("status", "registered")
+        .execute()
+        .data
+        or []
+    )
+    for a in registered:
+        db.table("attendees").update({"status": "arrived"}).eq("id", a["id"]).execute()
+    if registered:
+        record_audit(
+            db,
+            action="attendee.bulk_checked_in",
+            entity_type="event",
+            actor_user_id=organizer_id,
+            event_id=event_id,
+            entity_id=event_id,
+            metadata={"count": len(registered)},
+        )
+    return BulkCheckInResponse(arrived=len(registered))
+
+
 @router.get("/me", response_model=AttendeeResponse)
 async def get_my_registration(
     event_id: str,
@@ -161,7 +203,7 @@ async def update_my_registration(
     user: AuthUser = Depends(get_current_user),
     db: Client = Depends(get_supabase),
 ):
-    """An attendee edits their OWN profile (fix a typo'd WhatsApp, add interests).
+    """An attendee edits their OWN profile (fix a typo'd link, add interests).
 
     Resolved from the JWT, so you can only ever edit yourself. Declared before
     /{attendee_id} so 'me' isn't matched as an id. Status is intentionally not
@@ -193,6 +235,59 @@ async def update_my_registration(
         event_id=event_id,
         entity_id=attendee["id"],
         metadata={"fields": sorted(changes.keys())},
+    )
+    return updated
+
+
+@router.post("/me/arrive", response_model=AttendeeResponse)
+async def self_arrive(
+    event_id: str,
+    body: ArriveRequest,
+    user: AuthUser = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """Self-service day-of check-in: a pre-registered attendee types the ROOM code
+    the organizer revealed in the room and flips themselves 'registered' ->
+    'arrived', joining the seating pool.
+
+    Resolved from the JWT, so you can only ever check yourself in. Declared before
+    /{attendee_id} so the 'me' segment isn't matched as an id. The room code is a
+    secret separate from the join code (deps.fetch_room_code) — never returned
+    here, only verified — and the audit records the status change, never the code.
+    """
+    event = fetch_event_or_404(db, event_id)
+    if event["status"] == "ended":
+        raise HTTPException(status_code=409, detail="This event has already ended")
+
+    me = fetch_my_attendee(db, event_id, user.id)
+    if me is None:
+        raise HTTPException(status_code=404, detail="Register for this event first")
+
+    # Idempotent: already in the room — a double-tap or stale screen is a no-op success.
+    if me["status"] == "arrived":
+        return me
+
+    room_code = fetch_room_code(db, event_id)
+    if not room_code:
+        # No code set yet — check-in isn't open. (code_matches() would pass an
+        # empty required code, so we must guard before calling it.)
+        raise HTTPException(
+            status_code=409, detail="Check-in isn't open yet — ask the host for the room code"
+        )
+    if not code_matches(room_code, body.room_code):
+        raise HTTPException(status_code=403, detail="That room code isn't right")
+
+    updated = (
+        db.table("attendees").update({"status": "arrived"}).eq("id", me["id"]).execute().data[0]
+    )
+    record_audit(
+        db,
+        action="attendee.self_arrived",
+        entity_type="attendee",
+        actor_user_id=user.id,
+        event_id=event_id,
+        entity_id=me["id"],
+        metadata={"from": me["status"]},  # 'registered' or 're-entry from left'; never the code
     )
     return updated
 

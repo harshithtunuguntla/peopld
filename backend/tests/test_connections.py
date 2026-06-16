@@ -77,8 +77,8 @@ def test_connections_rolodex(client, db, event):
     # Round 1: ME sits with B at table 1; C is elsewhere
     # Round 2: ME sits with C and D at table 2
     me = make_attendee(db, event["id"], name="Me", user_id=ATTENDEE_USER_ID)
-    b = make_attendee(db, event["id"], name="B", whatsapp_number="+911111111111")
-    c = make_attendee(db, event["id"], name="C", whatsapp_number=None)
+    b = make_attendee(db, event["id"], name="B", website_url="https://b.dev")
+    c = make_attendee(db, event["id"], name="C", website_url=None)
     d = make_attendee(db, event["id"], name="D")
     r1 = make_round(db, event["id"], round_number=1, status="completed")
     r2 = make_round(db, event["id"], round_number=2, status="completed")
@@ -105,7 +105,7 @@ def test_connections_rolodex(client, db, event):
     # Sorted by round, then table
     assert [e["name"] for e in entries] == ["B", "C", "D"]
     assert entries[0]["round_number"] == 1
-    assert entries[0]["whatsapp_number"] == "+911111111111"
+    assert entries[0]["website_url"] == "https://b.dev"
     assert entries[1]["round_number"] == 2
 
 

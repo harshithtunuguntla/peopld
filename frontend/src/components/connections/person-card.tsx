@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Heart, MessageCircle, Linkedin, StickyNote, Loader2, Check, CalendarDays } from "lucide-react";
+import { Heart, Globe, Linkedin, StickyNote, Loader2, Check, CalendarDays } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
 import { Avatar } from "@/components/brand/avatar";
@@ -12,9 +12,10 @@ export interface Connection {
   attendee_id: string;
   name: string;
   role: string;
+  company: string | null;
   looking_for: string | null;
-  whatsapp_number: string | null;
   linkedin_url: string | null;
+  website_url: string | null;
   avatar_url: string | null;
   interests: string[];
   shared_interests: string[];
@@ -30,9 +31,10 @@ export interface Person {
   attendee_id: string;
   name: string;
   role: string;
+  company: string | null;
   looking_for: string | null;
-  whatsapp_number: string | null;
   linkedin_url: string | null;
+  website_url: string | null;
   avatar_url: string | null;
   interests: string[];
   shared_interests: string[];
@@ -58,9 +60,10 @@ export function groupByPerson(rows: Connection[]): Person[] {
         attendee_id: c.attendee_id,
         name: c.name,
         role: c.role,
+        company: c.company,
         looking_for: c.looking_for,
-        whatsapp_number: c.whatsapp_number,
         linkedin_url: c.linkedin_url,
+        website_url: c.website_url,
         avatar_url: c.avatar_url,
         interests: c.interests ?? [],
         shared_interests: c.shared_interests ?? [],
@@ -83,7 +86,7 @@ export function groupByPerson(rows: Connection[]): Person[] {
  * (on the cross-event page it's that connection's own event).
  */
 export function PersonCard({ person, eventId }: { person: Person; eventId: string }) {
-  const wa = person.whatsapp_number ? `https://wa.me/${person.whatsapp_number.replace(/[^\d]/g, "")}` : null;
+  const roleLine = [person.role, person.company].filter(Boolean).join(" · ");
   const sharedSet = new Set(person.shared_interests.map((s) => s.toLowerCase()));
   const otherInterests = person.interests.filter((t) => !sharedSet.has(t.toLowerCase()));
   const rounds = [...person.rounds].sort((a, b) => a - b);
@@ -102,7 +105,7 @@ export function PersonCard({ person, eventId }: { person: Person; eventId: strin
               <Heart className="h-3.5 w-3.5 shrink-0 fill-accent text-accent" aria-label="You liked them" />
             ) : null}
           </div>
-          <p className="truncate text-sm text-muted-foreground">{person.role}</p>
+          <p className="truncate text-sm text-muted-foreground">{roleLine}</p>
           {person.eventLabel ? (
             <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
               <CalendarDays className="h-3 w-3" aria-hidden /> {person.eventLabel}
@@ -136,18 +139,8 @@ export function PersonCard({ person, eventId }: { person: Person; eventId: strin
         </div>
       )}
 
-      {(wa || person.linkedin_url) && (
+      {(person.linkedin_url || person.website_url) && (
         <div className="mt-3 flex gap-2">
-          {wa && (
-            <a
-              href={wa}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              <MessageCircle className="h-4 w-4" aria-hidden /> WhatsApp
-            </a>
-          )}
           {person.linkedin_url && (
             <a
               href={person.linkedin_url}
@@ -156,6 +149,16 @@ export function PersonCard({ person, eventId }: { person: Person; eventId: strin
               className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
             >
               <Linkedin className="h-4 w-4" aria-hidden /> LinkedIn
+            </a>
+          )}
+          {person.website_url && (
+            <a
+              href={person.website_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              <Globe className="h-4 w-4" aria-hidden /> Website
             </a>
           )}
         </div>

@@ -10,6 +10,7 @@ import { useLiveState } from "@/lib/live/use-live-state";
 import {
   LiveShell,
   WaitingRoom,
+  RoomCodeCheckIn,
   BetweenRounds,
   NotSeated,
   EventEnded,
@@ -103,6 +104,18 @@ function LiveInner({ eventId }: { eventId: string }) {
     );
   }
 
+  // Pre-registered but not yet checked in: gate the whole live experience behind
+  // self-service room-code check-in (status flips registered -> arrived). Only
+  // 'arrived' people are ever seated, so until they check in there's nothing to
+  // show them. An ended event skips straight to the recap below.
+  if (state.attendee_status === "registered" && state.phase !== "ended") {
+    return (
+      <LiveShell eventId={eventId}>
+        <RoomCodeCheckIn state={state} eventId={eventId} onArrived={refetch} />
+      </LiveShell>
+    );
+  }
+
   switch (state.phase) {
     case "ended":
       return (
@@ -126,7 +139,7 @@ function LiveInner({ eventId }: { eventId: string }) {
     default:
       return (
         <LiveShell eventId={eventId}>
-          <WaitingRoom state={state} />
+          <WaitingRoom state={state} eventId={eventId} />
         </LiveShell>
       );
   }

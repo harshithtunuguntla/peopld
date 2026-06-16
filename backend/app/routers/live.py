@@ -136,7 +136,10 @@ async def get_live_state(
         started_at = active.get("started_at")
         ends_at = None
         if started_at:
-            ends_at = _parse_iso(started_at) + timedelta(seconds=active["duration_seconds"])
+            # Effective end shifts forward by any banked paused time (migration 008).
+            ends_at = _parse_iso(started_at) + timedelta(
+                seconds=active["duration_seconds"] + int(active.get("total_paused_seconds") or 0)
+            )
         round_payload = LiveRound(
             round_id=active["id"],
             round_number=active["round_number"],
@@ -144,6 +147,7 @@ async def get_live_state(
             started_at=started_at,
             duration_seconds=active["duration_seconds"],
             ends_at=ends_at,
+            paused_at=active.get("paused_at"),
         )
 
         my_assignment = (
@@ -177,6 +181,17 @@ async def get_live_state(
             ).data or []
             liked_ids = {str(l["liked_attendee_id"]) for l in my_likes}
 
+            # Which tablemates did I pre-event PICK to meet? (Phase 3a nudge —
+            # private to me; the other person is never told they were picked.)
+            my_intents = (
+                db.table("meeting_intents")
+                .select("liked_attendee_id")
+                .eq("event_id", event_id)
+                .eq("liker_attendee_id", str(attendee["id"]))
+                .execute()
+            ).data or []
+            wanted_ids = {str(i["liked_attendee_id"]) for i in my_intents}
+
             my_interests = [str(t) for t in (attendee.get("interests") or [])]
             my_interest_set = {t.casefold() for t in my_interests}
 
@@ -194,11 +209,13 @@ async def get_live_state(
                             attendee_id=aid,
                             name=info["name"],
                             role=info["role"],
+                            company=info.get("company"),
                             looking_for=info.get("looking_for"),
                             interests=their_interests,
                             shared_interests=shared,
                             avatar_url=info.get("avatar_url"),
                             liked=aid in liked_ids,
+                            wanted=aid in wanted_ids,
                         )
                     )
             mates.sort(key=lambda m: m.name.lower())

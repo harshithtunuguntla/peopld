@@ -29,11 +29,17 @@ CREATE TABLE attendees (
   user_id          UUID REFERENCES auth.users(id),
   name             TEXT NOT NULL,
   role             TEXT NOT NULL,
+  company          TEXT,  -- where they work / what they're building (migration 009)
+  description      TEXT,  -- short "what are you doing right now" line (migration 009)
   looking_for      TEXT,
   linkedin_url     TEXT,
-  whatsapp_number  TEXT,
+  website_url      TEXT,  -- personal site / product link (migration 009)
   avatar_url       TEXT,  -- OAuth (Google) profile photo, captured at registration; null = use initials
   interests        TEXT[] NOT NULL DEFAULT '{}',  -- conversation-seed tags; shared ones highlighted on cards
+  -- Pre-event directory controls (migration 009):
+  show_in_directory BOOLEAN NOT NULL DEFAULT TRUE,  -- per-attendee opt-out of the public "who's coming" list
+  tag              TEXT NOT NULL DEFAULT 'attendee'
+                     CHECK (tag IN ('attendee', 'speaker', 'host')),  -- organizer-assigned; filters the directory
   status           TEXT NOT NULL DEFAULT 'registered'
                      CHECK (status IN ('registered', 'arrived', 'left')),
   created_at       TIMESTAMPTZ DEFAULT NOW()
@@ -46,6 +52,11 @@ CREATE TABLE rounds (
   duration_seconds INTEGER NOT NULL,
   started_at       TIMESTAMPTZ,
   ended_at         TIMESTAMPTZ,
+  -- Pause support (migration 008): paused_at is set while paused (null when
+  -- running); total_paused_seconds accumulates past pauses. Effective end =
+  -- started_at + duration_seconds + total_paused_seconds.
+  paused_at            TIMESTAMPTZ,
+  total_paused_seconds INTEGER NOT NULL DEFAULT 0,
   status           TEXT NOT NULL DEFAULT 'active'
                      CHECK (status IN ('active', 'completed')),
   UNIQUE (event_id, round_number)
@@ -106,10 +117,36 @@ CREATE TABLE event_access_codes (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Per-event ROOM code (Phase 2 — self-service day-of check-in): a SECOND short
+-- secret, separate from the access code above. Pre-registered attendees type it
+-- in the room to flip themselves 'registered' -> 'arrived'. Must NOT be
+-- shareable in advance (unlike the join code), so it is its own secret revealed
+-- only at the venue. Same posture: own table, NO RLS policies (service-role
+-- only). No row = check-in not open yet. (migration 010)
+CREATE TABLE event_room_codes (
+  event_id   UUID PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+  code       TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Connection likes (Step 7): an attendee "likes" a tablemate during a live round;
 -- surfaced in the post-event rolodex (mutual = a match). Private signals — its own
 -- table with NO RLS policies (service-role only), like the other secret tables.
 CREATE TABLE connection_likes (
+  id                 UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id           UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  liker_attendee_id  UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
+  liked_attendee_id  UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (event_id, liker_attendee_id, liked_attendee_id)
+);
+
+-- Meeting intents (Phase 3a): a pre-event "I want to meet X" pick made while
+-- browsing the directory. DISTINCT from connection_likes (that's the post-meeting
+-- rolodex signal) — a different concept with different privacy, so its own table.
+-- Phase 3b will teach seating to honor these. Private signals — NO RLS policies
+-- (service-role only). Directed edge; a pair is mutual when both directions exist.
+CREATE TABLE meeting_intents (
   id                 UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   event_id           UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   liker_attendee_id  UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
@@ -155,7 +192,9 @@ ALTER TABLE icebreakers      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE round_drafts     ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE round_plans      ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE event_access_codes ENABLE ROW LEVEL SECURITY; -- no policies: service-role only
+ALTER TABLE event_room_codes   ENABLE ROW LEVEL SECURITY; -- no policies: service-role only
 ALTER TABLE connection_likes ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
+ALTER TABLE meeting_intents  ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE connection_notes ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE audit_log        ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 
@@ -163,7 +202,7 @@ ALTER TABLE audit_log        ENABLE ROW LEVEL SECURITY;  -- no policies: service
 -- backend (service-role key, bypasses RLS, enforces ownership checks).
 -- Client-side keys get SELECT only on non-PII tables needed for the
 -- public landing page and Realtime subscriptions. The attendees table
--- (names, WhatsApp, LinkedIn) is NOT client-readable.
+-- (names, LinkedIn, contact details) is NOT client-readable.
 
 -- Anyone can read event details (public landing page)
 CREATE POLICY "events_public_read" ON events

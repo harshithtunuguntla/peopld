@@ -20,13 +20,20 @@ def test_attendee_can_edit_own_profile(client, db, event):
     make_attendee(db, event["id"], name="Me", user_id=ATTENDEE_USER_ID)
     res = client.patch(
         f"/events/{event['id']}/attendees/me",
-        json={"whatsapp_number": "+910000000000", "interests": ["AI", "Climate"]},
+        json={
+            "website_url": "https://me.dev",
+            "company": "Acme",
+            "interests": ["AI", "Climate"],
+            "show_in_directory": False,
+        },
         headers=ATTENDEE_AUTH,
     )
     assert res.status_code == 200
     body = res.json()
-    assert body["whatsapp_number"] == "+910000000000"
+    assert body["website_url"] == "https://me.dev"
+    assert body["company"] == "Acme"
     assert body["interests"] == ["AI", "Climate"]
+    assert body["show_in_directory"] is False
 
 
 def test_self_edit_requires_registration(client, db, event):

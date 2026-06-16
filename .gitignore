@@ -40,3 +40,6 @@ npm-debug.log*
 # Generated validation reports (each run saved locally, not committed)
 backend/reports/
 report.html
+
+# Gemini CLI local tool config (personal, not part of the app)
+.gemini/

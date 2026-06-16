@@ -1,20 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Globe, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
 import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
-import { LinkedInGlyph, WhatsAppGlyph } from "@/components/brand/glyphs";
+import { LinkedInGlyph } from "@/components/brand/glyphs";
 
 export interface RegisterValues {
   name: string;
   role: string;
+  company: string;
+  description: string;
   looking_for: string;
   linkedin_url: string;
-  whatsapp_number: string;
+  website_url: string;
   interests: string[];
 }
 
@@ -29,7 +31,16 @@ interface RegisterFormProps {
   defaultName?: string;
 }
 
-const EMPTY: RegisterValues = { name: "", role: "", looking_for: "", linkedin_url: "", whatsapp_number: "", interests: [] };
+const EMPTY: RegisterValues = {
+  name: "",
+  role: "",
+  company: "",
+  description: "",
+  looking_for: "",
+  linkedin_url: "",
+  website_url: "",
+  interests: [],
+};
 
 /** Attendee profile form. Owns its field state + client validation; emits clean
  * values to the parent, which maps them to the API and handles the request. */
@@ -45,12 +56,19 @@ export function RegisterForm({ onSubmit, busy, error, defaultName }: RegisterFor
     if (errors[key]) setErrors((prev) => ({ ...prev, [key]: undefined }));
   };
 
+  function isUrl(v: string) {
+    return /^https?:\/\/.+/i.test(v.trim());
+  }
+
   function validate(v: RegisterValues): Errors {
     const next: Errors = {};
     if (!v.name.trim()) next.name = "Tell us your name so tablemates know who you are.";
     if (!v.role.trim()) next.role = "A quick role helps people break the ice.";
-    if (v.linkedin_url.trim() && !/^https?:\/\/.+/i.test(v.linkedin_url.trim())) {
+    if (v.linkedin_url.trim() && !isUrl(v.linkedin_url)) {
       next.linkedin_url = "Include the full link (starting with https://).";
+    }
+    if (v.website_url.trim() && !isUrl(v.website_url)) {
+      next.website_url = "Include the full link (starting with https://).";
     }
     return next;
   }
@@ -61,16 +79,18 @@ export function RegisterForm({ onSubmit, busy, error, defaultName }: RegisterFor
     if (Object.keys(found).length) {
       setErrors(found);
       // Focus the first invalid field for keyboard/screen-reader users.
-      const firstKey = (["name", "role", "linkedin_url"] as const).find((k) => found[k]);
+      const firstKey = (["name", "role", "linkedin_url", "website_url"] as const).find((k) => found[k]);
       if (firstKey) document.getElementById(`reg-${firstKey}`)?.focus();
       return;
     }
     void onSubmit({
       name: values.name.trim(),
       role: values.role.trim(),
+      company: values.company.trim(),
+      description: values.description.trim(),
       looking_for: values.looking_for.trim(),
       linkedin_url: values.linkedin_url.trim(),
-      whatsapp_number: values.whatsapp_number.trim(),
+      website_url: values.website_url.trim(),
       interests: values.interests,
     });
   }
@@ -79,7 +99,7 @@ export function RegisterForm({ onSubmit, busy, error, defaultName }: RegisterFor
     <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-5">
       <header>
         <h2 className="font-display text-xl text-foreground">Set up your profile</h2>
-        <p className="mt-1 text-sm text-muted-foreground">This is what your tablemates will see at the event.</p>
+        <p className="mt-1 text-sm text-muted-foreground">This is what everyone at the event — and on the guest list — will see.</p>
       </header>
 
       <Field label="Full name" name="reg-name" required error={errors.name}>
@@ -88,9 +108,28 @@ export function RegisterForm({ onSubmit, busy, error, defaultName }: RegisterFor
         )}
       </Field>
 
-      <Field label="Role" name="reg-role" required error={errors.role} hint="What you do, in a few words.">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <Field label="Role" name="reg-role" required error={errors.role} hint="What you do.">
+          {(p) => (
+            <Input {...p} value={values.role} onChange={set("role")} placeholder="Founder" />
+          )}
+        </Field>
+
+        <Field label="Company" name="reg-company" hint="Where you work / build.">
+          {(p) => (
+            <Input {...p} value={values.company} onChange={set("company")} placeholder="Acme" />
+          )}
+        </Field>
+      </div>
+
+      <Field label="What are you working on?" name="reg-description" hint="A line about what you're building right now.">
         {(p) => (
-          <Input {...p} value={values.role} onChange={set("role")} placeholder="Founder at Acme" />
+          <Textarea
+            {...p}
+            value={values.description}
+            onChange={set("description")}
+            placeholder="Building an AI copilot for warehouse ops — just shipped our first pilot."
+          />
         )}
       </Field>
 
@@ -133,17 +172,17 @@ export function RegisterForm({ onSubmit, busy, error, defaultName }: RegisterFor
         )}
       </Field>
 
-      <Field label="WhatsApp" name="reg-whatsapp_number" hint="Shared only with people you actually meet, after the event.">
+      <Field label="Website" name="reg-website_url" error={errors.website_url} hint="Your site or product link.">
         {(p) => (
           <Input
             {...p}
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            startIcon={<WhatsAppGlyph />}
-            value={values.whatsapp_number}
-            onChange={set("whatsapp_number")}
-            placeholder="+91 98765 43210"
+            type="url"
+            inputMode="url"
+            autoComplete="url"
+            startIcon={<Globe className="h-4 w-4" aria-hidden />}
+            value={values.website_url}
+            onChange={set("website_url")}
+            placeholder="https://yourproduct.com"
           />
         )}
       </Field>

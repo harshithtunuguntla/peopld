@@ -208,7 +208,7 @@ App screens (dark surfaces) are **designed at 375px, then widened** — never le
 phone-only. The recipe:
 
 - **Container width by surface:** attendee hub + cross-event rolodex use
-  `max-w-3xl`; organizer console uses `max-w-2xl` (`OrgShell`). Single-table **live**
+  `max-w-3xl`; organizer console uses `max-w-[1280px]` (`ConsoleShell`). Single-table **live**
   screens stay column-centered (`max-w-md`) — a table is inherently narrow, so
   widening it would only spread it thin.
 - **Lists → grids on wider screens:** card lists go `grid grid-cols-1 gap-3

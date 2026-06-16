@@ -2,15 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, Plus, Users, Radio, MapPin, CalendarDays, Lock, KeyRound, Copy, Check, RefreshCw, X } from "lucide-react";
+import { Loader2, Plus, Users, Radio, MapPin, CalendarDays, Lock, LayoutDashboard } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
-import { OrgShell } from "@/components/organizer/shell";
+import { ConsoleShell } from "@/components/organizer/console-shell";
+import { PageHeader, Card, StatCard, StatusChip } from "@/components/organizer/console-ui";
+import { AccessCodeControl } from "@/components/organizer/access-code-control";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
-import { cn } from "@/lib/utils";
 
 interface OrgEvent {
   id: string;
@@ -40,19 +41,32 @@ export default function OrganizerDashboard() {
 
   if (!checked || !user) {
     return (
-      <OrgShell>
+      <ConsoleShell>
         <Centered label="Loading…" />
-      </OrgShell>
+      </ConsoleShell>
     );
   }
 
+  const activeCount = events?.filter(e => e.status === "active").length || 0;
+  const upcomingCount = events?.filter(e => e.status === "upcoming").length || 0;
+
   return (
-    <OrgShell>
-      <div className="flex items-center justify-between">
-        <h1 className="font-display text-3xl tracking-[-0.02em] text-foreground">Your events</h1>
-        <Button variant="accent" onClick={() => setCreating((v) => !v)} className="gap-1.5">
-          <Plus className="h-4 w-4" /> New event
-        </Button>
+    <ConsoleShell>
+      <PageHeader
+        eyebrow="Organizer"
+        title="Dashboard"
+        subtitle="Manage your networking events and run live sessions."
+        actions={
+          <Button variant="accent" onClick={() => setCreating((v) => !v)} className="gap-1.5">
+            <Plus className="h-4 w-4" /> New event
+          </Button>
+        }
+      />
+
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard label="Live Events" value={activeCount.toString()} icon={Radio} delay={0.1} />
+        <StatCard label="Upcoming" value={upcomingCount.toString()} icon={CalendarDays} delay={0.2} />
+        <StatCard label="Total Events" value={(events?.length || 0).toString()} icon={LayoutDashboard} delay={0.3} />
       </div>
 
       {creating && (
@@ -72,175 +86,68 @@ export default function OrganizerDashboard() {
       )}
 
       {events === null && !error && (
-        <div className="mt-6 space-y-3">
-          <div className="h-24 animate-pulse rounded-2xl border border-border bg-card/40" />
-          <div className="h-24 animate-pulse rounded-2xl border border-border bg-card/40" />
+        <div className="mt-6 space-y-4">
+          <div className="h-32 animate-pulse rounded-2xl border border-border bg-card/40" />
+          <div className="h-32 animate-pulse rounded-2xl border border-border bg-card/40" />
         </div>
       )}
 
       {events && events.length === 0 && (
-        <div className="mt-8 rounded-2xl border border-dashed border-border bg-card/40 px-6 py-10 text-center">
-          <CalendarDays className="mx-auto h-7 w-7 text-muted-foreground" aria-hidden />
-          <p className="mt-3 font-display text-lg text-foreground">No events yet</p>
-          <p className="mt-1 text-sm text-muted-foreground">Create your first event to get started.</p>
+        <div className="mt-8 rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
+          <CalendarDays className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden />
+          <p className="mt-4 font-display text-xl text-foreground">No events yet</p>
+          <p className="mt-1 text-sm text-muted-foreground">Create your first event to start networking.</p>
         </div>
       )}
 
       {events && events.length > 0 && (
-        <ul className="mt-6 space-y-3">
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
           {events.map((e) => (
-            <EventRow key={e.id} event={e} />
+            <EventCard key={e.id} event={e} />
           ))}
-        </ul>
+        </div>
       )}
-    </OrgShell>
+    </ConsoleShell>
   );
 }
 
-function EventRow({ event }: { event: OrgEvent }) {
-  const status = {
-    upcoming: "bg-info/15 text-info",
-    active: "bg-accent/15 text-accent",
-    ended: "bg-muted text-muted-foreground",
-  }[event.status];
+function EventCard({ event }: { event: OrgEvent }) {
   const day = new Date(`${event.date}T${event.time || "00:00:00"}`).toLocaleDateString(undefined, {
     weekday: "short",
     day: "numeric",
     month: "short",
   });
   return (
-    <li className="rounded-2xl border border-border bg-card/50 p-4">
+    <Card className="flex flex-col p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide", status)}>
-              {event.status === "active" ? "Live" : event.status}
-            </span>
+            <StatusChip status={event.status} />
             {event.requires_code && <Lock className="h-3.5 w-3.5 text-muted-foreground" aria-label="Has access code" />}
           </div>
-          <h2 className="mt-2 truncate font-display text-lg text-foreground">{event.name}</h2>
-          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          <h2 className="mt-3 truncate font-display text-xl text-foreground">{event.name}</h2>
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
             <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" aria-hidden /> {day} · {formatTime(event.time)}</span>
             <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" aria-hidden /> {event.location}</span>
           </p>
         </div>
       </div>
-      <AccessCodeControl eventId={event.id} initialHasCode={event.requires_code} />
+      
+      <div className="mt-auto">
+        <div className="mt-3.5">
+          <AccessCodeControl eventId={event.id} initialHasCode={event.requires_code} />
+        </div>
 
-      <div className="mt-3.5 flex gap-2">
-        <Link href={`/organizer/event/${event.id}/people`} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-border py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
-          <Users className="h-4 w-4" aria-hidden /> People
-        </Link>
-        <Link href={`/organizer/event/${event.id}/live`} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-accent py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90">
-          <Radio className="h-4 w-4" aria-hidden /> Run event
-        </Link>
+        <div className="mt-4 flex gap-2">
+          <Link href={`/organizer/event/${event.id}/people`} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-border py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary">
+            <Users className="h-4 w-4" aria-hidden /> People
+          </Link>
+          <Link href={`/organizer/event/${event.id}/live`} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-accent py-2 text-sm font-medium text-accent-foreground transition-transform hover:-translate-y-0.5">
+            <Radio className="h-4 w-4" aria-hidden /> Run event
+          </Link>
+        </div>
       </div>
-    </li>
-  );
-}
-
-/**
- * Per-event access code: view, copy, regenerate, or remove. The secret value is
- * fetched lazily (owner-only endpoint) the first time the row needs it. This is
- * the code attendees use on the hub's "Join via access code" / QR.
- */
-function AccessCodeControl({ eventId, initialHasCode }: { eventId: string; initialHasCode: boolean }) {
-  const [code, setCode] = useState<string | null | undefined>(initialHasCode ? undefined : null);
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!initialHasCode) return;
-    apiFetch<{ code: string | null }>(`/events/${eventId}/access-code`)
-      .then((r) => setCode(r.code))
-      .catch(() => setCode(null));
-  }, [eventId, initialHasCode]);
-
-  async function regenerate() {
-    setBusy(true);
-    try {
-      const r = await apiFetch<{ code: string | null }>(`/events/${eventId}/access-code/regenerate`, { method: "POST" });
-      setCode(r.code);
-    } catch {
-      /* leave the current value; the organizer can retry */
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove() {
-    setBusy(true);
-    try {
-      await apiFetch(`/events/${eventId}/access-code`, { method: "DELETE" });
-      setCode(null);
-    } catch {
-      /* no-op */
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function copy() {
-    if (!code) return;
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked — value is still visible */
-    }
-  }
-
-  return (
-    <div className="mt-3.5 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-background/40 px-3 py-2">
-      <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-      {code === undefined ? (
-        <span className="text-sm text-muted-foreground">Loading code…</span>
-      ) : code ? (
-        <>
-          <button
-            type="button"
-            onClick={copy}
-            title="Copy code"
-            className="inline-flex items-center gap-1.5 font-display text-lg tracking-[0.2em] text-foreground transition-colors hover:text-accent"
-          >
-            {code}
-            {copied ? <Check className="h-3.5 w-3.5 text-success" aria-hidden /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />}
-          </button>
-          <div className="ml-auto flex items-center gap-1">
-            <CodeBtn label="Regenerate code" onClick={regenerate} busy={busy}>
-              <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} aria-hidden />
-            </CodeBtn>
-            <CodeBtn label="Remove code (make open)" onClick={remove} busy={busy}>
-              <X className="h-3.5 w-3.5" aria-hidden />
-            </CodeBtn>
-          </div>
-        </>
-      ) : (
-        <>
-          <span className="text-sm text-muted-foreground">No code — open event</span>
-          <Button variant="outline" size="sm" onClick={regenerate} disabled={busy} className="ml-auto gap-1.5">
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
-            Generate code
-          </Button>
-        </>
-      )}
-    </div>
-  );
-}
-
-function CodeBtn({ label, onClick, busy, children }: { label: string; onClick: () => void; busy: boolean; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      aria-label={label}
-      title={label}
-      className="flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-    >
-      {children}
-    </button>
+    </Card>
   );
 }
 

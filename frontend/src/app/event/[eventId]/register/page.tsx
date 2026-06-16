@@ -139,9 +139,11 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
         body: JSON.stringify({
           name: values.name,
           role: values.role,
+          company: values.company || null,
+          description: values.description || null,
           looking_for: values.looking_for || null,
           linkedin_url: values.linkedin_url || null,
-          whatsapp_number: values.whatsapp_number || null,
+          website_url: values.website_url || null,
           interests: values.interests,
           // Capture the OAuth (Google) profile photo so name cards show a face.
           avatar_url:

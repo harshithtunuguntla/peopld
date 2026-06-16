@@ -86,6 +86,24 @@ def test_live_in_round_seated_with_tablemates(client, db, event):
     assert all("role" in m for m in body["seat"]["tablemates"])
 
 
+def test_live_round_paused_shifts_ends_at_and_reports_paused(client, db, event):
+    """A paused round banks time into the effective end and tells the phone it's
+    paused, so the attendee countdown freezes (migration 008)."""
+    _me(db, event["id"])
+    make_round(
+        db, event["id"], round_number=1, status="active",
+        started_at="2026-07-01T18:00:00+00:00",
+        paused_at="2026-07-01T18:02:00+00:00",
+        total_paused_seconds=120,
+    )
+    r = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH)
+    assert r.status_code == 200
+    rnd = r.json()["round"]
+    # ends_at = started_at + duration(300) + total_paused(120) = 18:07:00
+    assert rnd["ends_at"].startswith("2026-07-01T18:07:00")
+    assert rnd["paused_at"] is not None
+
+
 def test_live_in_round_not_seated(client, db, event):
     """Late arrival: a round is live but this attendee has no table yet."""
     _me(db, event["id"], status="arrived")
@@ -128,7 +146,7 @@ def test_live_payload_has_no_contact_pii(client, db, event):
     me = _me(db, event["id"])
     mate = make_attendee(
         db, event["id"], name="Bobby", status="arrived",
-        whatsapp_number="+915550001111", linkedin_url="https://linkedin.com/in/bobby",
+        website_url="https://bobby.dev", linkedin_url="https://linkedin.com/in/bobby",
     )
     rnd = make_round(db, event["id"], round_number=1, status="active")
     make_assignment(db, event["id"], rnd["id"], me["id"], table_number=1)
@@ -138,9 +156,8 @@ def test_live_payload_has_no_contact_pii(client, db, event):
     raw = r.text
     # Tablemate name/role are shown; contact details are NOT (rolodex only).
     assert "Bobby" in raw
-    assert "+915550001111" not in raw
+    assert "bobby.dev" not in raw.lower()
     assert "linkedin" not in raw.lower()
-    assert "whatsapp" not in raw.lower()
 
 
 # --- icebreaker hook (Step 6) ---

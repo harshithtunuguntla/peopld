@@ -359,7 +359,7 @@ def run_live(attendees: int, tables: int, seats: int, rounds: int) -> LiveRun:
             "event_id": event_id, "user_id": None,
             "name": f"Founder {i:03d}", "role": "Founder",
             "looking_for": None, "linkedin_url": None,
-            "whatsapp_number": None, "status": "arrived",
+            "website_url": None, "status": "arrived",
         } for i in range(attendees)]
         inserted = db.table("attendees").insert(rows).execute().data
         attendee_ids = [str(a["id"]) for a in inserted]

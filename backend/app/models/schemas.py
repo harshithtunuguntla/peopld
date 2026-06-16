@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, Literal
 from datetime import date, time, datetime
+from datetime import date as DateType, time as TimeType  # aliases for models that also have date/time FIELDS (avoids name shadowing)
 from uuid import UUID
 
 
@@ -22,6 +23,11 @@ class EventCreate(BaseModel):
 
 class EventUpdate(BaseModel):
     """Organizer-editable config — capacity is never hardcoded (design doc §3)."""
+    name: Optional[str] = Field(default=None, min_length=1)
+    description: Optional[str] = None
+    location: Optional[str] = Field(default=None, min_length=1)
+    date: Optional[DateType] = None
+    time: Optional[TimeType] = None
     status: Optional[Literal["upcoming", "active", "ended"]] = None
     num_tables: Optional[int] = Field(default=None, ge=1)
     seats_per_table: Optional[int] = Field(default=None, ge=3)
@@ -95,14 +101,27 @@ class AccessCodeResponse(BaseModel):
     code: Optional[str] = None
 
 
+class RoomCodeResponse(BaseModel):
+    """The event's secret ROOM code (day-of check-in) — returned ONLY to the
+    owning organizer so they can reveal it in the room. None = check-in not open."""
+    code: Optional[str] = None
+
+
+class ArriveRequest(BaseModel):
+    """An attendee checks themselves in by typing the room code shown at the venue."""
+    room_code: str
+
+
 # --- Attendee ---
 
 class AttendeeCreate(BaseModel):
     name: str
     role: str
+    company: Optional[str] = None  # where they work / what they're building
+    description: Optional[str] = None  # short "what are you doing right now" line
     looking_for: Optional[str] = None
     linkedin_url: Optional[str] = None
-    whatsapp_number: Optional[str] = None
+    website_url: Optional[str] = None  # personal site / product link
     interests: list[str] = []  # conversation-seed tags; shared ones highlight on cards
     avatar_url: Optional[str] = None  # OAuth profile photo, captured client-side at registration
     access_code: Optional[str] = None  # required iff the event has one; verified server-side, not stored on the attendee
@@ -113,14 +132,19 @@ class WalkInCreate(BaseModel):
     no avatar — just enough to seat them."""
     name: str
     role: str
+    company: Optional[str] = None
+    description: Optional[str] = None
     looking_for: Optional[str] = None
     linkedin_url: Optional[str] = None
-    whatsapp_number: Optional[str] = None
+    website_url: Optional[str] = None
     interests: list[str] = []
 
 
 class AttendeeUpdate(BaseModel):
+    """Organizer control-panel edits: move someone arrived/left, or tag them
+    (attendee/speaker/host) for the directory filters."""
     status: Optional[Literal["registered", "arrived", "left"]] = None
+    tag: Optional[Literal["attendee", "speaker", "host"]] = None
 
 
 class AttendeeSelfUpdate(BaseModel):
@@ -128,10 +152,13 @@ class AttendeeSelfUpdate(BaseModel):
     here on purpose — only the organizer moves people between arrived/left."""
     name: Optional[str] = None
     role: Optional[str] = None
+    company: Optional[str] = None
+    description: Optional[str] = None
     looking_for: Optional[str] = None
     linkedin_url: Optional[str] = None
-    whatsapp_number: Optional[str] = None
+    website_url: Optional[str] = None
     interests: Optional[list[str]] = None
+    show_in_directory: Optional[bool] = None  # opt in/out of the public pre-event list
 
 
 class AttendeeResponse(BaseModel):
@@ -140,11 +167,15 @@ class AttendeeResponse(BaseModel):
     user_id: Optional[UUID]
     name: str
     role: str
+    company: Optional[str] = None
+    description: Optional[str] = None
     looking_for: Optional[str]
     linkedin_url: Optional[str]
-    whatsapp_number: Optional[str]
+    website_url: Optional[str] = None
     interests: list[str] = []
     avatar_url: Optional[str] = None
+    show_in_directory: bool = True
+    tag: Literal["attendee", "speaker", "host"] = "attendee"
     status: Literal["registered", "arrived", "left"]
     created_at: datetime
 
@@ -154,6 +185,80 @@ class AttendeeWithAssignmentResponse(AttendeeResponse):
     current_table_number: Optional[int] = None
     current_round_id: Optional[UUID] = None
     current_round_number: Optional[int] = None
+
+
+class BulkCheckInResponse(BaseModel):
+    """Result of the organizer's one-tap 'mark everyone arrived' door action."""
+    arrived: int  # how many registered attendees were moved to arrived
+
+
+# --- Pre-event directory ("who's coming") ---
+
+class DirectoryEntry(BaseModel):
+    """One person on the public attendee directory. Public profile fields only —
+    no status, no internal flags, and contact is professional links (LinkedIn /
+    website), never a phone number. `shared_interests` are tags the viewer and
+    this person both picked, surfaced so people have an instant opener."""
+    attendee_id: UUID
+    name: str
+    role: str
+    company: Optional[str] = None
+    description: Optional[str] = None
+    looking_for: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    website_url: Optional[str] = None
+    interests: list[str] = []
+    shared_interests: list[str] = []
+    avatar_url: Optional[str] = None
+    tag: Literal["attendee", "speaker", "host"] = "attendee"
+    wanted_by_me: bool = False  # has the viewer picked this person to meet?
+
+
+class DirectoryResponse(BaseModel):
+    """The 'who's coming' list for an event, visible to registered attendees and
+    the organizer. Only opted-in people appear; the viewer is excluded."""
+    count: int
+    speakers: int  # how many of the listed people are tagged 'speaker' (UI chip)
+    my_intents_used: int = 0  # how many meeting picks the viewer has made
+    my_intents_cap: int = 0   # the viewer's pick cap (= planned rounds)
+    attendees: list[DirectoryEntry]
+
+
+# --- Meeting intents (Phase 3a — pre-event "I want to meet X") ---
+
+class IntentRequest(BaseModel):
+    target_attendee_id: UUID
+
+
+class IntentResponse(BaseModel):
+    """State after a set/clear. `used`/`cap` let the UI show "3 of 5 picks"."""
+    wants: bool   # does the viewer now intend to meet this person?
+    used: int     # picks the viewer has made
+    cap: int      # max picks allowed (= planned rounds)
+
+
+class MyIntentsResponse(BaseModel):
+    """The viewer's own picks (never anyone else's — privacy)."""
+    used: int
+    cap: int
+    target_ids: list[UUID] = []  # who the viewer wants to meet
+
+
+class IntentMatch(BaseModel):
+    """A mutual pick, revealed only AFTER the event (mutual-only reveal). Contact
+    links are included because a match is a confirmed two-way interest."""
+    attendee_id: UUID
+    name: str
+    role: str
+    company: Optional[str] = None
+    avatar_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    website_url: Optional[str] = None
+
+
+class IntentMatchesResponse(BaseModel):
+    count: int
+    matches: list[IntentMatch] = []
 
 
 # --- Table Assignment ---
@@ -176,6 +281,8 @@ class RoundResponse(BaseModel):
     started_at: Optional[datetime]
     ended_at: Optional[datetime]
     status: Literal["active", "completed"]
+    paused_at: Optional[datetime] = None  # set while paused; null when running
+    total_paused_seconds: int = 0  # accumulated paused time — shifts the effective end
 
 
 class RoundWithAssignmentsResponse(RoundResponse):
@@ -217,18 +324,20 @@ class RoundDraftResponse(BaseModel):
 
 class Tablemate(BaseModel):
     """A person at your table this round. Name + role + avatar + conversation
-    seeds (interests / looking_for) — but NO contact details (WhatsApp/LinkedIn),
+    seeds (interests / looking_for) — but NO contact details (LinkedIn/website),
     which belong to the post-event rolodex, never the live path. `liked` is
     whether *I* (the caller) have liked this person; `shared_interests` are tags
     we both picked, to break the ice."""
     attendee_id: UUID
     name: str
     role: str
+    company: Optional[str] = None
     looking_for: Optional[str] = None
     interests: list[str] = []
     shared_interests: list[str] = []
     avatar_url: Optional[str] = None
     liked: bool = False
+    wanted: bool = False  # the caller picked (pre-event) to meet this tablemate → nudge
 
 
 class LiveRound(BaseModel):
@@ -237,7 +346,8 @@ class LiveRound(BaseModel):
     status: Literal["active", "completed"]
     started_at: Optional[datetime]
     duration_seconds: int
-    ends_at: Optional[datetime] = None  # started_at + duration; phone derives the countdown from this + server_time
+    ends_at: Optional[datetime] = None  # started_at + duration + total_paused; phone derives the countdown from this + server_time
+    paused_at: Optional[datetime] = None  # set while paused — phone freezes the countdown at (ends_at - paused_at)
 
 
 class LiveSeat(BaseModel):
@@ -309,9 +419,10 @@ class ConnectionEntry(BaseModel):
     attendee_id: UUID
     name: str
     role: str
+    company: Optional[str] = None
     looking_for: Optional[str] = None
-    whatsapp_number: Optional[str]
     linkedin_url: Optional[str] = None
+    website_url: Optional[str] = None
     avatar_url: Optional[str] = None
     interests: list[str] = []
     shared_interests: list[str] = []  # tags the caller and this person both picked

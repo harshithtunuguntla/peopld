@@ -12,16 +12,19 @@ export interface LiveRound {
   started_at: string | null;
   duration_seconds: number;
   ends_at: string | null;
+  paused_at: string | null;
 }
 export interface Tablemate {
   attendee_id: string;
   name: string;
   role: string;
+  company: string | null;
   looking_for: string | null;
   interests: string[];
   shared_interests: string[];
   avatar_url: string | null;
   liked: boolean;
+  wanted: boolean; // I picked this person pre-event (Phase 3a) → at-table nudge
 }
 export interface LiveSeat {
   table_number: number;

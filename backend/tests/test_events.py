@@ -79,6 +79,35 @@ def test_patch_event_wrong_organizer_forbidden(client, event):
     assert response.status_code == 403
 
 
+def test_patch_event_edits_details_and_format(client, event):
+    """The settings page edits name/location/date/time + capacity/timing/auto-arrive."""
+    response = client.patch(
+        f"/events/{event['id']}",
+        json={
+            "name": "Renamed Mixer",
+            "location": "New Venue, Hyderabad",
+            "date": "2026-08-01",
+            "time": "19:30:00",
+            "num_tables": 12,
+            "seats_per_table": 5,
+            "default_round_duration_seconds": 420,
+            "auto_arrive_on_register": False,
+            "target_rounds": 5,
+        },
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "Renamed Mixer"
+    assert body["location"] == "New Venue, Hyderabad"
+    assert str(body["date"]) == "2026-08-01"
+    assert body["num_tables"] == 12
+    assert body["seats_per_table"] == 5
+    assert body["default_round_duration_seconds"] == 420
+    assert body["auto_arrive_on_register"] is False
+    assert body["target_rounds"] == 5
+
+
 def test_end_event_completes_active_rounds(client, db, event):
     active = make_round(db, event["id"], round_number=1, status="active")
 

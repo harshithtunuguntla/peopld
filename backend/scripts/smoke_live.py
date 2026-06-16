@@ -151,7 +151,7 @@ def main() -> int:
             print("\n[5] Attendees")
             register_payload = {
                 "name": "Asha Test", "role": "Founder at XYZ",
-                "looking_for": "investors", "whatsapp_number": "+919999999999",
+                "looking_for": "investors", "website_url": "https://asha.dev",
             }
             r = api.post(f"/events/{event_id}/attendees", json=register_payload)
             check("register without token -> 401", r.status_code == 401, r.text)
@@ -280,9 +280,9 @@ def main() -> int:
             check("live server_time present (clock-skew anchor)", bool(live.get("server_time")), str(live))
             check(f"REQ-RT-01: recovery within 3s (took {recover_ms:.0f}ms)",
                   recover_ms < 3000, f"{recover_ms:.0f}ms")
-            check("live payload carries NO WhatsApp number", "+919999999999" not in r.text, "PII LEAK in /live")
-            check("live payload has no whatsapp_number/linkedin_url keys",
-                  "whatsapp_number" not in r.text and "linkedin_url" not in r.text, "PII key in /live")
+            check("live payload carries NO contact link", "asha.dev" not in r.text, "PII LEAK in /live")
+            check("live payload has no website_url/linkedin_url keys",
+                  "website_url" not in r.text and "linkedin_url" not in r.text, "PII key in /live")
             check("GET /live without token -> 401", api.get(f"/events/{event_id}/live").status_code == 401)
 
             # Tables a phone subscribes to over realtime must be PII-free.

@@ -116,6 +116,20 @@ def fetch_my_attendee(db: Client, event_id: str, user_id: str) -> dict | None:
     return res.data[0] if res.data else None
 
 
+# Meeting-intent ("I want to meet X") pick cap. Tied to the round count so it
+# scales with how many people you can actually meet — roughly one prioritized
+# pick per round. Falls back to a sensible default when the organizer hasn't set
+# target_rounds yet (the event may still be in planning).
+DEFAULT_INTENT_CAP = 5
+
+
+def intent_cap(event: dict) -> int:
+    """How many people one attendee may pick to meet at this event (= planned
+    rounds, so picks stay meaningful and within meeting capacity)."""
+    target = event.get("target_rounds")
+    return int(target) if target else DEFAULT_INTENT_CAP
+
+
 def code_matches(required: str | None, supplied: str | None) -> bool:
     """True if `supplied` unlocks the gate. Open events (no code) always pass.
 
@@ -127,9 +141,29 @@ def code_matches(required: str | None, supplied: str | None) -> bool:
     return (supplied or "").strip().casefold() == required.casefold()
 
 
+def fetch_room_code(db: Client, event_id: str) -> str | None:
+    """The event's secret ROOM code (self-service check-in), or None if check-in
+    isn't open yet. Separate from fetch_access_code — different table, different
+    secret. Read with the service-role key only — event_room_codes has no RLS
+    policies, so attendee phones can never reach this value.
+    """
+    result = (
+        db.table("event_room_codes")
+        .select("code")
+        .eq("event_id", event_id)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0]["code"] if result.data else None
+
+
 # Unambiguous alphabet — no I/L/O/0/1, so codes are easy to read aloud and type.
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 CODE_LENGTH = 6
+# Room codes are entered at a busy door, so they're shorter than the join code.
+# They're only ever matched within one event (the arrive endpoint is event-scoped),
+# so they need no global uniqueness — just a quick, readable string.
+ROOM_CODE_LENGTH = 4
 
 
 def generate_access_code(db: Client, length: int = CODE_LENGTH) -> str:
@@ -146,6 +180,16 @@ def generate_access_code(db: Client, length: int = CODE_LENGTH) -> str:
         code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(length))
         if code.casefold() not in existing:
             return code
+
+
+def generate_room_code(length: int = ROOM_CODE_LENGTH) -> str:
+    """A fresh, human-friendly ROOM code for day-of check-in.
+
+    Unlike the join code, this needs no collision check: it is only ever matched
+    within a single event (POST /attendees/me/arrive is event-scoped), so there
+    is no global code -> event lookup to keep unambiguous.
+    """
+    return "".join(secrets.choice(CODE_ALPHABET) for _ in range(length))
 
 
 def find_event_by_code(db: Client, code: str | None) -> str | None:

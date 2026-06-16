@@ -43,6 +43,7 @@ const config: Config = {
         // Extended app neutrals (richer ramp for console surfaces — see
         // docs/design/UI_IMPORT_HANDOFF.md §6). Driven by CSS variables.
         "surface-2": "hsl(var(--surface-2))",
+        elevated: "hsl(var(--elevated))",
         "foreground-subtle": "hsl(var(--foreground-subtle))",
         "line-strong": "hsl(var(--line-strong))",
         panel: { DEFAULT: "hsl(var(--panel))", foreground: "hsl(var(--panel-foreground))" },

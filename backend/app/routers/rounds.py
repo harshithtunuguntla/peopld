@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from datetime import datetime, timezone
 from math import ceil
@@ -27,6 +28,11 @@ from app.models.schemas import (
 logger = logging.getLogger("app.rounds")
 
 router = APIRouter(prefix="/events/{event_id}/rounds", tags=["rounds"])
+
+
+def _parse_iso(value: str) -> datetime:
+    """Parse a Postgres/Supabase ISO timestamp into an aware datetime."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _fetch_active_round(db: Client, event_id: str) -> dict:
@@ -82,8 +88,15 @@ def _fetch_draft(db: Client, event_id: str) -> dict | None:
     return result.data[0] if result.data else None
 
 
+# Guests who attend but never join the rotation. A speaker/host is there to
+# present, not to be shuffled between tables — they're excluded from seating
+# (and, per Phase 3a, can't be picked either). Default 'attendee' is always seated.
+NON_SEATED_TAGS = ("speaker", "host")
+
+
 def _arrived_pool(db: Client, event_id: str) -> list[dict]:
-    """Only status='arrived' attendees are ever seated (design decision #1)."""
+    """The seated pool: status='arrived' attendees, minus non-seated guests
+    (speakers/hosts). Only these people are ever placed at tables."""
     result = (
         db.table("attendees")
         .select("*")
@@ -91,7 +104,8 @@ def _arrived_pool(db: Client, event_id: str) -> list[dict]:
         .eq("status", "arrived")
         .execute()
     )
-    return result.data or []
+    rows = result.data or []
+    return [a for a in rows if (a.get("tag") or "attendee") not in NON_SEATED_TAGS]
 
 
 def _pair_counts(db: Client, event_id: str) -> PairCounts:
@@ -113,6 +127,44 @@ def _pair_counts(db: Client, event_id: str) -> PairCounts:
                 pair = frozenset((group[i], group[j]))
                 counts[pair] = counts.get(pair, 0) + 1
     return counts
+
+
+def _meeting_intents(db: Client, event_id: str, seated_ids: set[str]) -> set[tuple[str, str]]:
+    """Directed "want to meet" picks (liker -> liked), restricted to the SEATED
+    pool. A pick whose liker or liked person isn't arrived (a no-show, or a guest
+    not in the rotation) leaves the seating problem entirely and is dropped — so
+    the planner only ever tries to honor picks it can physically place."""
+    rows = (
+        db.table("meeting_intents")
+        .select("liker_attendee_id, liked_attendee_id")
+        .eq("event_id", event_id)
+        .execute()
+        .data
+        or []
+    )
+    intents: set[tuple[str, str]] = set()
+    for r in rows:
+        liker, liked = str(r["liker_attendee_id"]), str(r["liked_attendee_id"])
+        if liker in seated_ids and liked in seated_ids:
+            intents.add((liker, liked))
+    return intents
+
+
+def _plan_cache_hash(arrived_hash: str, intents: set[tuple[str, str]]) -> str:
+    """Cache key for the multi-round plan: attendance/config AND the seated picks.
+
+    The draft's own `arrived_hash` stays attendance-only (the stale-publish guard
+    is about who's in the room). The PLAN, though, is also a function of the picks
+    it honored — so when an attendee changes a pick mid-event, this key changes,
+    the cached plan is treated as stale, and the next /start re-plans the remaining
+    rounds from the fixed history (live re-planning, validated in simulate_intent).
+    """
+    fingerprint = "none"
+    if intents:
+        fingerprint = hashlib.sha256(
+            ",".join(sorted(f"{a}>{b}" for a, b in intents)).encode()
+        ).hexdigest()
+    return hashlib.sha256(f"{arrived_hash}|{fingerprint}".encode()).hexdigest()
 
 
 def _next_round_number(db: Client, event_id: str) -> int:
@@ -183,21 +235,26 @@ def _seating_for_next_round(
     pool = _arrived_pool(db, event_id)
     arrived_ids = sorted(str(a["id"]) for a in pool)
     num_tables, seats = event["num_tables"], event["seats_per_table"]
-    current_hash = draft_snapshot_hash(arrived_ids, num_tables, seats)
+    # The draft hash is attendance-only (stale-publish guard); the plan cache key
+    # also folds in the seated picks so a mid-event pick change re-plans the tail.
+    arrived_hash = draft_snapshot_hash(arrived_ids, num_tables, seats)
+    intents = _meeting_intents(db, event_id, set(arrived_ids))
+    plan_hash = _plan_cache_hash(arrived_hash, intents)
     next_number = _next_round_number(db, event_id)
     pair_counts = _pair_counts(db, event_id)
 
     if not force_replan:
         cached = _fetch_plan(db, event_id)
-        if cached and cached["planned_for_hash"] == current_hash:
+        if cached and cached["planned_for_hash"] == plan_hash:
             idx = next_number - cached["horizon_start_round"]
             plan = cached["plan"]
             if 0 <= idx < len(plan):
-                return plan[idx], current_hash, pair_counts
+                return plan[idx], arrived_hash, pair_counts
 
     horizon = _resolve_horizon(event, len(arrived_ids), next_number)
     try:
-        result = plan_rounds(arrived_ids, pair_counts, num_tables, seats, horizon)
+        result = plan_rounds(arrived_ids, pair_counts, num_tables, seats, horizon,
+                             intents=intents)
         seatings = result.rounds
     except RotationError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -209,10 +266,10 @@ def _seating_for_next_round(
             rotation = generate_rotation(arrived_ids, pair_counts, num_tables, seats)
         except RotationError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
-        return rotation.tables, current_hash, pair_counts
+        return rotation.tables, arrived_hash, pair_counts
 
-    _store_plan(db, event_id, current_hash, next_number, seatings)
-    return seatings[0], current_hash, pair_counts
+    _store_plan(db, event_id, plan_hash, next_number, seatings)
+    return seatings[0], arrived_hash, pair_counts
 
 
 def _build_draft_row(db: Client, event: dict, event_id: str,
@@ -507,6 +564,77 @@ async def end_round(
         event_id=event_id,
         entity_id=active["id"],
         metadata={"round_number": active["round_number"]},
+    )
+    return result.data[0]
+
+
+@router.post("/pause", response_model=RoundResponse)
+async def pause_round(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Freeze the active round's countdown (e.g. for a host announcement).
+
+    Sets paused_at=now. The effective end shifts forward by the paused span on
+    resume, so no round time is lost. Idempotent: pausing an already-paused round
+    is a no-op that returns the current state.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    active = _fetch_active_round(db, event_id)
+    if active.get("paused_at"):
+        return active  # already paused — idempotent
+    now = datetime.now(timezone.utc).isoformat()
+    result = (
+        db.table("rounds")
+        .update({"paused_at": now})
+        .eq("id", active["id"])
+        .execute()
+    )
+    record_audit(
+        db,
+        action="round.paused",
+        entity_type="round",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=active["id"],
+        metadata={"round_number": active["round_number"]},
+    )
+    return result.data[0]
+
+
+@router.post("/resume", response_model=RoundResponse)
+async def resume_round(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Resume a paused round, banking the paused span into total_paused_seconds
+    so the timer picks up exactly where it left off. Idempotent: resuming a
+    running round is a no-op."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    active = _fetch_active_round(db, event_id)
+    paused_at = active.get("paused_at")
+    if not paused_at:
+        return active  # not paused — idempotent
+    elapsed = int((datetime.now(timezone.utc) - _parse_iso(paused_at)).total_seconds())
+    new_total = int(active.get("total_paused_seconds") or 0) + max(0, elapsed)
+    result = (
+        db.table("rounds")
+        .update({"paused_at": None, "total_paused_seconds": new_total})
+        .eq("id", active["id"])
+        .execute()
+    )
+    record_audit(
+        db,
+        action="round.resumed",
+        entity_type="round",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=active["id"],
+        metadata={"round_number": active["round_number"], "total_paused_seconds": new_total},
     )
     return result.data[0]
 

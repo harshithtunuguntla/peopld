@@ -71,9 +71,9 @@ def make_attendee(db, event_id: str, name: str = "Asha", **overrides) -> dict:
         "user_id": None,
         "name": name,
         "role": "Founder at XYZ",
+        "company": "XYZ",
         "looking_for": "investors",
         "linkedin_url": None,
-        "whatsapp_number": "+919999999999",
         "status": "registered",
     }
     row.update(overrides)

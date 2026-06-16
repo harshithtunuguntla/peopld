@@ -5,12 +5,13 @@
 @layer base {
   :root {
     /* Light (landing) — shadcn semantic tokens */
-    --background: 43 33% 93%;
+    --background: 43 33% 93%;        /* warm cream canvas (matches landing) */
     --foreground: 252 16% 7%;
-    --card: 0 0% 100%;
+    --card: 43 55% 96%;              /* warm porcelain — cream, NEVER stark white (demo --surface) */
     --card-foreground: 252 16% 7%;
-    --popover: 0 0% 100%;
+    --popover: 0 0% 100%;            /* rare pure white, reserved for floating popovers/tooltips */
     --popover-foreground: 252 16% 7%;
+    --elevated: 0 0% 100%;           /* rare pure white for dialogs/menus that must lift hard */
     --primary: 252 16% 7%;
     --primary-foreground: 43 33% 93%;
     --secondary: 40 25% 88%;
@@ -35,7 +36,7 @@
 
     /* Extended app neutrals (richer ramp for console surfaces — see
        docs/design/UI_IMPORT_HANDOFF.md §6). Additive over the shadcn base. */
-    --surface-2: 40 24% 90%;          /* deeper cream for hover/inset fills */
+    --surface-2: 42 36% 88%;          /* deeper cream for hover/inset fills (demo --surface-2) */
     --foreground-subtle: 252 8% 52%;  /* third text tier, below muted-foreground */
     --line-strong: 40 12% 72%;        /* emphasized hairline (inputs, dividers) */
     --panel: 252 16% 9%;              /* dramatic dark sub-panel shown on light */
@@ -51,6 +52,7 @@
     --card-foreground: 40 30% 95%;
     --popover: 240 20% 9%;
     --popover-foreground: 40 30% 95%;
+    --elevated: 240 16% 10%;         /* dark elevated surface for dialogs/menus */
     --primary: 40 30% 95%;
     --primary-foreground: 240 25% 5%;
     --secondary: 240 15% 14%;

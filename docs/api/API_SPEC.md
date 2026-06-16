@@ -155,6 +155,57 @@ Remove the code — the event becomes open (link/QR is the only gate).
 
 ---
 
+## Room code (Phase 2 — self-service day-of check-in)
+
+A **second** per-event secret, separate from the access/join code above. Lives in
+its own service-role-only table `event_room_codes` (migration 010), so attendee
+phones can never read it. The value is revealed **only** on the organizer's
+control-room screen — never in a link or QR — and never appears in the audit log.
+
+### `GET /events/{eventId}/room-code`
+
+The event's room code — returned **only** to the owning organizer to reveal in the room.
+
+- **Auth:** required (**organizer, owner only**).
+- **Response `200`** (`RoomCodeResponse`): `{ "code": "AB12" }` or `{ "code": null }`
+  when check-in hasn't been opened.
+- **Errors:** `403` not the owner; `404` event not found.
+
+### `POST /events/{eventId}/room-code/regenerate`
+
+Open check-in / mint a fresh room code (doubles as the first "generate"). Any code
+shown before stops working. Room codes are 4 chars from the same unambiguous
+alphabet; no global uniqueness needed (matched only within one event).
+
+- **Auth:** required (**organizer, owner only**). Audited as
+  `event.room_code_regenerated` (the value is never logged).
+- **Response `200`** (`RoomCodeResponse`): `{ "code": "K7M3" }`.
+- **Errors:** `403` not the owner; `404` event not found.
+
+### `DELETE /events/{eventId}/room-code`
+
+Close check-in — no one can self-arrive until a new code is opened.
+
+- **Auth:** required (**organizer, owner only**). Audited as `event.room_code_cleared`.
+- **Response `200`** (`RoomCodeResponse`): `{ "code": null }`.
+- **Errors:** `403` not the owner; `404` event not found.
+
+### `POST /events/{eventId}/attendees/me/arrive`
+
+A pre-registered attendee checks **themselves** in by typing the room code.
+Flips their own status `registered` → `arrived` (joining the seating pool).
+
+- **Why:** self-service check-in — no door queue, no organizer tapping 40 names.
+- **Auth:** required. Identity resolved from the JWT (you can only check yourself in).
+- **Body** (`ArriveRequest`): `{ "room_code": "AB12" }` (trimmed, case-insensitive).
+- **Response `200`** (`AttendeeResponse`): the updated attendee. Idempotent — if
+  you're already `arrived`, returns `200` without re-checking the code. Audited as
+  `attendee.self_arrived` (the code value is never logged).
+- **Errors:** `403` wrong code; `404` not registered for this event; `409` check-in
+  isn't open yet (no room code set) or the event has ended.
+
+---
+
 ## Me (cross-event)
 
 ### `GET /me/connections`
@@ -290,6 +341,42 @@ nobody can read who-liked-whom from the client. Surfaced back only as flags on
 ### `DELETE /events/{eventId}/likes/{targetAttendeeId}`
 - **Auth:** required (attendee). Idempotent — unliking what you never liked still `200`.
 - **Response `200`:** `{ "liked": false }`.
+
+---
+
+## Meeting intents (Phase 3a — pre-event "I want to meet X")
+
+Pre-event picks made while browsing the directory. **Distinct from likes** (those
+are the post-meeting rolodex signal) — stored in `meeting_intents`, **RLS on with
+no policies → service-role only**. Privacy: you only ever read *your own* picks
+(`GET /me`); the at-table nudge (`wanted` on your live snapshot) is one-sided; and
+unrequited interest is never disclosed — only **mutual** picks surface, and only
+*after* the event (`GET /matches`). Picks are capped at the planned round count
+(`target_rounds`, default 5) and editable until and during the event. Phase 3a
+captures + surfaces intent only; Phase 3b will teach seating to honor it.
+
+### `POST /events/{eventId}/intents`
+- **Auth:** required (attendee — liker resolved from JWT, never the body).
+- **Body:** `{ "target_attendee_id": "uuid" }`
+- **Response `201`:** `{ "wants": true, "used": N, "cap": M }`. Idempotent.
+- **Errors:** `400` self-pick **or** target is a speaker/host (not in the rotation);
+  `404` caller not registered **or** target unknown; `409` event ended **or** cap reached.
+
+### `DELETE /events/{eventId}/intents/{targetAttendeeId}`
+- **Auth:** required (attendee). Idempotent.
+- **Response `200`:** `{ "wants": false, "used": N, "cap": M }`.
+
+### `GET /events/{eventId}/intents/me`
+- **Auth:** required (attendee). Your own picks only.
+- **Response `200`:** `{ "used": N, "cap": M, "target_ids": ["uuid", …] }`.
+
+### `GET /events/{eventId}/intents/matches`
+- **Auth:** required (attendee). **Mutual picks only**, revealed after the event.
+- **Response `200`:** `{ "count": N, "matches": [{ attendee_id, name, role, company, avatar_url, linkedin_url, website_url }] }`.
+- **Errors:** `409` event not ended yet; `404` caller not registered.
+
+> The directory (`GET /events/{eventId}/directory`) also returns `wanted_by_me` per
+> entry and `my_intents_used` / `my_intents_cap` (cap `0` for an organizer preview).
 
 ---
 

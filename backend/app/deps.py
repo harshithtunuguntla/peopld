@@ -2,13 +2,22 @@ import secrets
 from dataclasses import dataclass
 
 import jwt
+from jwt import PyJWKClient
 from fastapi import Depends, Header, HTTPException, Request
-from supabase import Client
 
 from app.config import settings
-from app.database import get_supabase
 
 ORGANIZER_ROLE = "organizer"
+
+# Asymmetric algorithms (Supabase's new JWT signing keys). For these we verify
+# the signature against the project's published public keys (JWKS) — never a
+# shared secret. HS256 is the legacy/shared-secret case (kept for older projects
+# and the test suite).
+_ASYMMETRIC_ALGS = ("ES256", "RS256", "EdDSA")
+
+# Lazily-built JWKS client (fetches + caches the project's public keys). Cached
+# across requests so verification is local CPU, not a network call per request.
+_jwks_client: PyJWKClient | None = None
 
 
 @dataclass
@@ -20,62 +29,71 @@ class AuthUser:
     role: str | None  # app_metadata.role — "organizer" or None (attendee)
 
 
-def _decode_local(token: str) -> AuthUser:
-    """Verify a Supabase JWT locally using the project JWT secret (HS256).
+def _get_jwks_client() -> PyJWKClient:
+    """The project's JWKS endpoint, wrapped in a key-caching client.
 
-    The fast path: ~0.1 ms of CPU vs a ~100 ms Supabase Auth round-trip per
-    request. Used whenever SUPABASE_JWT_SECRET is configured.
+    Supabase publishes its public signing keys at /auth/v1/.well-known/jwks.json.
+    PyJWKClient caches the key set (so it's one fetch, then in-memory), and looks
+    up the right key by the token's `kid` — handling key rotation transparently.
+    """
+    global _jwks_client
+    if _jwks_client is None:
+        url = f"{settings.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+        _jwks_client = PyJWKClient(url, cache_keys=True, lifespan=600)
+    return _jwks_client
+
+
+def _decode_local(token: str) -> AuthUser:
+    """Verify a Supabase JWT locally (no Supabase round-trip).
+
+    Picks the verification key from the token's algorithm:
+      - ES256/RS256/EdDSA → the project's public key via JWKS (new signing keys).
+      - HS256 → the shared SUPABASE_JWT_SECRET (legacy / tests).
+
+    Local verification is both faster (~0.1ms vs ~100ms) AND the only path that
+    works for projects on asymmetric signing keys: the server-side get_user()
+    session lookup returns session_not_found for those tokens.
     """
     try:
-        payload = jwt.decode(
-            token,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
+        alg = jwt.get_unverified_header(token).get("alg")
+        if alg in _ASYMMETRIC_ALGS:
+            key = _get_jwks_client().get_signing_key_from_jwt(token).key
+            algorithms = [alg]
+        elif alg == "HS256":
+            if not settings.supabase_jwt_secret:
+                raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET not configured")
+            key = settings.supabase_jwt_secret
+            algorithms = ["HS256"]
+        else:
+            raise HTTPException(status_code=401, detail="Unsupported token algorithm")
+        payload = jwt.decode(token, key, algorithms=algorithms, audience="authenticated")
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.PyJWTError:
+    except HTTPException:
+        raise
+    except Exception:
+        # Bad signature, malformed token, or a JWKS lookup miss — all "unauthorized".
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     role = (payload.get("app_metadata") or {}).get("role")
     return AuthUser(id=str(payload["sub"]), email=payload.get("email"), role=role)
 
 
-def _verify_remote(token: str, db: Client) -> AuthUser:
-    """Fallback: ask Supabase Auth to verify the token (one round-trip).
-
-    Kept so the service still works if SUPABASE_JWT_SECRET hasn't been set yet
-    (safe, gradual rollout) — reliability over cleverness. Slower, so set the
-    secret to get the local fast path.
-    """
-    try:
-        result = db.auth.get_user(token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    if result is None or result.user is None:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = result.user
-    role = (user.app_metadata or {}).get("role")
-    return AuthUser(id=str(user.id), email=user.email, role=role)
-
-
 def get_current_user(
     request: Request,
     authorization: str | None = Header(default=None),
-    db: Client = Depends(get_supabase),
 ) -> AuthUser:
-    """Resolve the signed-in user from the Bearer JWT.
+    """Resolve the signed-in user from the Bearer JWT via local verification.
 
-    Fast path: local HS256 verification (no Supabase round-trip) when
-    SUPABASE_JWT_SECRET is set. Otherwise falls back to a remote auth check so
-    the service keeps working before the secret is configured.
+    No Supabase round-trip — saves ~100ms per request, and (critically) works
+    with the project's asymmetric signing keys, which the get_user() path does
+    not. See _decode_local.
     """
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
     token = authorization.split(" ", 1)[1].strip()
     if not token:
         raise HTTPException(status_code=401, detail="Missing bearer token")
-    user = _decode_local(token) if settings.supabase_jwt_secret else _verify_remote(token, db)
+    user = _decode_local(token)
     request.state.user_id = user.id  # picked up by the request-log middleware
     return user
 
@@ -83,7 +101,6 @@ def get_current_user(
 def get_optional_user(
     request: Request,
     authorization: str | None = Header(default=None),
-    db: Client = Depends(get_supabase),
 ) -> AuthUser | None:
     """Like get_current_user, but never raises — returns None when there's no
     valid token. For public endpoints that ENRICH their response when signed in
@@ -93,7 +110,7 @@ def get_optional_user(
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
     try:
-        return get_current_user(request, authorization, db)
+        return get_current_user(request, authorization)
     except HTTPException:
         return None
 

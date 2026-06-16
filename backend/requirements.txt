@@ -6,4 +6,4 @@ python-dotenv==1.0.1
 pydantic==2.13.4
 pydantic-settings==2.7.0
 python-multipart==0.0.18
-PyJWT>=2.12.0  # also pulled in by supabase-auth; declared here as a direct import (app/deps.py)
+PyJWT[crypto]>=2.12.0  # local JWT verification incl. ES256 (JWKS) — app/deps.py

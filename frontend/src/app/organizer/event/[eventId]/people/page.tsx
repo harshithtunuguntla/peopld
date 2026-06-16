@@ -15,7 +15,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
 import { inkOn } from "@/lib/design/rounds";
-import { ATTENDEE_STATUS_HEX, ATTENDEE_STATUS_PILL } from "@/lib/design/status";
+import { ATTENDEE_STATUS_HEX, ATTENDEE_TONE } from "@/lib/design/status";
+import { StatusPill } from "@/components/ui/status-pill";
 import { cn } from "@/lib/utils";
 
 type Tag = "attendee" | "speaker" | "host";
@@ -423,10 +424,9 @@ function PersonCard({
 }
 
 function StatusControls({ status, onSet }: { status: Attendee["status"]; onSet: (s: Attendee["status"]) => void }) {
-  const badge = ATTENDEE_STATUS_PILL[status];
   return (
     <div className="flex shrink-0 items-center gap-2">
-      <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", badge)}>{status}</span>
+      <StatusPill tone={ATTENDEE_TONE[status]} label={status} pulse={status === "arrived"} className={cn(status === "left" && "line-through")} />
       {status !== "arrived" ? (
         <IconBtn label="Mark arrived" onClick={() => onSet("arrived")}><UserCheck className="h-4 w-4" /></IconBtn>
       ) : (

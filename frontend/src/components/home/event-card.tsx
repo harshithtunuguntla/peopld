@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Clock, Lock, MapPin, Check } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { EVENT_PHASE, REGISTERED_CHIP } from "@/lib/design/status";
+import { EVENT_PHASE, REGISTERED_TONE } from "@/lib/design/status";
+import { StatusPill } from "@/components/ui/status-pill";
 
 export interface EventCardData {
   id: string;
@@ -85,7 +85,8 @@ export function EventCard({ event, todayStr }: { event: EventCardData; todayStr:
         </div>
         {event.registered && (
           <span
-            className={cn("inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium", REGISTERED_CHIP)}
+            className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium"
+            style={{ color: REGISTERED_TONE.fg, background: REGISTERED_TONE.bg }}
             title="You're registered"
           >
             <Check className="h-3 w-3" aria-hidden /> Registered
@@ -107,11 +108,6 @@ export function EventCard({ event, todayStr }: { event: EventCardData; todayStr:
 }
 
 function StatusBadge({ phase }: { phase: Phase }) {
-  const { label, pill } = EVENT_PHASE[phase];
-  return (
-    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide", pill)}>
-      {phase === "now" && <span className="mr-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-current" aria-hidden />}
-      {label}
-    </span>
-  );
+  const { label, tone } = EVENT_PHASE[phase];
+  return <StatusPill tone={tone} label={label} pulse={phase === "now"} uppercase />;
 }

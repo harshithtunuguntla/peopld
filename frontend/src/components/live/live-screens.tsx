@@ -12,6 +12,7 @@ import { Avatar } from "@/components/brand/avatar";
 import { IcebreakerCard } from "@/components/brand/icebreaker-card";
 import { buttonVariants } from "@/components/ui/button";
 import { ROUNDS, agendaFor, type Round } from "@/lib/design/rounds";
+import { COLORS } from "@/lib/design/colors";
 import { cn } from "@/lib/utils";
 import { Hourglass } from "./hourglass";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -699,7 +700,7 @@ function RoundReveal({
   return (
     <motion.div
       className="fixed inset-0 z-50 overflow-hidden"
-      style={{ background: phase >= 1 ? round.bg : "#0A0A12", transition: "background 0.7s ease" }}
+      style={{ background: phase >= 1 ? round.bg : COLORS.ink900, transition: "background 0.7s ease" }}
       initial={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       role="status"

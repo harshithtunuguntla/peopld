@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     @field_validator("supabase_url", "supabase_service_role_key", mode="before")
     @classmethod
     def strip_whitespace(cls, v: str) -> str:
-        return v.strip()
+        return v.encode("utf-8").decode("utf-8-sig").strip()
     frontend_url: str = "http://localhost:3000"
     log_format: str = "text"  # set LOG_FORMAT=json on Cloud Run (Cloud Logging parses it)
 

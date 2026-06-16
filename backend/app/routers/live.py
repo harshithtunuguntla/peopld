@@ -194,6 +194,17 @@ async def get_live_state(
             ).data or []
             wanted_ids = {str(i["liked_attendee_id"]) for i in my_intents}
 
+            # My own private notes about people (author-private), so a note I
+            # already jotted pre-fills when this tablemate reappears. (One query.)
+            my_notes = (
+                db.table("connection_notes")
+                .select("target_attendee_id, note")
+                .eq("event_id", event_id)
+                .eq("author_attendee_id", str(attendee["id"]))
+                .execute()
+            ).data or []
+            notes_by_target = {str(n["target_attendee_id"]): n["note"] for n in my_notes}
+
             my_interests = [str(t) for t in (attendee.get("interests") or [])]
             my_interest_set = {t.casefold() for t in my_interests}
 
@@ -218,6 +229,7 @@ async def get_live_state(
                             avatar_url=info.get("avatar_url"),
                             liked=aid in liked_ids,
                             wanted=aid in wanted_ids,
+                            note=notes_by_target.get(aid),
                         )
                     )
             mates.sort(key=lambda m: m.name.lower())

@@ -25,6 +25,7 @@ export interface Tablemate {
   avatar_url: string | null;
   liked: boolean;
   wanted: boolean; // I picked this person pre-event (Phase 3a) → at-table nudge
+  note: string | null; // my own private note about this person (pre-fills the at-table note editor)
 }
 export interface LiveSeat {
   table_number: number;

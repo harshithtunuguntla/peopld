@@ -372,6 +372,7 @@ class Tablemate(BaseModel):
     avatar_url: Optional[str] = None
     liked: bool = False
     wanted: bool = False  # the caller picked (pre-event) to meet this tablemate → nudge
+    note: Optional[str] = None  # the caller's OWN private note about this person, so it pre-fills at the table
 
 
 class LiveRound(BaseModel):

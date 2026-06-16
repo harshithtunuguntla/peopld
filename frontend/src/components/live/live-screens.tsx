@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { Loader2, PartyPopper, Sparkles, Armchair, Clock3, Heart, UserRound, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw } from "lucide-react";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { Loader2, PartyPopper, Sparkles, Armchair, Clock3, Heart, UserRound, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check } from "lucide-react";
 
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Wordmark } from "@/components/brand/wordmark";
@@ -10,18 +11,28 @@ import { BoardingPass } from "@/components/brand/boarding-pass";
 import { Avatar } from "@/components/brand/avatar";
 import { IcebreakerCard } from "@/components/brand/icebreaker-card";
 import { buttonVariants } from "@/components/ui/button";
-import { ROUNDS, agendaFor } from "@/lib/design/rounds";
+import { ROUNDS, agendaFor, type Round } from "@/lib/design/rounds";
 import { cn } from "@/lib/utils";
 import { Hourglass } from "./hourglass";
 import { apiFetch, ApiError } from "@/lib/api";
 import { CountdownPill, useCountdown } from "./countdown";
 import type { LiveState, Tablemate } from "@/lib/live/use-live-state";
 
-/** One tablemate, with a like (❤️) toggle. Likes persist and surface in the
- * rolodex later (mutual = a match). Optimistic with revert on failure. */
+/** One tablemate, with a like (❤️) toggle and a private-note affordance. Likes
+ * persist and surface in the rolodex later (mutual = a match); notes are
+ * author-private and pre-fill from the snapshot. Both optimistic-ish, with the
+ * note saving on blur. */
 function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
   const [liked, setLiked] = useState(mate.liked);
   const [pending, setPending] = useState(false);
+
+  // Private note — collapsed by default; expands inline beneath the row.
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [note, setNote] = useState(mate.note ?? "");
+  const [savedNote, setSavedNote] = useState(mate.note ?? "");
+  const [noteBusy, setNoteBusy] = useState(false);
+  const hasNote = savedNote.trim().length > 0;
+  const noteDirty = note.trim() !== savedNote.trim();
 
   async function toggle() {
     if (pending) return;
@@ -44,6 +55,22 @@ function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
     }
   }
 
+  async function saveNote() {
+    if (!noteDirty) return; // nothing changed → no write
+    setNoteBusy(true);
+    try {
+      await apiFetch(`/events/${eventId}/notes/${mate.attendee_id}`, {
+        method: "PUT",
+        body: JSON.stringify({ note: note.trim() }),
+      });
+      setSavedNote(note.trim());
+    } catch {
+      // keep the text so the user can retry; nothing destructive happened
+    } finally {
+      setNoteBusy(false);
+    }
+  }
+
   return (
     <li className={cn("rounded-2xl border bg-card/50 p-3", mate.wanted ? "border-accent/50 bg-accent/[0.06]" : "border-border")}>
       <div className="flex items-center gap-3">
@@ -59,19 +86,37 @@ function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
           </div>
           <p className="truncate text-sm text-muted-foreground">{[mate.role, mate.company].filter(Boolean).join(" · ")}</p>
         </div>
-        <button
-          type="button"
-          onClick={toggle}
-          disabled={pending}
-          aria-pressed={liked}
-          aria-label={liked ? `Unlike ${mate.name}` : `Like ${mate.name}`}
-          className={cn(
-            "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-60",
-            liked ? "border-accent/40 bg-accent/15 text-accent" : "border-border text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <Heart className={cn("h-4 w-4", liked && "fill-current")} aria-hidden />
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setNotesOpen((o) => !o)}
+            aria-pressed={notesOpen}
+            aria-label={hasNote ? `Edit your note about ${mate.name}` : `Add a private note about ${mate.name}`}
+            title="Private note — only you see this"
+            className={cn(
+              "relative flex h-9 w-9 items-center justify-center rounded-full border transition-colors",
+              hasNote || notesOpen ? "border-accent/40 bg-accent/15 text-accent" : "border-border text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <StickyNote className="h-4 w-4" aria-hidden />
+            {hasNote && !notesOpen && (
+              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent ring-2 ring-card" aria-hidden />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={toggle}
+            disabled={pending}
+            aria-pressed={liked}
+            aria-label={liked ? `Unlike ${mate.name}` : `Like ${mate.name}`}
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-full border transition-colors disabled:opacity-60",
+              liked ? "border-accent/40 bg-accent/15 text-accent" : "border-border text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Heart className={cn("h-4 w-4", liked && "fill-current")} aria-hidden />
+          </button>
+        </div>
       </div>
 
       {mate.shared_interests.length > 0 && (
@@ -88,6 +133,33 @@ function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
         <p className="mt-2 pl-[52px] text-xs text-muted-foreground">
           <span className="text-muted-foreground/70">Looking for:</span> {mate.looking_for}
         </p>
+      )}
+
+      {notesOpen && (
+        <div className="mt-3 pl-[52px]">
+          <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+            <StickyNote className="h-3 w-3" aria-hidden /> Private note · only you see this
+          </label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onBlur={saveNote}
+            rows={2}
+            maxLength={500}
+            autoFocus
+            placeholder="e.g. follow up about hiring · intro to Priya"
+            className="mt-1.5 w-full resize-none rounded-xl border border-input bg-secondary/50 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          />
+          <div className="mt-1 flex h-4 items-center justify-end text-[11px] text-muted-foreground">
+            {noteBusy ? (
+              <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Saving…</span>
+            ) : noteDirty ? (
+              <span>Tap outside to save</span>
+            ) : hasNote ? (
+              <span className="inline-flex items-center gap-1 text-success"><Check className="h-3 w-3" aria-hidden /> Saved</span>
+            ) : null}
+          </div>
+        </div>
       )}
     </li>
   );
@@ -473,6 +545,116 @@ export function EventEnded({ eventId }: { eventId: string }) {
   );
 }
 
+/** Round-start REVEAL — the celebratory "your table is N" moment in the round's
+ * signature color, before settling into the table. Reuses the landing "reveal"
+ * scene's visual language. Shown ONCE per round (sessionStorage-gated in
+ * RoundView, so a mid-round refresh doesn't replay it), tap-to-skip, and skipped
+ * entirely under prefers-reduced-motion. */
+function RoundReveal({
+  round,
+  roundNumber,
+  tableNumber,
+  mateCount,
+  onDone,
+}: {
+  round: Round;
+  roundNumber: number;
+  tableNumber: number;
+  mateCount: number;
+  onDone: () => void;
+}) {
+  const reduced = useReducedMotion();
+  const [phase, setPhase] = useState(0);
+
+  useEffect(() => {
+    if (reduced) {
+      onDone(); // honor reduced-motion: go straight to the table, no animation
+      return;
+    }
+    const t1 = setTimeout(() => setPhase(1), 650);
+    const t2 = setTimeout(onDone, 2700);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [reduced, onDone]);
+
+  if (reduced) return null;
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 overflow-hidden"
+      style={{ background: phase >= 1 ? round.bg : "#0A0A12", transition: "background 0.7s ease" }}
+      initial={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      role="status"
+      aria-label={`Round ${roundNumber} starting — your table is ${tableNumber}`}
+      onClick={onDone}
+    >
+      {phase >= 1 &&
+        Array.from({ length: 16 }).map((_, i) => (
+          <motion.span
+            key={i}
+            initial={{ left: "50vw", top: "55vh", opacity: 0, scale: 0 }}
+            animate={{
+              left: `calc(50vw + ${Math.cos((i / 16) * Math.PI * 2) * 42}vw)`,
+              top: `calc(55vh + ${Math.sin((i / 16) * Math.PI * 2) * 42}vh)`,
+              opacity: [0, 1, 0],
+              scale: [0, 1, 0.3],
+            }}
+            transition={{ duration: 1.6, delay: 0.1 + i * 0.03 }}
+            className="absolute h-2 w-2 rounded-full"
+            style={{ background: round.ink, opacity: 0.5 }}
+            aria-hidden
+          />
+        ))}
+
+      <div className="relative flex h-full flex-col items-center justify-center px-6 text-center" style={{ color: round.ink }}>
+        <AnimatePresence mode="wait">
+          {phase === 0 ? (
+            <motion.div key="p0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center text-cream">
+              <div className="mb-5 h-12 w-12 animate-spin rounded-full border-2 border-cream/25 border-t-cream" />
+              <p className="font-display text-xl">Reading the room…</p>
+              <p className="mt-2 text-xs text-cream/50">Finding your people for this round</p>
+            </motion.div>
+          ) : (
+            <motion.div key="p1" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <motion.div initial={{ y: 8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }} className="mb-2 text-[10px] uppercase tracking-[0.4em] opacity-80">
+                Round {roundNumber} · {round.name}
+              </motion.div>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="mb-1 text-xs opacity-70">
+                Your table is
+              </motion.div>
+              <motion.div
+                initial={{ scale: 0.4, opacity: 0, filter: "blur(15px)" }}
+                animate={{ scale: 1, opacity: 1, filter: "blur(0px)" }}
+                transition={{ type: "spring", stiffness: 220, damping: 19 }}
+                className="font-display leading-[0.8] tracking-[-0.05em]"
+                style={{ fontSize: "clamp(7rem, 40vw, 12rem)" }}
+              >
+                {tableNumber}
+              </motion.div>
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.55 }}
+                className="mt-6 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium"
+                style={{ background: round.ink, color: round.bg }}
+              >
+                <Sparkles className="h-3 w-3" aria-hidden />
+                {mateCount > 0 ? `${mateCount} ${mateCount === 1 ? "human" : "humans"} waiting` : "Settle in"}
+              </motion.div>
+              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.3 }} className="mt-8 text-[11px] opacity-60">
+                Tap to continue
+              </motion.p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.div>
+  );
+}
+
 /** The main event: your table, tablemates, and a personalized icebreaker. */
 export function RoundView({
   state,
@@ -493,8 +675,33 @@ export function RoundView({
   const paused = Boolean(round.paused_at);
   const wantedHere = mates.filter((m) => m.wanted);
 
+  // Play the round-start reveal once per round. sessionStorage-gated by round_id
+  // so a mid-round refresh/poll never replays it (it would be jarring), but a
+  // genuinely new round (or getting seated after sitting one out) does.
+  const [revealing, setRevealing] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!sessionStorage.getItem(`peopld:revealed:${round.round_id}`)) setRevealing(true);
+  }, [round.round_id]);
+  const finishReveal = useCallback(() => {
+    if (typeof window !== "undefined") sessionStorage.setItem(`peopld:revealed:${round.round_id}`, "1");
+    setRevealing(false);
+  }, [round.round_id]);
+
   return (
     <div className="space-y-5">
+      <AnimatePresence>
+        {revealing && (
+          <RoundReveal
+            round={themed}
+            roundNumber={round.round_number}
+            tableNumber={seat.table_number}
+            mateCount={mates.length}
+            onDone={finishReveal}
+          />
+        )}
+      </AnimatePresence>
+
       <div className="flex items-center justify-between">
         <h1 className="font-display text-xl text-foreground">Round {round.round_number}</h1>
         <CountdownPill remaining={remaining} paused={paused} />

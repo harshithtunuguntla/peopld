@@ -86,6 +86,56 @@ def test_live_in_round_seated_with_tablemates(client, db, event):
     assert all("role" in m for m in body["seat"]["tablemates"])
 
 
+def test_live_seat_prefills_my_note_about_tablemate(client, db, event):
+    """A private note I authored about a tablemate pre-fills in the live seat
+    payload (so the at-table note editor opens with what I already wrote), and
+    tablemates I haven't noted carry note=None."""
+    me = _me(db, event["id"])
+    noted = make_attendee(db, event["id"], name="Anita", status="arrived")
+    blank = make_attendee(db, event["id"], name="Bobby", status="arrived")
+    rnd = make_round(db, event["id"], round_number=1, status="active")
+    make_assignment(db, event["id"], rnd["id"], me["id"], table_number=4)
+    make_assignment(db, event["id"], rnd["id"], noted["id"], table_number=4)
+    make_assignment(db, event["id"], rnd["id"], blank["id"], table_number=4)
+    db.seed(
+        "connection_notes",
+        {
+            "event_id": event["id"],
+            "author_attendee_id": me["id"],
+            "target_attendee_id": noted["id"],
+            "note": "intro re: hiring",
+        },
+    )
+
+    body = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH).json()
+    by_name = {m["name"]: m for m in body["seat"]["tablemates"]}
+    assert by_name["Anita"]["note"] == "intro re: hiring"
+    assert by_name["Bobby"]["note"] is None
+
+
+def test_live_seat_note_is_author_private(client, db, event):
+    """Someone ELSE's note about my tablemate must never leak into my snapshot."""
+    me = _me(db, event["id"])
+    mate = make_attendee(db, event["id"], name="Anita", status="arrived")
+    other = make_attendee(db, event["id"], name="Stranger", status="arrived")
+    rnd = make_round(db, event["id"], round_number=1, status="active")
+    make_assignment(db, event["id"], rnd["id"], me["id"], table_number=4)
+    make_assignment(db, event["id"], rnd["id"], mate["id"], table_number=4)
+    # `other` wrote a note about my tablemate — not mine, must not appear.
+    db.seed(
+        "connection_notes",
+        {
+            "event_id": event["id"],
+            "author_attendee_id": other["id"],
+            "target_attendee_id": mate["id"],
+            "note": "secret",
+        },
+    )
+
+    body = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH).json()
+    assert body["seat"]["tablemates"][0]["note"] is None
+
+
 def test_live_round_paused_shifts_ends_at_and_reports_paused(client, db, event):
     """A paused round banks time into the effective end and tells the phone it's
     paused, so the attendee countdown freezes (migration 008)."""

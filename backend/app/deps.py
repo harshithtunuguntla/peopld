@@ -6,6 +6,7 @@ from fastapi import Depends, Header, HTTPException, Request
 from supabase import Client
 
 from app.config import settings
+from app.database import get_supabase
 
 ORGANIZER_ROLE = "organizer"
 
@@ -19,15 +20,12 @@ class AuthUser:
     role: str | None  # app_metadata.role — "organizer" or None (attendee)
 
 
-def _decode_token(token: str) -> AuthUser:
+def _decode_local(token: str) -> AuthUser:
     """Verify a Supabase JWT locally using the project JWT secret (HS256).
 
-    Local decode costs ~0.1 ms vs ~100 ms for a Supabase Auth round-trip.
-    Falls back to the remote call only when SUPABASE_JWT_SECRET is not set
-    (dev convenience, not for production).
+    The fast path: ~0.1 ms of CPU vs a ~100 ms Supabase Auth round-trip per
+    request. Used whenever SUPABASE_JWT_SECRET is configured.
     """
-    if not settings.supabase_jwt_secret:
-        raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET not configured")
     try:
         payload = jwt.decode(
             token,
@@ -43,20 +41,41 @@ def _decode_token(token: str) -> AuthUser:
     return AuthUser(id=str(payload["sub"]), email=payload.get("email"), role=role)
 
 
+def _verify_remote(token: str, db: Client) -> AuthUser:
+    """Fallback: ask Supabase Auth to verify the token (one round-trip).
+
+    Kept so the service still works if SUPABASE_JWT_SECRET hasn't been set yet
+    (safe, gradual rollout) — reliability over cleverness. Slower, so set the
+    secret to get the local fast path.
+    """
+    try:
+        result = db.auth.get_user(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if result is None or result.user is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = result.user
+    role = (user.app_metadata or {}).get("role")
+    return AuthUser(id=str(user.id), email=user.email, role=role)
+
+
 def get_current_user(
     request: Request,
     authorization: str | None = Header(default=None),
+    db: Client = Depends(get_supabase),
 ) -> AuthUser:
-    """Verify the Supabase JWT from the Authorization header using local HS256 decode.
+    """Resolve the signed-in user from the Bearer JWT.
 
-    No Supabase round-trip — saves ~100 ms per request at any call volume.
+    Fast path: local HS256 verification (no Supabase round-trip) when
+    SUPABASE_JWT_SECRET is set. Otherwise falls back to a remote auth check so
+    the service keeps working before the secret is configured.
     """
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
     token = authorization.split(" ", 1)[1].strip()
     if not token:
         raise HTTPException(status_code=401, detail="Missing bearer token")
-    user = _decode_token(token)
+    user = _decode_local(token) if settings.supabase_jwt_secret else _verify_remote(token, db)
     request.state.user_id = user.id  # picked up by the request-log middleware
     return user
 
@@ -64,6 +83,7 @@ def get_current_user(
 def get_optional_user(
     request: Request,
     authorization: str | None = Header(default=None),
+    db: Client = Depends(get_supabase),
 ) -> AuthUser | None:
     """Like get_current_user, but never raises — returns None when there's no
     valid token. For public endpoints that ENRICH their response when signed in
@@ -73,7 +93,7 @@ def get_optional_user(
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
     try:
-        return get_current_user(request, authorization)
+        return get_current_user(request, authorization, db)
     except HTTPException:
         return None
 

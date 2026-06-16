@@ -3,6 +3,7 @@ uvicorn[standard]==0.32.1
 supabase==2.31.0
 anthropic[vertex]==0.39.0
 python-dotenv==1.0.1
+pyjwt[crypto]==2.13.0  # local Supabase JWT verification (app/auth_jwt.py)
 pydantic==2.13.4
 pydantic-settings==2.7.0
 python-multipart==0.0.18

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from fastapi import Depends, Header, HTTPException, Request
 from supabase import Client
 
-from app.database import get_supabase
+from app.auth_jwt import JWTVerificationError, decode_supabase_jwt
 
 ORGANIZER_ROLE = "organizer"
 
@@ -21,13 +21,14 @@ class AuthUser:
 async def get_current_user(
     request: Request,
     authorization: str | None = Header(default=None),
-    db: Client = Depends(get_supabase),
 ) -> AuthUser:
-    """Verify the Supabase JWT from the Authorization header.
+    """Verify the Supabase JWT from the Authorization header — LOCALLY.
 
-    Uses auth.get_user() (one round-trip) over local JWKS verification:
-    reliability over cleverness at pilot scale. Swap internals here if
-    request volume ever makes it matter — callers won't change.
+    The token's signature is checked in-process against the project's public key
+    (see app/auth_jwt.py), so there is no per-request round-trip to Supabase Auth.
+    Identity comes from the signed claims, so it can't be forged without the
+    signing key. (Trade-off: no instant revocation — a token is valid until it
+    expires; see auth_jwt.py.)
     """
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
@@ -36,22 +37,23 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Missing bearer token")
 
     try:
-        result = db.auth.get_user(token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    if result is None or result.user is None:
+        claims = decode_supabase_jwt(token)
+    except JWTVerificationError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    user = result.user
-    role = (user.app_metadata or {}).get("role")
-    request.state.user_id = str(user.id)  # picked up by the request-log middleware
-    return AuthUser(id=str(user.id), email=user.email, role=role)
+    user_id = claims.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    # App role lives in app_metadata (set by scripts/tag_organizer.py); the
+    # top-level `role` claim is the Postgres role ("authenticated"), not ours.
+    role = (claims.get("app_metadata") or {}).get("role")
+    request.state.user_id = str(user_id)  # picked up by the request-log middleware
+    return AuthUser(id=str(user_id), email=claims.get("email"), role=role)
 
 
 async def get_optional_user(
     request: Request,
     authorization: str | None = Header(default=None),
-    db: Client = Depends(get_supabase),
 ) -> AuthUser | None:
     """Like get_current_user, but never raises — returns None when there's no
     valid token. For public endpoints that ENRICH their response when signed in
@@ -61,7 +63,7 @@ async def get_optional_user(
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
     try:
-        return await get_current_user(request, authorization, db)
+        return await get_current_user(request, authorization)
     except HTTPException:
         return None
 

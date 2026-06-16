@@ -7,8 +7,9 @@ class Settings(BaseSettings):
 
     supabase_url: str
     supabase_service_role_key: str
+    supabase_jwt_secret: str = ""
 
-    @field_validator("supabase_url", "supabase_service_role_key", mode="before")
+    @field_validator("supabase_url", "supabase_service_role_key", "supabase_jwt_secret", mode="before")
     @classmethod
     def strip_whitespace(cls, v: str) -> str:
         return v.encode("utf-8").decode("utf-8-sig").strip()

@@ -198,11 +198,12 @@ def _round_theme(db: Client, event_id: str, round_id: str) -> str | None:
 
 
 def _rows_for_table(
-    round_id: str, table_number: int, roster: list[dict],
+    event_id: str, round_id: str, table_number: int, roster: list[dict],
     questions: list[tuple[int, int, str, str]], generated_at: str,
 ) -> list[dict]:
     return [
         {
+            "event_id": event_id,
             "round_id": round_id,
             "table_number": table_number,
             "recipient_attendee_id": roster[recipient_idx - 1]["id"],
@@ -252,7 +253,7 @@ def generate_for_round(db: Client, event_id: str, round_id: str, *, client: LLMC
             started = time.monotonic()
             histories = _histories_for_roster(db, roster)
             questions = _questions_for_table(roster, client, histories, theme)
-            rows = _rows_for_table(round_id, table_number, roster, questions, generated_at)
+            rows = _rows_for_table(event_id, round_id, table_number, roster, questions, generated_at)
             db.table("icebreakers").insert(rows).execute()
 
             llm = sum(1 for q in questions if q[3] == "llm")
@@ -321,7 +322,7 @@ def refresh_for_attendee(
     histories = _histories_for_roster(db, roster)
     theme = _round_theme(db, event_id, round_id)
     questions = _questions_for_table(roster, client, histories, theme)
-    rows = _rows_for_table(round_id, table_number, roster, questions, _now_iso())
+    rows = _rows_for_table(event_id, round_id, table_number, roster, questions, _now_iso())
     mine = next((r for r in rows if str(r["recipient_attendee_id"]) == str(attendee_id)), None)
     if mine is None:
         return None

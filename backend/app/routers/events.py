@@ -72,7 +72,7 @@ def _upsert_access_code(db: Client, event_id: str, code: str | None) -> None:
 
 
 @router.get("", response_model=list[EventBrowseItem])
-async def list_events(
+def list_events(
     user: AuthUser | None = Depends(get_optional_user),
     db: Client = Depends(get_supabase),
 ):
@@ -144,7 +144,7 @@ async def list_events(
 
 
 @router.get("/mine", response_model=list[EventResponse])
-async def list_my_events(
+def list_my_events(
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
@@ -160,7 +160,7 @@ async def list_my_events(
 
 
 @router.post("", response_model=EventResponse, status_code=201)
-async def create_event(
+def create_event(
     body: EventCreate,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
@@ -184,7 +184,7 @@ async def create_event(
 
 
 @router.get("/{event_id}", response_model=EventResponse)
-async def get_event(event_id: str, db: Client = Depends(get_supabase)):
+def get_event(event_id: str, db: Client = Depends(get_supabase)):
     """Public - powers the event landing + registration page.
 
     Returns only `requires_code` (boolean); the code value itself never leaves
@@ -194,7 +194,7 @@ async def get_event(event_id: str, db: Client = Depends(get_supabase)):
 
 
 @router.get("/{event_id}/stats", response_model=EventStats)
-async def get_event_stats(event_id: str, db: Client = Depends(get_supabase)):
+def get_event_stats(event_id: str, db: Client = Depends(get_supabase)):
     """Public, non-PII social proof for the registration page ('38 already inside').
 
     Returns a COUNT only — never names or contact info. The attendees table
@@ -211,7 +211,7 @@ async def get_event_stats(event_id: str, db: Client = Depends(get_supabase)):
 
 
 @router.post("/{event_id}/verify-code", response_model=VerifyCodeResponse)
-async def verify_event_code(
+def verify_event_code(
     event_id: str,
     body: VerifyCodeRequest,
     db: Client = Depends(get_supabase),
@@ -225,7 +225,7 @@ async def verify_event_code(
 
 
 @router.post("/join", response_model=JoinResponse)
-async def join_by_code(
+def join_by_code(
     body: JoinRequest,
     _user: AuthUser | None = Depends(get_optional_user),
     db: Client = Depends(get_supabase),
@@ -242,7 +242,7 @@ async def join_by_code(
 
 
 @router.patch("/{event_id}", response_model=EventResponse)
-async def update_event(
+def update_event(
     event_id: str,
     body: EventUpdate,
     organizer_id: str = Depends(get_current_organizer_id),
@@ -275,7 +275,7 @@ async def update_event(
 
 
 @router.post("/{event_id}/end", response_model=EventResponse)
-async def end_event(
+def end_event(
     event_id: str,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
@@ -302,7 +302,7 @@ async def end_event(
 
 
 @router.get("/{event_id}/access-code", response_model=AccessCodeResponse)
-async def get_access_code(
+def get_access_code(
     event_id: str,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
@@ -315,7 +315,7 @@ async def get_access_code(
 
 
 @router.post("/{event_id}/access-code/regenerate", response_model=AccessCodeResponse)
-async def regenerate_access_code(
+def regenerate_access_code(
     event_id: str,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
@@ -338,7 +338,7 @@ async def regenerate_access_code(
 
 
 @router.delete("/{event_id}/access-code", response_model=AccessCodeResponse)
-async def clear_access_code(
+def clear_access_code(
     event_id: str,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
@@ -364,7 +364,7 @@ async def clear_access_code(
 
 
 @router.get("/{event_id}/room-code", response_model=RoomCodeResponse)
-async def get_room_code(
+def get_room_code(
     event_id: str,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
@@ -378,7 +378,7 @@ async def get_room_code(
 
 
 @router.post("/{event_id}/room-code/regenerate", response_model=RoomCodeResponse)
-async def regenerate_room_code(
+def regenerate_room_code(
     event_id: str,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
@@ -404,7 +404,7 @@ async def regenerate_room_code(
 
 
 @router.delete("/{event_id}/room-code", response_model=RoomCodeResponse)
-async def clear_room_code(
+def clear_room_code(
     event_id: str,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
@@ -425,7 +425,7 @@ async def clear_room_code(
 
 
 @router.get("/{event_id}/attendees", response_model=list[AttendeeResponse])
-async def list_attendees(
+def list_attendees(
     event_id: str,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
@@ -453,7 +453,7 @@ def _likes_and_matches(db: Client, event_id: str) -> tuple[int, int]:
 
 
 @router.get("/{event_id}/analytics", response_model=EventAnalytics)
-async def get_analytics(
+def get_analytics(
     event_id: str,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
@@ -502,7 +502,7 @@ async def get_analytics(
 
 
 @router.get("/{event_id}/live-stats", response_model=LiveStats)
-async def get_live_stats(
+def get_live_stats(
     event_id: str,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),

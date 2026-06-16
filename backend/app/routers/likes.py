@@ -28,7 +28,7 @@ def _target_in_event(db: Client, event_id: str, target_id: str) -> bool:
 
 
 @router.post("", response_model=LikeResponse, status_code=201)
-async def like_attendee(
+def like_attendee(
     event_id: str,
     body: LikeRequest,
     user: AuthUser = Depends(get_current_user),
@@ -67,7 +67,7 @@ async def like_attendee(
 
 
 @router.delete("/{target_attendee_id}", response_model=LikeResponse)
-async def unlike_attendee(
+def unlike_attendee(
     event_id: str,
     target_attendee_id: str,
     user: AuthUser = Depends(get_current_user),

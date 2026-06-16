@@ -30,6 +30,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { ConsoleShell } from "@/components/organizer/console-shell";
 import { Card, StatCard } from "@/components/organizer/console-ui";
@@ -191,13 +192,42 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
     if (user) load();
   }, [user, load]);
 
+  // Realtime doorbell + slow poll. The control room used to blind-poll every 12s
+  // (4–5 calls each tick). Now it reloads on actual round/seating changes via
+  // Supabase Realtime — debounced so a publish (one INSERT per attendee) is a
+  // single reload — and falls back to a 25s poll for stats freshness.
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reload = useCallback(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      if (!busyRef.current) load();
+    }, 300);
+  }, [load]);
+
   useEffect(() => {
     if (!user) return;
+
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    try {
+      channel = supabase
+        .channel(`organizer-live:${eventId}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "rounds", filter: `event_id=eq.${eventId}` }, reload)
+        .on("postgres_changes", { event: "*", schema: "public", table: "table_assignments", filter: `event_id=eq.${eventId}` }, reload)
+        .subscribe();
+    } catch {
+      // Realtime unavailable — the poll below still keeps the room fresh.
+    }
+
     const id = setInterval(() => {
       if (!busyRef.current) load();
-    }, 12_000);
-    return () => clearInterval(id);
-  }, [user, load]);
+    }, 25_000);
+
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      clearInterval(id);
+    };
+  }, [user, eventId, load, reload]);
 
   async function refresh() {
     setRefreshing(true);

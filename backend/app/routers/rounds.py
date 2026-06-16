@@ -320,8 +320,9 @@ def _draft_response(draft: dict, attendees_by_id: dict[str, dict]) -> dict:
 
 
 @router.post("/start", response_model=RoundDraftResponse, status_code=201)
-async def start_round(
+def start_round(
     event_id: str,
+    background_tasks: BackgroundTasks,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
@@ -351,7 +352,8 @@ async def start_round(
             detail="A draft already exists — publish or regenerate it",
         )
 
-    record_audit(
+    background_tasks.add_task(
+        record_audit,
         db,
         action="round.draft_created",
         entity_type="round_draft",
@@ -368,8 +370,9 @@ async def start_round(
 
 
 @router.post("/regenerate", response_model=RoundDraftResponse)
-async def regenerate_draft(
+def regenerate_draft(
     event_id: str,
+    background_tasks: BackgroundTasks,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
@@ -387,7 +390,8 @@ async def regenerate_draft(
                ("round_number", "duration_seconds", "assignments", "arrived_hash", "repeat_pairings")}
     updated = db.table("round_drafts").update(changes).eq("id", draft["id"]).execute().data[0]
 
-    record_audit(
+    background_tasks.add_task(
+        record_audit,
         db,
         action="round.draft_regenerated",
         entity_type="round_draft",
@@ -404,7 +408,7 @@ async def regenerate_draft(
 
 
 @router.get("/draft", response_model=RoundDraftResponse)
-async def get_draft(
+def get_draft(
     event_id: str,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
@@ -422,7 +426,7 @@ async def get_draft(
 
 
 @router.post("/publish", response_model=RoundWithAssignmentsResponse, status_code=201)
-async def publish_round(
+def publish_round(
     event_id: str,
     response: Response,
     background_tasks: BackgroundTasks,
@@ -515,7 +519,8 @@ async def publish_round(
 
     db.table("round_drafts").delete().eq("id", draft["id"]).execute()
 
-    record_audit(
+    background_tasks.add_task(
+        record_audit,
         db,
         action="round.published",
         entity_type="round",
@@ -541,8 +546,9 @@ async def publish_round(
 
 
 @router.post("/end", response_model=RoundResponse)
-async def end_round(
+def end_round(
     event_id: str,
+    background_tasks: BackgroundTasks,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
@@ -556,7 +562,8 @@ async def end_round(
         .eq("id", active["id"])
         .execute()
     )
-    record_audit(
+    background_tasks.add_task(
+        record_audit,
         db,
         action="round.ended",
         entity_type="round",
@@ -569,8 +576,9 @@ async def end_round(
 
 
 @router.post("/pause", response_model=RoundResponse)
-async def pause_round(
+def pause_round(
     event_id: str,
+    background_tasks: BackgroundTasks,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
@@ -592,7 +600,8 @@ async def pause_round(
         .eq("id", active["id"])
         .execute()
     )
-    record_audit(
+    background_tasks.add_task(
+        record_audit,
         db,
         action="round.paused",
         entity_type="round",
@@ -605,8 +614,9 @@ async def pause_round(
 
 
 @router.post("/resume", response_model=RoundResponse)
-async def resume_round(
+def resume_round(
     event_id: str,
+    background_tasks: BackgroundTasks,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
@@ -627,7 +637,8 @@ async def resume_round(
         .eq("id", active["id"])
         .execute()
     )
-    record_audit(
+    background_tasks.add_task(
+        record_audit,
         db,
         action="round.resumed",
         entity_type="round",
@@ -640,8 +651,9 @@ async def resume_round(
 
 
 @router.post("/cancel", response_model=RoundCancelResponse)
-async def cancel_round(
+def cancel_round(
     event_id: str,
+    background_tasks: BackgroundTasks,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
@@ -667,7 +679,8 @@ async def cancel_round(
     db.table("table_assignments").delete().eq("round_id", active["id"]).execute()
     db.table("rounds").delete().eq("id", active["id"]).execute()
 
-    record_audit(
+    background_tasks.add_task(
+        record_audit,
         db,
         action="round.cancelled",
         entity_type="round",
@@ -680,7 +693,7 @@ async def cancel_round(
 
 
 @router.get("/current", response_model=RoundWithAssignmentsResponse)
-async def get_current_round(event_id: str, db: Client = Depends(get_supabase)):
+def get_current_round(event_id: str, db: Client = Depends(get_supabase)):
     """Active round + all table assignments — powers the organizer grid view."""
     round_data = dict(_fetch_active_round(db, event_id))
     assignments = (
@@ -697,7 +710,7 @@ async def get_current_round(event_id: str, db: Client = Depends(get_supabase)):
     "/{round_id}/tables/{table_number}",
     response_model=list[TableAssignmentResponse],
 )
-async def get_table(
+def get_table(
     event_id: str,
     round_id: str,
     table_number: int,

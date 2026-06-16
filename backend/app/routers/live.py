@@ -69,13 +69,15 @@ def _event_attendees(db: Client, event_id: str) -> dict[str, dict]:
 
 
 def _waiting_roster(db: Client, event_id: str) -> WaitingRoster:
-    """Everyone currently in the room (anyone who hasn't left), for the waiting-
-    room social proof. Returns a total count plus a capped sample of faces."""
+    """Everyone actually IN THE ROOM right now — i.e. checked in (status='arrived'),
+    not merely registered — for the waiting-room social proof. Returns a total count
+    plus a capped sample of faces. (Registered-but-not-arrived people aren't here
+    yet; counting them would overstate who's in the room.)"""
     rows = (
         db.table("attendees")
         .select("id, name, avatar_url, status")
         .eq("event_id", event_id)
-        .neq("status", "left")
+        .eq("status", "arrived")
         .execute()
         .data
         or []

@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
-import { Loader2, PartyPopper, Sparkles, Armchair, Clock3, Heart, UserRound, Users, ArrowRight, DoorOpen, UserCheck } from "lucide-react";
+import { Loader2, PartyPopper, Sparkles, Armchair, Clock3, Heart, UserRound, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw } from "lucide-react";
 
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Wordmark } from "@/components/brand/wordmark";
@@ -99,10 +99,15 @@ export function LiveShell({
   children,
   right,
   eventId,
+  onRefresh,
 }: {
   children: ReactNode;
   right?: ReactNode;
   eventId?: string;
+  /** When set, shows a manual "refresh" button — a safety net for when the
+   *  realtime doorbell doesn't fire, so the attendee can re-pull their state
+   *  without reloading the whole page. */
+  onRefresh?: () => void;
 }) {
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
@@ -113,6 +118,7 @@ export function LiveShell({
           <Wordmark size={24} />
           <div className="flex items-center gap-3">
             {right}
+            {onRefresh && <RefreshButton onRefresh={onRefresh} />}
             {eventId && (
               <Link
                 href={`/event/${eventId}/profile`}
@@ -128,6 +134,29 @@ export function LiveShell({
         <div className="mt-8">{children}</div>
       </div>
     </div>
+  );
+}
+
+/** Manual re-fetch affordance. Spins briefly on tap for feedback, and is
+ *  debounced so an impatient double-tap can't fire a burst of requests. */
+function RefreshButton({ onRefresh }: { onRefresh: () => void }) {
+  const [spinning, setSpinning] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label="Refresh"
+      title="Refresh"
+      disabled={spinning}
+      onClick={() => {
+        if (spinning) return;
+        setSpinning(true);
+        onRefresh();
+        setTimeout(() => setSpinning(false), 800);
+      }}
+      className="flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
+    >
+      <RefreshCw className={cn("h-4 w-4", spinning && "animate-spin")} aria-hidden />
+    </button>
   );
 }
 

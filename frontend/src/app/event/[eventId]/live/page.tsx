@@ -125,20 +125,20 @@ function LiveInner({ eventId }: { eventId: string }) {
       );
     case "between_rounds":
       return (
-        <LiveShell eventId={eventId}>
+        <LiveShell eventId={eventId} onRefresh={refetch}>
           <BetweenRounds />
         </LiveShell>
       );
     case "in_round":
       return (
-        <LiveShell eventId={eventId}>
+        <LiveShell eventId={eventId} onRefresh={refetch}>
           {state.seated ? <RoundView state={state} eventId={eventId} onExpire={refetch} /> : <NotSeated />}
         </LiveShell>
       );
     case "not_started":
     default:
       return (
-        <LiveShell eventId={eventId}>
+        <LiveShell eventId={eventId} onRefresh={refetch}>
           <WaitingRoom state={state} eventId={eventId} />
         </LiveShell>
       );

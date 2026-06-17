@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { Loader2, PartyPopper, Sparkles, Armchair, Clock3, Heart, UserRound, Users, ArrowRight, DoorOpen, UserCheck } from "lucide-react";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { Loader2, PartyPopper, Sparkles, Heart, UserRound, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star } from "lucide-react";
 
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Wordmark } from "@/components/brand/wordmark";
@@ -10,18 +11,31 @@ import { BoardingPass } from "@/components/brand/boarding-pass";
 import { Avatar } from "@/components/brand/avatar";
 import { IcebreakerCard } from "@/components/brand/icebreaker-card";
 import { buttonVariants } from "@/components/ui/button";
-import { ROUNDS, agendaFor } from "@/lib/design/rounds";
+import { ROUNDS, agendaFor, type Round } from "@/lib/design/rounds";
+import { COLORS } from "@/lib/design/colors";
 import { cn } from "@/lib/utils";
 import { Hourglass } from "./hourglass";
 import { apiFetch, ApiError } from "@/lib/api";
 import { CountdownPill, useCountdown } from "./countdown";
 import type { LiveState, Tablemate } from "@/lib/live/use-live-state";
+import { useEventBranding, type Sponsor } from "@/lib/live/use-branding";
+import { SponsorShowcase, EventLogo } from "./sponsor-showcase";
 
-/** One tablemate, with a like (❤️) toggle. Likes persist and surface in the
- * rolodex later (mutual = a match). Optimistic with revert on failure. */
+/** One tablemate, with a like (❤️) toggle and a private-note affordance. Likes
+ * persist and surface in the rolodex later (mutual = a match); notes are
+ * author-private and pre-fill from the snapshot. Both optimistic-ish, with the
+ * note saving on blur. */
 function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
   const [liked, setLiked] = useState(mate.liked);
   const [pending, setPending] = useState(false);
+
+  // Private note — collapsed by default; expands inline beneath the row.
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [note, setNote] = useState(mate.note ?? "");
+  const [savedNote, setSavedNote] = useState(mate.note ?? "");
+  const [noteBusy, setNoteBusy] = useState(false);
+  const hasNote = savedNote.trim().length > 0;
+  const noteDirty = note.trim() !== savedNote.trim();
 
   async function toggle() {
     if (pending) return;
@@ -44,6 +58,22 @@ function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
     }
   }
 
+  async function saveNote() {
+    if (!noteDirty) return; // nothing changed → no write
+    setNoteBusy(true);
+    try {
+      await apiFetch(`/events/${eventId}/notes/${mate.attendee_id}`, {
+        method: "PUT",
+        body: JSON.stringify({ note: note.trim() }),
+      });
+      setSavedNote(note.trim());
+    } catch {
+      // keep the text so the user can retry; nothing destructive happened
+    } finally {
+      setNoteBusy(false);
+    }
+  }
+
   return (
     <li className={cn("rounded-2xl border bg-card/50 p-3", mate.wanted ? "border-accent/50 bg-accent/[0.06]" : "border-border")}>
       <div className="flex items-center gap-3">
@@ -59,19 +89,37 @@ function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
           </div>
           <p className="truncate text-sm text-muted-foreground">{[mate.role, mate.company].filter(Boolean).join(" · ")}</p>
         </div>
-        <button
-          type="button"
-          onClick={toggle}
-          disabled={pending}
-          aria-pressed={liked}
-          aria-label={liked ? `Unlike ${mate.name}` : `Like ${mate.name}`}
-          className={cn(
-            "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-60",
-            liked ? "border-accent/40 bg-accent/15 text-accent" : "border-border text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <Heart className={cn("h-4 w-4", liked && "fill-current")} aria-hidden />
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setNotesOpen((o) => !o)}
+            aria-pressed={notesOpen}
+            aria-label={hasNote ? `Edit your note about ${mate.name}` : `Add a private note about ${mate.name}`}
+            title="Private note — only you see this"
+            className={cn(
+              "relative flex h-9 w-9 items-center justify-center rounded-full border transition-colors",
+              hasNote || notesOpen ? "border-accent/40 bg-accent/15 text-accent" : "border-border text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <StickyNote className="h-4 w-4" aria-hidden />
+            {hasNote && !notesOpen && (
+              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent ring-2 ring-card" aria-hidden />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={toggle}
+            disabled={pending}
+            aria-pressed={liked}
+            aria-label={liked ? `Unlike ${mate.name}` : `Like ${mate.name}`}
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-full border transition-colors disabled:opacity-60",
+              liked ? "border-accent/40 bg-accent/15 text-accent" : "border-border text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Heart className={cn("h-4 w-4", liked && "fill-current")} aria-hidden />
+          </button>
+        </div>
       </div>
 
       {mate.shared_interests.length > 0 && (
@@ -89,6 +137,33 @@ function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
           <span className="text-muted-foreground/70">Looking for:</span> {mate.looking_for}
         </p>
       )}
+
+      {notesOpen && (
+        <div className="mt-3 pl-[52px]">
+          <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+            <StickyNote className="h-3 w-3" aria-hidden /> Private note · only you see this
+          </label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onBlur={saveNote}
+            rows={2}
+            maxLength={500}
+            autoFocus
+            placeholder="e.g. follow up about hiring · intro to Priya"
+            className="mt-1.5 w-full resize-none rounded-xl border border-input bg-secondary/50 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          />
+          <div className="mt-1 flex h-4 items-center justify-end text-[11px] text-muted-foreground">
+            {noteBusy ? (
+              <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Saving…</span>
+            ) : noteDirty ? (
+              <span>Tap outside to save</span>
+            ) : hasNote ? (
+              <span className="inline-flex items-center gap-1 text-success"><Check className="h-3 w-3" aria-hidden /> Saved</span>
+            ) : null}
+          </div>
+        </div>
+      )}
     </li>
   );
 }
@@ -99,10 +174,15 @@ export function LiveShell({
   children,
   right,
   eventId,
+  onRefresh,
 }: {
   children: ReactNode;
   right?: ReactNode;
   eventId?: string;
+  /** When set, shows a manual "refresh" button — a safety net for when the
+   *  realtime doorbell doesn't fire, so the attendee can re-pull their state
+   *  without reloading the whole page. */
+  onRefresh?: () => void;
 }) {
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
@@ -113,6 +193,7 @@ export function LiveShell({
           <Wordmark size={24} />
           <div className="flex items-center gap-3">
             {right}
+            {onRefresh && <RefreshButton onRefresh={onRefresh} />}
             {eventId && (
               <Link
                 href={`/event/${eventId}/profile`}
@@ -128,6 +209,29 @@ export function LiveShell({
         <div className="mt-8">{children}</div>
       </div>
     </div>
+  );
+}
+
+/** Manual re-fetch affordance. Spins briefly on tap for feedback, and is
+ *  debounced so an impatient double-tap can't fire a burst of requests. */
+function RefreshButton({ onRefresh }: { onRefresh: () => void }) {
+  const [spinning, setSpinning] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label="Refresh"
+      title="Refresh"
+      disabled={spinning}
+      onClick={() => {
+        if (spinning) return;
+        setSpinning(true);
+        onRefresh();
+        setTimeout(() => setSpinning(false), 800);
+      }}
+      className="flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
+    >
+      <RefreshCw className={cn("h-4 w-4", spinning && "animate-spin")} aria-hidden />
+    </button>
   );
 }
 
@@ -239,10 +343,25 @@ function AgendaCard({
   );
 }
 
+/** The sponsor flip in its one consistent carded frame — used identically by every
+ * lobby / waiting / between-rounds screen so the brand moment looks the same all
+ * the way through the event. Renders nothing when no sponsors are authored (never
+ * an empty ad box). */
+function SponsorBlock({ sponsors }: { sponsors: Sponsor[] }) {
+  if (sponsors.length === 0) return null;
+  return (
+    <div className="rounded-2xl border border-border bg-card/40 p-4">
+      <SponsorShowcase sponsors={sponsors} />
+    </div>
+  );
+}
+
 export function WaitingRoom({ state, eventId }: { state: LiveState; eventId?: string }) {
   // Defensive: tolerate an older backend that doesn't yet send these fields.
   const firstName = (state.attendee_name ?? "").trim().split(/\s+/)[0] || "there";
   const roster = state.roster ?? { count: 0, preview: [] };
+  const branding = useEventBranding(eventId);
+  const sponsors = branding?.sponsors ?? [];
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -256,6 +375,7 @@ export function WaitingRoom({ state, eventId }: { state: LiveState; eventId?: st
       </div>
 
       <div className="flex flex-col items-center pt-2 text-center">
+        <EventLogo branding={branding} className="mb-4" />
         <Hourglass size={120} />
         <h1 className="mt-3 font-display text-2xl text-foreground">The room is filling up</h1>
         <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">
@@ -271,6 +391,7 @@ export function WaitingRoom({ state, eventId }: { state: LiveState; eventId?: st
       />
       <RoomRoster roster={roster} />
       {eventId && <DirectoryLink eventId={eventId} />}
+      <SponsorBlock sponsors={sponsors} />
     </div>
   );
 }
@@ -311,6 +432,7 @@ export function RoomCodeCheckIn({
   onArrived: () => void;
 }) {
   const firstName = (state.attendee_name ?? "").trim().split(/\s+/)[0] || "there";
+  const returning = state.attendee_status === "left"; // stepped out / marked gone → re-checking in
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -345,7 +467,7 @@ export function RoomCodeCheckIn({
       <div className="flex items-center justify-between">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-[11px] font-medium text-accent ring-1 ring-inset ring-accent/25">
           <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
-          You&apos;re registered
+          {returning ? "Welcome back" : "You're registered"}
         </span>
         <span className="truncate text-xs text-muted-foreground">Hi, {firstName}</span>
       </div>
@@ -357,10 +479,15 @@ export function RoomCodeCheckIn({
           </div>
           <span className="absolute inset-0 -z-10 rounded-2xl bg-accent/20 blur-xl" aria-hidden />
         </div>
-        <h1 className="mt-4 font-display text-2xl text-foreground">You&apos;re on the list</h1>
+        <h1 className="mt-4 font-display text-2xl text-foreground">
+          {returning ? "Ready to rejoin?" : "You're on the list"}
+        </h1>
         <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">
-          When you arrive, enter the <span className="text-foreground">room code</span> shown at the
-          venue to check in and join the first round.
+          {returning ? (
+            <>Enter the <span className="text-foreground">room code</span> shown at the venue to check back in and be seated in the next round.</>
+          ) : (
+            <>When you arrive, enter the <span className="text-foreground">room code</span> shown at the venue to check in and join the first round.</>
+          )}
         </p>
       </div>
 
@@ -408,25 +535,115 @@ export function RoomCodeCheckIn({
   );
 }
 
-export function BetweenRounds() {
+export function BetweenRounds({ eventId }: { eventId?: string }) {
+  const branding = useEventBranding(eventId);
+  const sponsors = branding?.sponsors ?? [];
+
+  // Same brand treatment as the waiting room and the "next round is yours" screen:
+  // logo → hourglass → message → the sponsor flip. The hourglass IS the waiting
+  // indicator, so it's always present (not only when sponsors exist) — the gap
+  // between rounds looks identical to every other wait, sponsors or not.
   return (
-    <StatusPanel
-      icon={<Clock3 className="h-7 w-7" />}
-      title="Round complete"
-      subtitle="Nice one. The next table is being set up — hang tight, you'll be moved in a few seconds."
-    >
-      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
-    </StatusPanel>
+    <div className="space-y-5">
+      <div className="flex flex-col items-center pt-2 text-center">
+        <EventLogo branding={branding} className="mb-4" />
+        <Hourglass size={104} />
+        <h1 className="mt-3 font-display text-2xl text-foreground">Round complete</h1>
+        <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">
+          Nice one. The next table is being set up — hang tight, you&apos;ll be moved in a few seconds.
+        </p>
+      </div>
+      <SponsorBlock sponsors={sponsors} />
+    </div>
   );
 }
 
-export function NotSeated() {
+/**
+ * Shown when a round is live but this attendee has no table for it. Two ways to
+ * land here:
+ *  - a LATE ARRIVAL who checked in mid-round (seating froze before they were in
+ *    the room) — they'll be placed when the organizer starts the next round; or
+ *  - a GUEST (speaker/host) who is deliberately never in the table rotation.
+ * The screen must tell these two apart so we never promise a seat to a guest who
+ * will never get one. For the late arrival, the dead wait becomes useful: a clear
+ * "you're next", who's in the room, the directory to browse now, and sponsors.
+ */
+export function NotSeated({ state, eventId }: { state: LiveState; eventId?: string }) {
+  const firstName = (state.attendee_name ?? "").trim().split(/\s+/)[0] || "there";
+  const isGuest = state.attendee_tag === "speaker" || state.attendee_tag === "host";
+  const branding = useEventBranding(eventId);
+  const sponsors = branding?.sponsors ?? [];
+  const roster = state.roster ?? { count: 0, preview: [] };
+
+  // Name the round everyone else is in right now, so the wait has context.
+  const currentRoundNumber = state.round?.round_number ?? null;
+  const currentTopic = currentRoundNumber
+    ? agendaFor(currentRoundNumber - 1, state.round_topics).name
+    : null;
+
+  // --- Guest (speaker / host): not in the rotation, so never promise a seat. ---
+  if (isGuest) {
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center justify-between">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-gold/15 px-2.5 py-1 text-[11px] font-medium text-gold ring-1 ring-inset ring-gold/25">
+            <Star className="h-3 w-3" aria-hidden />
+            You&apos;re a {state.attendee_tag}
+          </span>
+          <span className="truncate text-xs text-muted-foreground">Hi, {firstName}</span>
+        </div>
+        <StatusPanel
+          icon={<Star className="h-7 w-7" />}
+          title="You're here as a guest"
+          subtitle={`As a ${state.attendee_tag} you're not in the table rotation, so you won't be shuffled between tables — the floor is yours. Mingle freely and enjoy the event.`}
+        >
+          <EventLogo branding={branding} className="mt-2 max-h-10" />
+        </StatusPanel>
+        {eventId && <DirectoryLink eventId={eventId} />}
+        <SponsorBlock sponsors={sponsors} />
+      </div>
+    );
+  }
+
+  // --- Late arrival: checked in mid-round, will be seated next round. ---
   return (
-    <StatusPanel
-      icon={<Armchair className="h-7 w-7" />}
-      title="Sit tight for this round"
-      subtitle="You're not seated this round, but you'll be placed in the next one. Stay close and keep this screen open."
-    />
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-2.5 py-1 text-[11px] font-medium text-success ring-1 ring-inset ring-success/25 shadow-[0_0_16px_-4px_hsl(var(--success)/0.55)]">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" aria-hidden />
+          You&apos;re checked in
+        </span>
+        <span className="truncate text-xs text-muted-foreground">Hi, {firstName}</span>
+      </div>
+
+      <div className="flex flex-col items-center pt-2 text-center">
+        <EventLogo branding={branding} className="mb-4" />
+        <Hourglass size={104} />
+        <h1 className="mt-3 font-display text-2xl text-foreground">Next round is yours</h1>
+        <p className="mt-2 max-w-[320px] text-sm leading-relaxed text-muted-foreground">
+          {currentTopic ? (
+            <>&ldquo;{currentTopic}&rdquo; is underway right now. The moment it wraps, we&apos;ll seat you for the next one. </>
+          ) : (
+            <>A round&apos;s in progress right now. The moment it wraps, we&apos;ll seat you for the next one. </>
+          )}
+          Keep this screen open.
+        </p>
+      </div>
+
+      {/* Reassurance that they aren't forgotten — the host's console lists them. */}
+      <div className="flex items-center gap-3 rounded-2xl border border-accent/30 bg-accent/[0.06] p-4">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent">
+          <UserCheck className="h-4 w-4" aria-hidden />
+        </span>
+        <p className="text-sm text-muted-foreground">
+          <span className="text-foreground">You&apos;re on the floor list.</span> The host can see you&apos;re here and will place you in the next round.
+        </p>
+      </div>
+
+      <RoomRoster roster={roster} />
+      {eventId && <DirectoryLink eventId={eventId} />}
+      <SponsorBlock sponsors={sponsors} />
+    </div>
   );
 }
 
@@ -441,6 +658,116 @@ export function EventEnded({ eventId }: { eventId: string }) {
         See your recap
       </Link>
     </StatusPanel>
+  );
+}
+
+/** Round-start REVEAL — the celebratory "your table is N" moment in the round's
+ * signature color, before settling into the table. Reuses the landing "reveal"
+ * scene's visual language. Shown ONCE per round (sessionStorage-gated in
+ * RoundView, so a mid-round refresh doesn't replay it), tap-to-skip, and skipped
+ * entirely under prefers-reduced-motion. */
+function RoundReveal({
+  round,
+  roundNumber,
+  tableNumber,
+  mateCount,
+  onDone,
+}: {
+  round: Round;
+  roundNumber: number;
+  tableNumber: number;
+  mateCount: number;
+  onDone: () => void;
+}) {
+  const reduced = useReducedMotion();
+  const [phase, setPhase] = useState(0);
+
+  useEffect(() => {
+    if (reduced) {
+      onDone(); // honor reduced-motion: go straight to the table, no animation
+      return;
+    }
+    const t1 = setTimeout(() => setPhase(1), 650);
+    const t2 = setTimeout(onDone, 2700);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [reduced, onDone]);
+
+  if (reduced) return null;
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 overflow-hidden"
+      style={{ background: phase >= 1 ? round.bg : COLORS.ink900, transition: "background 0.7s ease" }}
+      initial={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      role="status"
+      aria-label={`Round ${roundNumber} starting — your table is ${tableNumber}`}
+      onClick={onDone}
+    >
+      {phase >= 1 &&
+        Array.from({ length: 16 }).map((_, i) => (
+          <motion.span
+            key={i}
+            initial={{ left: "50vw", top: "55vh", opacity: 0, scale: 0 }}
+            animate={{
+              left: `calc(50vw + ${Math.cos((i / 16) * Math.PI * 2) * 42}vw)`,
+              top: `calc(55vh + ${Math.sin((i / 16) * Math.PI * 2) * 42}vh)`,
+              opacity: [0, 1, 0],
+              scale: [0, 1, 0.3],
+            }}
+            transition={{ duration: 1.6, delay: 0.1 + i * 0.03 }}
+            className="absolute h-2 w-2 rounded-full"
+            style={{ background: round.ink, opacity: 0.5 }}
+            aria-hidden
+          />
+        ))}
+
+      <div className="relative flex h-full flex-col items-center justify-center px-6 text-center" style={{ color: round.ink }}>
+        <AnimatePresence mode="wait">
+          {phase === 0 ? (
+            <motion.div key="p0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center text-cream">
+              <div className="mb-5 h-12 w-12 animate-spin rounded-full border-2 border-cream/25 border-t-cream" />
+              <p className="font-display text-xl">Reading the room…</p>
+              <p className="mt-2 text-xs text-cream/50">Finding your people for this round</p>
+            </motion.div>
+          ) : (
+            <motion.div key="p1" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <motion.div initial={{ y: 8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }} className="mb-2 text-[10px] uppercase tracking-[0.4em] opacity-80">
+                Round {roundNumber} · {round.name}
+              </motion.div>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="mb-1 text-xs opacity-70">
+                Your table is
+              </motion.div>
+              <motion.div
+                initial={{ scale: 0.4, opacity: 0, filter: "blur(15px)" }}
+                animate={{ scale: 1, opacity: 1, filter: "blur(0px)" }}
+                transition={{ type: "spring", stiffness: 220, damping: 19 }}
+                className="font-display leading-[0.8] tracking-[-0.05em]"
+                style={{ fontSize: "clamp(7rem, 40vw, 12rem)" }}
+              >
+                {tableNumber}
+              </motion.div>
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.55 }}
+                className="mt-6 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium"
+                style={{ background: round.ink, color: round.bg }}
+              >
+                <Sparkles className="h-3 w-3" aria-hidden />
+                {mateCount > 0 ? `${mateCount} ${mateCount === 1 ? "human" : "humans"} waiting` : "Settle in"}
+              </motion.div>
+              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.3 }} className="mt-8 text-[11px] opacity-60">
+                Tap to continue
+              </motion.p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.div>
   );
 }
 
@@ -464,8 +791,33 @@ export function RoundView({
   const paused = Boolean(round.paused_at);
   const wantedHere = mates.filter((m) => m.wanted);
 
+  // Play the round-start reveal once per round. sessionStorage-gated by round_id
+  // so a mid-round refresh/poll never replays it (it would be jarring), but a
+  // genuinely new round (or getting seated after sitting one out) does.
+  const [revealing, setRevealing] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!sessionStorage.getItem(`peopld:revealed:${round.round_id}`)) setRevealing(true);
+  }, [round.round_id]);
+  const finishReveal = useCallback(() => {
+    if (typeof window !== "undefined") sessionStorage.setItem(`peopld:revealed:${round.round_id}`, "1");
+    setRevealing(false);
+  }, [round.round_id]);
+
   return (
     <div className="space-y-5">
+      <AnimatePresence>
+        {revealing && (
+          <RoundReveal
+            round={themed}
+            roundNumber={round.round_number}
+            tableNumber={seat.table_number}
+            mateCount={mates.length}
+            onDone={finishReveal}
+          />
+        )}
+      </AnimatePresence>
+
       <div className="flex items-center justify-between">
         <h1 className="font-display text-xl text-foreground">Round {round.round_number}</h1>
         <CountdownPill remaining={remaining} paused={paused} />

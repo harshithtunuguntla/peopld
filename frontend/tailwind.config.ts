@@ -75,6 +75,8 @@ const config: Config = {
         gold: COLORS.gold,
         ice: COLORS.ice,
         rose: COLORS.rose,
+        amber: COLORS.amber,
+        sky: COLORS.sky,
       },
       borderRadius: {
         lg: "var(--radius)",

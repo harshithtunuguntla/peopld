@@ -406,6 +406,42 @@ re: hiring"). Author-private, stored in `connection_notes` (**RLS on, no policie
 
 ---
 
+## Saved contacts (bookmarks)
+
+An explicit "save this person" shortlist — **separate** from likes and from the
+auto rolodex. Owner-private (`connection_bookmarks`, RLS on → **service-role
+only**). Surfaced back as the `saved` flag on each rolodex entry, powering the
+"Saved" filter.
+
+### `PUT /events/{eventId}/bookmarks/{targetAttendeeId}`
+- **Auth:** required (attendee — owner resolved from JWT). No body.
+- **Response `200`** (`BookmarkResponse`): `{ "target_attendee_id": "uuid", "saved": true }`. Idempotent — saving twice is a no-op.
+- **Errors:** `400` saving yourself; `404` caller not registered **or** target unknown.
+
+### `DELETE /events/{eventId}/bookmarks/{targetAttendeeId}`
+- **Auth:** required (attendee). Idempotent — unsaving what you never saved still `200`.
+- **Response `200`:** `{ "target_attendee_id": "uuid", "saved": false }`.
+
+---
+
+## Sponsors & branding
+
+Sponsors are shown to attendees between rounds + in the lobby (rotating around the
+hourglass). The event logo + show-logo toggle live on the event (`PATCH /events/:id`
+fields `logo_url`, `show_event_logo`). Sponsors reach phones via the backend
+(`sponsors` table is RLS-on, service-role only).
+
+### `GET /events/{eventId}/sponsors`
+- **Auth:** none (sponsors are promotional; nothing private). Powers the attendee branding block.
+- **Response `200`** (`SponsorsResponse`): `{ "event_name": "…", "logo_url": "…|null", "show_event_logo": true, "sponsors": [ { "id", "name", "image_url", "tagline", "url" } ] }`.
+
+### `PUT /events/{eventId}/sponsors`
+- **Auth:** **owner only** (organizer). Whole-list replace.
+- **Body** (`SponsorsPutRequest`): `{ "sponsors": [ { "name", "image_url?", "tagline?", "url?" } ] }`. Blank rows (no name + no image) are dropped; capped at 20; order preserved.
+- **Response `200`:** the saved `SponsorsResponse`.
+
+---
+
 ## Connections (post-event rolodex)
 
 ### `GET /events/{eventId}/connections`

@@ -1,21 +1,25 @@
 /**
- * Deterministic initials-avatar gradients. A real attendee with no profile
- * photo gets a *two-color* brand gradient (not one flat fill), picked stably
- * from a seed (their id) so the same person always looks the same everywhere —
- * live screen, rolodex, organizer console. See DESIGN_SYSTEM §1.2.
+ * Deterministic initials-avatar coloring. A real attendee with no profile photo
+ * gets a SINGLE solid brand color (no gradient mix), picked stably from a seed
+ * (their id) so the same person always looks the same everywhere — live screen,
+ * rolodex, organizer console. This matches the landing-page roster vibe (the
+ * "38 already inside" avatars), which use one solid brand color each.
  *
  * This is the single source for app avatar coloring. Do NOT re-implement the
  * hash per-page (it used to be copy-pasted in 4 files).
  */
 import { COLORS } from "./colors";
 
+/**
+ * The exact single-color set the landing avatars cycle through
+ * (see lib/content/landing.ts) — solid brand colors, no gradients.
+ */
 const PALETTE = [
   COLORS.coral,
+  COLORS.chlorine,
   COLORS.plasma,
   COLORS.gold,
   COLORS.ice,
-  COLORS.chlorine,
-  COLORS.rose,
 ] as const;
 
 /** djb2-ish stable hash → unsigned int. */
@@ -34,31 +38,19 @@ function luminance(hex: string): number {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 }
 
-export type AvatarGradient = {
-  /** Ready-to-use CSS `linear-gradient(...)` for `background`. */
+export type AvatarColor = {
+  /** Solid brand color for `background`. */
   css: string;
   /** Readable foreground (#fff or near-black) for the initials. */
   ink: string;
 };
 
 /**
- * Two distinct brand colors + a seeded angle → a stable gradient. The second
- * color is guaranteed different from the first, so every avatar reads as
- * multi-color rather than a single flat tile.
+ * One solid brand color, picked stably from the seed. Same person → same color
+ * everywhere; light fills (chlorine/gold/ice) get near-black initials, the rest
+ * get white — matching the landing avatars exactly.
  */
-export function avatarGradient(seed: string): AvatarGradient {
-  const h = hash(seed);
-  const len = PALETTE.length;
-  const i = h % len;
-  // step is 1..len-1, so j is always a different index from i.
-  const step = 1 + (Math.floor(h / len) % (len - 1));
-  const j = (i + step) % len;
-  const from = PALETTE[i];
-  const to = PALETTE[j];
-  const angle = 90 + (h % 180); // 90..269deg — varied but never washed-out flat
-  return {
-    css: `linear-gradient(${angle}deg, ${from} 0%, ${to} 100%)`,
-    // Average the two ends; if the blend is light, use near-black initials.
-    ink: (luminance(from) + luminance(to)) / 2 > 0.62 ? COLORS.ink900 : "#FFFFFF",
-  };
+export function avatarColor(seed: string): AvatarColor {
+  const c = PALETTE[hash(seed) % PALETTE.length];
+  return { css: c, ink: luminance(c) > 0.62 ? COLORS.ink900 : "#FFFFFF" };
 }

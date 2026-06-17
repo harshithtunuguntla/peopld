@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { COLORS } from "@/lib/design/colors";
+import { TONE } from "@/lib/design/status";
 
 /* ----------------------------- Types ----------------------------- */
 
@@ -145,28 +146,12 @@ export function StatCard({
 
 /* ----------------------------- Status chip ----------------------------- */
 
-const STATUS_STYLE: Record<
-  EventStatus,
-  { label: string; dot: string; fg: string; bg: string }
-> = {
-  active: {
-    label: "Live",
-    dot: "hsl(var(--success))",
-    fg: "hsl(var(--success))",
-    bg: "hsl(var(--success) / 0.14)",
-  },
-  upcoming: {
-    label: "Upcoming",
-    dot: "hsl(var(--accent))",
-    fg: "hsl(var(--accent))",
-    bg: "hsl(var(--accent) / 0.14)",
-  },
-  ended: {
-    label: "Completed",
-    dot: "hsl(var(--info))",
-    fg: "hsl(var(--info))",
-    bg: "hsl(var(--info) / 0.14)",
-  },
+// Demo pill language (dot + saturated text + 0.14 tint), shared from
+// lib/design/status.ts so console chips match every other status pill in the app.
+const STATUS_STYLE: Record<EventStatus, { label: string; dot: string; fg: string; bg: string }> = {
+  active: { label: "Live", ...TONE.positive },
+  upcoming: { label: "Upcoming", ...TONE.pending },
+  ended: { label: "Completed", ...TONE.info },
 };
 
 export function StatusChip({ status }: { status: EventStatus }) {

@@ -86,6 +86,56 @@ def test_live_in_round_seated_with_tablemates(client, db, event):
     assert all("role" in m for m in body["seat"]["tablemates"])
 
 
+def test_live_seat_prefills_my_note_about_tablemate(client, db, event):
+    """A private note I authored about a tablemate pre-fills in the live seat
+    payload (so the at-table note editor opens with what I already wrote), and
+    tablemates I haven't noted carry note=None."""
+    me = _me(db, event["id"])
+    noted = make_attendee(db, event["id"], name="Anita", status="arrived")
+    blank = make_attendee(db, event["id"], name="Bobby", status="arrived")
+    rnd = make_round(db, event["id"], round_number=1, status="active")
+    make_assignment(db, event["id"], rnd["id"], me["id"], table_number=4)
+    make_assignment(db, event["id"], rnd["id"], noted["id"], table_number=4)
+    make_assignment(db, event["id"], rnd["id"], blank["id"], table_number=4)
+    db.seed(
+        "connection_notes",
+        {
+            "event_id": event["id"],
+            "author_attendee_id": me["id"],
+            "target_attendee_id": noted["id"],
+            "note": "intro re: hiring",
+        },
+    )
+
+    body = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH).json()
+    by_name = {m["name"]: m for m in body["seat"]["tablemates"]}
+    assert by_name["Anita"]["note"] == "intro re: hiring"
+    assert by_name["Bobby"]["note"] is None
+
+
+def test_live_seat_note_is_author_private(client, db, event):
+    """Someone ELSE's note about my tablemate must never leak into my snapshot."""
+    me = _me(db, event["id"])
+    mate = make_attendee(db, event["id"], name="Anita", status="arrived")
+    other = make_attendee(db, event["id"], name="Stranger", status="arrived")
+    rnd = make_round(db, event["id"], round_number=1, status="active")
+    make_assignment(db, event["id"], rnd["id"], me["id"], table_number=4)
+    make_assignment(db, event["id"], rnd["id"], mate["id"], table_number=4)
+    # `other` wrote a note about my tablemate — not mine, must not appear.
+    db.seed(
+        "connection_notes",
+        {
+            "event_id": event["id"],
+            "author_attendee_id": other["id"],
+            "target_attendee_id": mate["id"],
+            "note": "secret",
+        },
+    )
+
+    body = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH).json()
+    assert body["seat"]["tablemates"][0]["note"] is None
+
+
 def test_live_round_paused_shifts_ends_at_and_reports_paused(client, db, event):
     """A paused round banks time into the effective end and tells the phone it's
     paused, so the attendee countdown freezes (migration 008)."""
@@ -117,6 +167,37 @@ def test_live_in_round_not_seated(client, db, event):
     assert body["seated"] is False
     assert body["seat"] is None
     assert body["round"]["round_number"] == 2  # phone still knows a round is running
+    # A normal attendee here is a late arrival → the "next round is yours" screen,
+    # so the tag must read 'attendee' (the default when no tag is set).
+    assert body["attendee_tag"] == "attendee"
+
+
+def test_live_guest_in_round_carries_tag_not_attendee(client, db, event):
+    """A speaker/host is in the room during a round but deliberately never seated.
+    The snapshot must surface their tag so the phone shows the guest message
+    ("you're not in the rotation") instead of falsely promising a seat next round."""
+    _me(db, event["id"], status="arrived", tag="speaker")
+    rnd = make_round(db, event["id"], round_number=2, status="active")
+    other = make_attendee(db, event["id"], name="Seated", status="arrived")
+    make_assignment(db, event["id"], rnd["id"], other["id"], table_number=1)
+
+    body = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH).json()
+    assert body["phase"] == "in_round"
+    assert body["seated"] is False
+    assert body["attendee_tag"] == "speaker"
+
+
+def test_live_left_attendee_reports_status_for_recheckin(client, db, event):
+    """An attendee marked 'left' still gets an authoritative snapshot (not a 404),
+    so the phone can offer the room-code screen again to rejoin the rotation."""
+    _me(db, event["id"], status="left")
+    make_round(db, event["id"], round_number=1, status="active")
+
+    r = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["attendee_status"] == "left"
+    assert body["seated"] is False  # never seated while 'left'
 
 
 def test_live_between_rounds(client, db, event):

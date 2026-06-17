@@ -6,6 +6,7 @@ import { Sparkles, MapPin, Timer, Heart, ArrowRight, Crown, Play, Download } fro
 import { Avatar } from "@/components/brand/avatar";
 import { BoardingPass } from "@/components/brand/boarding-pass";
 import { roundFor, ROUNDS } from "@/lib/design/rounds";
+import { COLORS } from "@/lib/design/colors";
 import { ATTENDEES, SAMPLE_ICEBREAKER } from "@/lib/content/landing";
 
 /**
@@ -142,7 +143,7 @@ function RevealScene({ roundIdx = 1 }: { roundIdx?: number }) {
   return (
     <div
       className="relative h-full overflow-hidden"
-      style={{ background: phase >= 1 ? round.bg : "#0A0A12", transition: "background 0.8s ease" }}
+      style={{ background: phase >= 1 ? round.bg : COLORS.ink900, transition: "background 0.8s ease" }}
     >
       {phase >= 1 &&
         Array.from({ length: 16 }).map((_, i) => (
@@ -343,7 +344,7 @@ function OrganizerScene() {
         <div className="grid grid-cols-5 gap-1.5">
           {Array.from({ length: 10 }).map((_, i) => {
             const filled = [4, 4, 3, 4, 2, 4, 3, 4, 2, 3][i];
-            const dot = filled === 4 ? "#A8FF7A" : filled >= 2 ? "#FF4E2B" : "rgba(255,255,255,0.2)";
+            const dot = filled === 4 ? COLORS.chlorine : filled >= 2 ? COLORS.ember : "rgba(255,255,255,0.2)";
             return (
               <div key={i} className="rounded-md border border-white/10 p-1.5 text-center">
                 <span className="mb-1 inline-block h-1.5 w-1.5 rounded-full" style={{ background: dot }} />

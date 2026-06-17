@@ -67,7 +67,7 @@ def _response(db: Client, event: dict) -> SponsorsResponse:
 
 
 @router.get("", response_model=SponsorsResponse)
-async def get_sponsors(event_id: str, db: Client = Depends(get_supabase)):
+def get_sponsors(event_id: str, db: Client = Depends(get_supabase)):
     """Public — powers the attendee between-rounds / lobby branding. Sponsors are
     promotional by nature (meant to be seen), so no auth is required; nothing
     private is exposed."""
@@ -76,7 +76,7 @@ async def get_sponsors(event_id: str, db: Client = Depends(get_supabase)):
 
 
 @router.put("", response_model=SponsorsResponse)
-async def replace_sponsors(
+def replace_sponsors(
     event_id: str,
     body: SponsorsPutRequest,
     organizer_id: str = Depends(get_current_organizer_id),

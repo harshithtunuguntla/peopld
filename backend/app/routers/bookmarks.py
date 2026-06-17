@@ -38,7 +38,7 @@ def _me_or_404(db: Client, event_id: str, user: AuthUser) -> dict:
 
 
 @router.put("/{target_attendee_id}", response_model=BookmarkResponse)
-async def save_contact(
+def save_contact(
     event_id: str,
     target_attendee_id: str,
     user: AuthUser = Depends(get_current_user),
@@ -72,7 +72,7 @@ async def save_contact(
 
 
 @router.delete("/{target_attendee_id}", response_model=BookmarkResponse)
-async def unsave_contact(
+def unsave_contact(
     event_id: str,
     target_attendee_id: str,
     user: AuthUser = Depends(get_current_user),

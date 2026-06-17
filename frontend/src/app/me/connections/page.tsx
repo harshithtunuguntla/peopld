@@ -44,6 +44,7 @@ function groupCrossEvent(rows: MyConnection[]): { person: Person; eventId: strin
       if (!existing.person.rounds.includes(c.round_number)) existing.person.rounds.push(c.round_number);
       existing.person.liked = existing.person.liked || c.liked;
       existing.person.mutual = existing.person.mutual || c.mutual;
+      existing.person.saved = existing.person.saved || c.saved;
     } else {
       map.set(key, {
         eventId: c.event_id,
@@ -62,6 +63,7 @@ function groupCrossEvent(rows: MyConnection[]): { person: Person; eventId: strin
           rounds: [c.round_number],
           liked: c.liked,
           mutual: c.mutual,
+          saved: c.saved,
           eventLabel: `${c.event_name} · ${shortDate(c.event_date)}`,
         },
       });

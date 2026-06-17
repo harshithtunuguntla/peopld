@@ -65,3 +65,9 @@ def setup_logging(log_format: str = "text") -> None:
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(logging.INFO)
+
+    # Quiet third-party request chatter: httpx/httpcore log a line per Supabase
+    # REST call at INFO, which floods the console (one event = many DB hits) and
+    # buries our own request logs. We keep their warnings/errors.
+    for noisy in ("httpx", "httpcore", "hpack"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)

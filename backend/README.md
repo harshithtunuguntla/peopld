@@ -30,8 +30,11 @@ pytest
 
 - **DB access** is injected via `Depends(get_supabase)` (`app/database.py`).
   Tests override it with `tests/fake_supabase.py`. Never import a client directly.
-- **Auth** (`app/deps.py`): Supabase JWT via `Authorization: Bearer <token>`,
-  verified with `auth.get_user()`. Organizer endpoints additionally require
+- **Auth** (`app/deps.py` + `app/auth_jwt.py`): Supabase JWT via `Authorization:
+  Bearer <token>`, verified **locally** (signature checked in-process against the
+  project's ES256 public key from JWKS — no per-request auth round-trip). Set
+  `SUPABASE_JWT_SECRET` only in dev/tests to verify locally-minted HS256 tokens.
+  Organizer endpoints additionally require
   `app_metadata.role == "organizer"` — tag the account with
   `python scripts/tag_organizer.py <email>` after creating it in the dashboard.
   Attendee registration links `attendees.user_id` to the JWT identity and

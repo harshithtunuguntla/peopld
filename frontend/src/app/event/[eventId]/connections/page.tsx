@@ -1,10 +1,10 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
-import { Loader2, Heart, Sparkles, Users } from "lucide-react";
+import { Loader2, Heart, Sparkles, Users, Bookmark } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
@@ -62,6 +62,23 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
 
   const people = useMemo(() => (data ? groupByPerson(data.connections) : []), [data]);
 
+  // Saved-contacts filter. Seed the set from the snapshot, then keep it in sync as
+  // cards are bookmarked/un-bookmarked so the "Saved" view updates live.
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setSavedIds(new Set(people.filter((p) => p.saved).map((p) => p.attendee_id)));
+  }, [people]);
+  const [filter, setFilter] = useState<"all" | "saved">("all");
+  const handleSavedChange = useCallback((id: string, saved: boolean) => {
+    setSavedIds((prev) => {
+      const next = new Set(prev);
+      if (saved) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+  const visible = filter === "saved" ? people.filter((p) => savedIds.has(p.attendee_id)) : people;
+
   if (!authChecked || !user) {
     return (
       <LiveShell>
@@ -103,15 +120,71 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
           {people.length === 0 ? (
             <EmptyState />
           ) : (
-            <ul className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {people.map((p) => (
-                <PersonCard key={p.attendee_id} person={p} eventId={eventId} />
-              ))}
-            </ul>
+            <>
+              <FilterTabs filter={filter} onChange={setFilter} savedCount={savedIds.size} />
+              {visible.length === 0 ? (
+                <SavedEmptyState />
+              ) : (
+                <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {visible.map((p) => (
+                    <PersonCard key={p.attendee_id} person={p} eventId={eventId} onSavedChange={handleSavedChange} />
+                  ))}
+                </ul>
+              )}
+            </>
           )}
         </>
       )}
     </LiveShell>
+  );
+}
+
+/** "Everyone / Saved" segmented filter for the rolodex. */
+function FilterTabs({
+  filter,
+  onChange,
+  savedCount,
+}: {
+  filter: "all" | "saved";
+  onChange: (f: "all" | "saved") => void;
+  savedCount: number;
+}) {
+  const tab = (key: "all" | "saved", label: React.ReactNode) => (
+    <button
+      type="button"
+      onClick={() => onChange(key)}
+      aria-pressed={filter === key}
+      className={cn(
+        "inline-flex h-9 items-center justify-center gap-1.5 rounded-full px-4 text-sm font-medium transition-colors",
+        filter === key ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="mt-7 inline-flex items-center rounded-full border border-border bg-secondary p-1">
+      {tab("all", "Everyone")}
+      {tab(
+        "saved",
+        <>
+          <Bookmark className={cn("h-3.5 w-3.5", filter === "saved" && "fill-current")} aria-hidden />
+          Saved{savedCount > 0 ? ` · ${savedCount}` : ""}
+        </>,
+      )}
+    </div>
+  );
+}
+
+function SavedEmptyState() {
+  return (
+    <div className="mt-6 rounded-2xl border border-dashed border-border bg-card/40 px-6 py-10 text-center">
+      <Bookmark className="mx-auto h-7 w-7 text-muted-foreground" aria-hidden />
+      <p className="mt-3 font-display text-lg text-foreground">Nothing saved yet</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Tap the <Bookmark className="inline h-3.5 w-3.5 align-[-2px]" aria-hidden /> on anyone to keep them on your shortlist.
+      </p>
+    </div>
   );
 }
 

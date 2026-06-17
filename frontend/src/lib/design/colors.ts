@@ -32,6 +32,12 @@ export const COLORS = {
   gold: "#F5C16C", // round 4
   ice: "#A8D5FF", // round 5
   rose: "#FFB5A8", // soft coral tile
+
+  // Vivid UI-state accents — punchier siblings to the pastel gold/ice, for status
+  // emphasis (KPIs, status pills, card accents). NOT round themes (rounds keep
+  // their pastels). Reused via tailwind utilities + lib/design/status.ts.
+  amber: "#FF9E2C", // "waiting / not here yet" — vivid marigold
+  sky: "#5AA9FF", // neutral counts / upcoming — vivid blue
 } as const;
 
 export type ColorName = keyof typeof COLORS;

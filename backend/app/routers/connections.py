@@ -96,6 +96,19 @@ def build_connection_entries(db: Client, event: dict, attendee: dict) -> Connect
     )
     notes_by_target = {str(n["target_attendee_id"]): n["note"] for n in notes}
 
+    # People I've explicitly saved (bookmarked) — my shortlist, for the "Saved"
+    # filter. Owner-private. (One query.)
+    bookmarks = (
+        db.table("connection_bookmarks")
+        .select("target_attendee_id")
+        .eq("event_id", event_id)
+        .eq("owner_attendee_id", str(attendee_id))
+        .execute()
+        .data
+        or []
+    )
+    saved_ids = {str(b["target_attendee_id"]) for b in bookmarks}
+
     # My interests, for highlighting what each connection and I have in common.
     my_interest_set = {str(t).casefold() for t in (attendee.get("interests") or [])}
 
@@ -130,6 +143,7 @@ def build_connection_entries(db: Client, event: dict, attendee: dict) -> Connect
                 table_number=a["table_number"],
                 liked=liked,
                 mutual=liked and other_id in liked_me,
+                saved=other_id in saved_ids,
             )
         )
         people_met.add(a["attendee_id"])

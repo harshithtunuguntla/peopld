@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     log_format: str = "text"  # set LOG_FORMAT=json on Cloud Run (Cloud Logging parses it)
 
+    # --- JWT verification (app/deps.py::_decode_local) ---
+    # We verify Supabase access tokens LOCALLY (no per-request auth round-trip).
+    # Production: leave supabase_jwt_secret empty -> tokens are verified against
+    # the project's asymmetric public key (ES256) fetched from the JWKS endpoint.
+    # Dev/tests: set SUPABASE_JWT_SECRET to verify HS256 tokens minted locally
+    # (offline, no JWKS fetch). HS256 is ONLY accepted when this secret is set, so
+    # production never accepts it — closing the alg-confusion attack surface.
+    # (supabase_jwt_secret is declared above so the strip_whitespace validator covers it.)
+
     # --- Icebreaker engine (Step 6) ---
     # The LLM is reached through a provider abstraction (app/icebreakers/provider.py).
     # "vertex" = Claude on GCP Vertex AI (uses GCP credits + Application Default

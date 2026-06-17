@@ -46,36 +46,39 @@
 
   .dark {
     /* Dark (app) */
-    --background: 240 25% 5%;
-    --foreground: 40 30% 95%;
-    --card: 240 20% 9%;
-    --card-foreground: 40 30% 95%;
-    --popover: 240 20% 9%;
-    --popover-foreground: 40 30% 95%;
-    --elevated: 240 16% 10%;         /* dark elevated surface for dialogs/menus */
-    --primary: 40 30% 95%;
-    --primary-foreground: 240 25% 5%;
-    --secondary: 240 15% 14%;
-    --secondary-foreground: 40 30% 95%;
-    --muted: 240 15% 12%;
-    --muted-foreground: 240 8% 65%;
-    --accent: 11 100% 58%;
+    /* Dark neutrals aligned to demo-workup-ui .app-theme.dark: a violet-tinted ink
+       world (#0E0D14 canvas / #17161F surface / #201F2A surface-2 / #1A1922
+       elevated / #F5F0E6 cream text), brand #FF6A4D. Hue ~247-249, not 240. */
+    --background: 249 22% 6%;        /* #0E0D14 */
+    --foreground: 40 40% 93%;        /* #F5F0E6 cream */
+    --card: 247 18% 10%;             /* #17161F */
+    --card-foreground: 40 40% 93%;
+    --popover: 247 18% 10%;
+    --popover-foreground: 40 40% 93%;
+    --elevated: 247 16% 11%;         /* #1A1922 */
+    --primary: 40 40% 93%;
+    --primary-foreground: 249 22% 6%;
+    --secondary: 245 16% 14%;        /* #201F2A */
+    --secondary-foreground: 40 40% 93%;
+    --muted: 247 15% 12%;
+    --muted-foreground: 40 9% 63%;   /* warm cream-grey (demo fg-muted) */
+    --accent: 10 100% 65%;           /* #FF6A4D demo dark brand */
     --accent-foreground: 0 0% 100%;
-    --border: 240 12% 18%;
-    --input: 240 12% 18%;
-    --ring: 11 100% 58%;
+    --border: 247 13% 19%;
+    --input: 247 13% 19%;
+    --ring: 10 100% 65%;
 
     /* Status colors — dark variants stay bright (readable on ink). */
     --success: 96 58% 62%;
     --warning: 38 88% 64%;
     --info: 205 80% 72%;
 
-    /* Extended app neutrals — dark variants. */
-    --surface-2: 240 14% 16%;
-    --foreground-subtle: 240 8% 52%;
-    --line-strong: 240 12% 26%;
-    --panel: 240 14% 16%;
-    --panel-foreground: 40 30% 95%;
+    /* Extended app neutrals — dark variants (demo violet-ink world). */
+    --surface-2: 245 16% 14%;        /* #201F2A */
+    --foreground-subtle: 40 8% 52%;
+    --line-strong: 247 13% 26%;
+    --panel: 245 16% 14%;
+    --panel-foreground: 40 40% 93%;
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 18px 44px -18px rgba(0, 0, 0, 0.7);
   }
 

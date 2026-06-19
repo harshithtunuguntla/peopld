@@ -2,7 +2,6 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
 import { Loader2, Heart, Sparkles, Users, Bookmark } from "lucide-react";
 
@@ -88,12 +87,15 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
   }
 
   return (
-    <LiveShell eventId={eventId} right={<Link href="/home" className="text-xs text-muted-foreground transition-colors hover:text-foreground">Home</Link>}>
-      <header>
+    <LiveShell eventId={eventId} className="max-w-5xl">
+      <header className="max-w-2xl">
         <p className="text-[11px] uppercase tracking-[0.3em] text-accent">Your rolodex</p>
-        <h1 className="mt-2 font-display text-3xl leading-tight tracking-[-0.02em] text-foreground">
+        <h1 className="mt-2 text-balance font-display text-3xl leading-tight tracking-[-0.02em] text-foreground sm:text-4xl">
           People you met
         </h1>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground sm:text-base">
+          Keep track of every conversation, save the people you want to follow up with, and add private context while it is still fresh.
+        </p>
       </header>
 
       {error && (
@@ -111,7 +113,7 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
 
       {data && (
         <>
-          <div className="mt-6 grid grid-cols-3 gap-2.5">
+          <div className="mt-6 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
             <Stat icon={<Users className="h-4 w-4" />} value={data.total_people_met} label="met" />
             <Stat icon={<Sparkles className="h-4 w-4" />} value={data.rounds_count} label="rounds" />
             <Stat icon={<Heart className="h-4 w-4" />} value={data.matches_count} label="matches" highlight={data.matches_count > 0} />
@@ -125,7 +127,7 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
               {visible.length === 0 ? (
                 <SavedEmptyState />
               ) : (
-                <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <ul className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {visible.map((p) => (
                     <PersonCard key={p.attendee_id} person={p} eventId={eventId} onSavedChange={handleSavedChange} />
                   ))}

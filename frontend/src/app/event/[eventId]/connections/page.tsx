@@ -104,8 +104,8 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
 
       {!data && !error && (
         <div className="mt-8 space-y-3">
-          <div className="h-20 animate-pulse rounded-2xl border border-border bg-card/40" />
-          <div className="h-20 animate-pulse rounded-2xl border border-border bg-card/40" />
+          <div className="h-20 skeleton rounded-2xl border border-border" />
+          <div className="h-20 skeleton rounded-2xl border border-border" />
         </div>
       )}
 

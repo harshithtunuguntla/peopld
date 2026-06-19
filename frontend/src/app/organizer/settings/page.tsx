@@ -1,11 +1,11 @@
 "use client";
 
-import { Loader2, Sun, Moon, Monitor, User, Check, Palette } from "lucide-react";
+import { Sun, Moon, Monitor, User, Check, Palette } from "lucide-react";
 
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { useTheme, type ThemePref } from "@/lib/theme/theme-provider";
 import { ConsoleShell } from "@/components/organizer/console-shell";
-import { PageHeader, Card } from "@/components/organizer/console-ui";
+import { PageHeader, Card, ConsoleLoading } from "@/components/organizer/console-ui";
 import { Avatar } from "@/components/brand/avatar";
 import { cn } from "@/lib/utils";
 
@@ -57,10 +57,7 @@ export default function OrganizerSettings() {
   if (!checked || !user) {
     return (
       <ConsoleShell>
-        <div className="flex flex-col items-center gap-3 pt-16 text-sm text-muted-foreground">
-          <Loader2 className="h-6 w-6 animate-spin" aria-hidden />
-          Loading…
-        </div>
+        <ConsoleLoading />
       </ConsoleShell>
     );
   }

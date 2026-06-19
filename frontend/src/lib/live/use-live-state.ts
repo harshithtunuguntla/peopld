@@ -56,6 +56,7 @@ export interface LiveState {
   target_rounds: number | null;
   round_seconds: number;
   round_topics: string[];
+  rounds_completed: number;
   seated: boolean;
   roster: WaitingRoster;
   round: LiveRound | null;

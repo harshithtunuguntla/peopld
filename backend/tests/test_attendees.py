@@ -334,6 +334,68 @@ def test_attendee_cannot_patch_status(client, db, event):
     assert response.status_code == 403
 
 
+def test_organizer_edits_attendee_identity(client, db, event):
+    # F6: organizer fixes a hurried walk-in typo (name/role/company).
+    attendee = make_attendee(db, event["id"], name="Jhon", role="Fonder", company="Acme")
+
+    response = client.patch(
+        f"/events/{event['id']}/attendees/{attendee['id']}",
+        json={"name": "John Smith", "role": "Founder", "company": "Acme Labs"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "John Smith"
+    assert body["role"] == "Founder"
+    assert body["company"] == "Acme Labs"
+    # status is untouched, so the edit is logged as a generic update (fields only).
+    audit = [r for r in db.store["audit_log"] if r["action"] == "attendee.updated"]
+    assert len(audit) == 1
+    assert audit[0]["metadata"] == {"fields": ["company", "name", "role"]}
+
+
+def test_organizer_edit_trims_and_rejects_blank_name(client, db, event):
+    attendee = make_attendee(db, event["id"], name="Asha")
+
+    # Whitespace-only name is rejected.
+    blank = client.patch(
+        f"/events/{event['id']}/attendees/{attendee['id']}",
+        json={"name": "   "},
+        headers=AUTH,
+    )
+    assert blank.status_code == 400
+
+    # A real name is trimmed.
+    ok = client.patch(
+        f"/events/{event['id']}/attendees/{attendee['id']}",
+        json={"name": "  Maya  "},
+        headers=AUTH,
+    )
+    assert ok.status_code == 200
+    assert ok.json()["name"] == "Maya"
+
+
+def test_organizer_edit_clears_optional_field(client, db, event):
+    attendee = make_attendee(db, event["id"], company="Acme")
+    response = client.patch(
+        f"/events/{event['id']}/attendees/{attendee['id']}",
+        json={"company": ""},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    assert response.json()["company"] is None
+
+
+def test_non_owner_cannot_edit_attendee(client, db, event):
+    attendee = make_attendee(db, event["id"], name="Asha")
+    response = client.patch(
+        f"/events/{event['id']}/attendees/{attendee['id']}",
+        json={"name": "Hacked"},
+        headers=OTHER_AUTH,
+    )
+    assert response.status_code == 403
+
+
 def test_wrong_organizer_cannot_modify_attendee(client, db, event):
     attendee = make_attendee(db, event["id"])
 

@@ -78,10 +78,11 @@ def register_attendee(
     if not code_matches(fetch_access_code(db, event_id), supplied_code):
         raise HTTPException(status_code=403, detail="Incorrect event code")
 
-    # Registration happens AT the venue for the pilot — auto_arrive_on_register
-    # (event config, default true) marks them arrived immediately so the
-    # organizer doesn't tap "arrived" at the door for every person.
-    auto_arrive = bool(event.get("auto_arrive_on_register", True))
+    # auto_arrive_on_register (event config, OFF by default) marks a registrant
+    # arrived immediately. When off — the default — they stay "registered" until
+    # the organizer checks them in (or they self-arrive with the room code), so
+    # the door is a deliberate step rather than implied by registering.
+    auto_arrive = bool(event.get("auto_arrive_on_register", False))
 
     row["event_id"] = event_id
     row["status"] = "arrived" if auto_arrive else "registered"
@@ -348,24 +349,45 @@ def update_attendee(
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
-    """Organizer control panel — mark attendee arrived / left. Event owner only."""
+    """Organizer control panel — mark arrived/left, tag, or fix identity details
+    (name/role/company/looking_for). Event owner only."""
     event = fetch_event_or_404(db, event_id)
     require_event_owner(event, organizer_id)
     attendee = _fetch_attendee(db, event_id, attendee_id)
 
     changes = body.model_dump(exclude_none=True)
+
+    # Trim free-text edits; require non-blank identity, null-out cleared optionals.
+    for key in ("name", "role", "company", "looking_for"):
+        if key in changes and isinstance(changes[key], str):
+            changes[key] = changes[key].strip()
+    for key in ("name", "role"):
+        if key in changes and not changes[key]:
+            raise HTTPException(status_code=400, detail=f"{key.capitalize()} can't be empty")
+    for key in ("company", "looking_for"):
+        if changes.get(key) == "":
+            changes[key] = None
+
     if not changes:
         return attendee
 
     result = db.table("attendees").update(changes).eq("id", attendee_id).execute()
     updated = result.data[0]
+    # Status moves are logged precisely; other edits log only WHICH fields changed
+    # (never the values) to keep PII out of the audit trail.
+    if "status" in changes:
+        action = "attendee.status_changed"
+        metadata = {"from": attendee["status"], "to": updated["status"]}
+    else:
+        action = "attendee.updated"
+        metadata = {"fields": sorted(changes.keys())}
     record_audit(
         db,
-        action="attendee.status_changed",
+        action=action,
         entity_type="attendee",
         actor_user_id=organizer_id,
         event_id=event_id,
         entity_id=attendee_id,
-        metadata={"from": attendee["status"], "to": updated["status"]},
+        metadata=metadata,
     )
     return updated

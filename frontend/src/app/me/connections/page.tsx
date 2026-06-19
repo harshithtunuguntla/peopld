@@ -95,9 +95,19 @@ export default function MyConnectionsPage() {
 
   useEffect(() => {
     if (!user) return;
-    apiFetch<MyConnectionsResp>("/me/connections")
-      .then(setData)
-      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load your connections"));
+    const controller = new AbortController();
+    setError(null);
+    apiFetch<MyConnectionsResp>("/me/connections", { signal: controller.signal })
+      .then((nextData) => {
+        if (controller.signal.aborted) return;
+        setData(nextData);
+        setError(null);
+      })
+      .catch((e) => {
+        if (controller.signal.aborted) return;
+        setError(e instanceof Error ? e.message : "Couldn't load your connections");
+      });
+    return () => controller.abort();
   }, [user]);
 
   const cards = useMemo(() => (data ? groupCrossEvent(data.connections) : []), [data]);
@@ -109,7 +119,13 @@ export default function MyConnectionsPage() {
 
       <div className="relative z-10 mx-auto w-full max-w-3xl px-5 pb-16 pt-7">
         <div className="flex items-center justify-between">
-          <Wordmark size={24} />
+          <Link
+            href="/home"
+            aria-label="Go to Peopld home"
+            className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <Wordmark size={24} />
+          </Link>
           <Link
             href="/home"
             className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"

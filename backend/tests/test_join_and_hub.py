@@ -150,3 +150,22 @@ def test_me_connections_empty_when_never_attended(client, db, event):
     body = res.json()
     assert body["total_people_met"] == 0
     assert body["events_count"] == 0
+
+
+def test_me_connections_survives_missing_optional_bookmarks_table(client, db, event, monkeypatch):
+    _met_in(db, event["id"], "Maya")
+    original_table = db.table
+
+    def table(name):
+        if name == "connection_bookmarks":
+            raise RuntimeError("relation connection_bookmarks does not exist")
+        return original_table(name)
+
+    monkeypatch.setattr(db, "table", table)
+
+    res = client.get("/me/connections", headers=ATTENDEE_AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["total_people_met"] == 1
+    assert body["connections"][0]["name"] == "Maya"
+    assert body["connections"][0]["saved"] is False

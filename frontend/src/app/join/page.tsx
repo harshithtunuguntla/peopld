@@ -48,7 +48,7 @@ export default function JoinPage() {
 
   if (!authChecked) {
     return (
-      <AuthShell>
+      <AuthShell brandHref="/home">
         <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading…
         </div>
@@ -58,14 +58,14 @@ export default function JoinPage() {
 
   if (!user) {
     return (
-      <AuthShell>
+      <AuthShell brandHref="/home">
         <SignInPanel nextPath="/join" />
       </AuthShell>
     );
   }
 
   return (
-    <AuthShell>
+    <AuthShell brandHref="/home">
       <AccessCodeGate onVerify={onVerify} />
     </AuthShell>
   );

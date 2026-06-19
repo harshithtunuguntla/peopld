@@ -1,16 +1,24 @@
-from functools import lru_cache
-from supabase import create_client, Client
+import httpx
+from supabase import Client, create_client
+from supabase.lib.client_options import SyncClientOptions
+
 from app.config import settings
 
 
-@lru_cache(maxsize=1)
 def get_supabase() -> Client:
     """FastAPI dependency providing the Supabase client.
 
-    Lazy singleton — created on first request, not at import time,
-    so tests can override via app.dependency_overrides without env vars.
+    Create a fresh sync client per request. The Supabase/PostgREST sync client
+    owns an httpx connection pool; sharing one singleton across concurrent
+    FastAPI worker threads can leave the underlying HTTP/2 connection in a bad
+    state (`RemoteProtocolError: Server disconnected`). We also force HTTP/1.1
+    for PostgREST calls because the observed failure is in httpcore's HTTP/2
+    stream handling.
     """
     return create_client(
         settings.supabase_url,
         settings.supabase_service_role_key,
+        options=SyncClientOptions(
+            httpx_client=httpx.Client(http2=False, timeout=120),
+        ),
     )

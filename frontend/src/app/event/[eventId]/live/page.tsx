@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { Loader2, WifiOff, RefreshCw } from "lucide-react";
@@ -59,6 +59,12 @@ export default function LiveDashboardPage({ params }: { params: Promise<{ eventI
 function LiveInner({ eventId }: { eventId: string }) {
   const router = useRouter();
   const { state, loading, error, notRegistered, refetch } = useLiveState(eventId);
+  const [manualRefreshVersion, setManualRefreshVersion] = useState(0);
+
+  const refreshLiveState = useCallback(() => {
+    setManualRefreshVersion((version) => version + 1);
+    refetch();
+  }, [refetch]);
 
   // Snapshot says you haven't registered → send you to do that.
   useEffect(() => {
@@ -136,8 +142,17 @@ function LiveInner({ eventId }: { eventId: string }) {
       );
     case "in_round":
       return (
-        <LiveShell eventId={eventId} onRefresh={refetch}>
-          {state.seated ? <RoundView state={state} eventId={eventId} onExpire={refetch} /> : <NotSeated state={state} eventId={eventId} />}
+        <LiveShell eventId={eventId} onRefresh={refreshLiveState}>
+          {state.seated ? (
+            <RoundView
+              state={state}
+              eventId={eventId}
+              onExpire={refetch}
+              refreshVersion={manualRefreshVersion}
+            />
+          ) : (
+            <NotSeated state={state} eventId={eventId} />
+          )}
         </LiveShell>
       );
     case "not_started":

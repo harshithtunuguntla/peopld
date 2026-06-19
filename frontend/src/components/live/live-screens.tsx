@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Loader2, PartyPopper, Sparkles, Heart, UserRound, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star } from "lucide-react";
@@ -25,17 +25,34 @@ import { SponsorShowcase, EventLogo } from "./sponsor-showcase";
  * persist and surface in the rolodex later (mutual = a match); notes are
  * author-private and pre-fill from the snapshot. Both optimistic-ish, with the
  * note saving on blur. */
-function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
+function TablemateRow({
+  mate,
+  eventId,
+  notesOpen,
+  onToggleNotes,
+}: {
+  mate: Tablemate;
+  eventId: string;
+  notesOpen: boolean;
+  onToggleNotes: () => void;
+}) {
   const [liked, setLiked] = useState(mate.liked);
   const [pending, setPending] = useState(false);
 
-  // Private note — collapsed by default; expands inline beneath the row.
-  const [notesOpen, setNotesOpen] = useState(false);
+  // Private note — collapsed by default; the parent keeps only one row open.
   const [note, setNote] = useState(mate.note ?? "");
   const [savedNote, setSavedNote] = useState(mate.note ?? "");
+  const [showSaved, setShowSaved] = useState(false);
   const [noteBusy, setNoteBusy] = useState(false);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasNote = savedNote.trim().length > 0;
   const noteDirty = note.trim() !== savedNote.trim();
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   async function toggle() {
     if (pending) return;
@@ -67,6 +84,9 @@ function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
         body: JSON.stringify({ note: note.trim() }),
       });
       setSavedNote(note.trim());
+      setShowSaved(true);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setShowSaved(false), 1000);
     } catch {
       // keep the text so the user can retry; nothing destructive happened
     } finally {
@@ -92,7 +112,7 @@ function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
-            onClick={() => setNotesOpen((o) => !o)}
+            onClick={onToggleNotes}
             aria-pressed={notesOpen}
             aria-label={hasNote ? `Edit your note about ${mate.name}` : `Add a private note about ${mate.name}`}
             title="Private note — only you see this"
@@ -145,7 +165,10 @@ function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
           </label>
           <textarea
             value={note}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e) => {
+              setNote(e.target.value);
+              if (showSaved) setShowSaved(false);
+            }}
             onBlur={saveNote}
             rows={2}
             maxLength={500}
@@ -158,7 +181,7 @@ function TablemateRow({ mate, eventId }: { mate: Tablemate; eventId: string }) {
               <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Saving…</span>
             ) : noteDirty ? (
               <span>Tap outside to save</span>
-            ) : hasNote ? (
+            ) : showSaved ? (
               <span className="inline-flex items-center gap-1 text-success"><Check className="h-3 w-3" aria-hidden /> Saved</span>
             ) : null}
           </div>
@@ -190,7 +213,13 @@ export function LiveShell({
       <div className="pointer-events-none absolute inset-0 grid-paper-light opacity-[0.12]" aria-hidden />
       <div className="relative z-10 mx-auto flex w-full max-w-md flex-col px-5 pb-16 pt-7">
         <div className="flex items-center justify-between">
-          <Wordmark size={24} />
+          <Link
+            href="/home"
+            aria-label="Go to Peopld home"
+            className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <Wordmark size={24} />
+          </Link>
           <div className="flex items-center gap-3">
             {right}
             {onRefresh && <RefreshButton onRefresh={onRefresh} />}
@@ -776,10 +805,12 @@ export function RoundView({
   state,
   eventId,
   onExpire,
+  refreshVersion = 0,
 }: {
   state: LiveState;
   eventId: string;
   onExpire: () => void;
+  refreshVersion?: number;
 }) {
   const round = state.round!;
   const seat = state.seat!;
@@ -790,6 +821,7 @@ export function RoundView({
   const mates = seat.tablemates;
   const paused = Boolean(round.paused_at);
   const wantedHere = mates.filter((m) => m.wanted);
+  const [openNoteAttendeeId, setOpenNoteAttendeeId] = useState<string | null>(null);
 
   // Play the round-start reveal once per round. sessionStorage-gated by round_id
   // so a mid-round refresh/poll never replays it (it would be jarring), but a
@@ -803,6 +835,14 @@ export function RoundView({
     if (typeof window !== "undefined") sessionStorage.setItem(`peopld:revealed:${round.round_id}`, "1");
     setRevealing(false);
   }, [round.round_id]);
+
+  useEffect(() => {
+    setOpenNoteAttendeeId(null);
+  }, [round.round_id]);
+
+  useEffect(() => {
+    setOpenNoteAttendeeId(null);
+  }, [refreshVersion]);
 
   return (
     <div className="space-y-5">
@@ -863,7 +903,15 @@ export function RoundView({
         ) : (
           <ul className="mt-3 space-y-2.5">
             {mates.map((m) => (
-              <TablemateRow key={m.attendee_id} mate={m} eventId={eventId} />
+              <TablemateRow
+                key={m.attendee_id}
+                mate={m}
+                eventId={eventId}
+                notesOpen={openNoteAttendeeId === m.attendee_id}
+                onToggleNotes={() =>
+                  setOpenNoteAttendeeId((current) => (current === m.attendee_id ? null : m.attendee_id))
+                }
+              />
             ))}
           </ul>
         )}

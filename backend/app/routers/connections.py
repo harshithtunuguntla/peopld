@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 
@@ -9,6 +11,7 @@ router = APIRouter(
     prefix="/events/{event_id}/attendees/{attendee_id}/connections",
     tags=["connections"],
 )
+logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=ConnectionsResponse)
@@ -78,34 +81,42 @@ def build_connection_entries(db: Client, event: dict, attendee: dict) -> Connect
     my_tables = {(m["round_id"], m["table_number"]) for m in my_assignments}
 
     # Likes both directions (one query each): who I liked, and who liked me.
-    likes = (
-        db.table("connection_likes").select("*").eq("event_id", event_id).execute().data or []
+    likes = _optional_signal_rows(
+        lambda: db.table("connection_likes").select("*").eq("event_id", event_id).execute().data,
+        table_name="connection_likes",
+        event_id=event_id,
     )
     i_liked = {str(l["liked_attendee_id"]) for l in likes if str(l["liker_attendee_id"]) == str(attendee_id)}
     liked_me = {str(l["liker_attendee_id"]) for l in likes if str(l["liked_attendee_id"]) == str(attendee_id)}
 
     # My private notes about people, keyed by target. (One query.)
-    notes = (
-        db.table("connection_notes")
-        .select("target_attendee_id, note")
-        .eq("event_id", event_id)
-        .eq("author_attendee_id", str(attendee_id))
-        .execute()
-        .data
-        or []
+    notes = _optional_signal_rows(
+        lambda: (
+            db.table("connection_notes")
+            .select("target_attendee_id, note")
+            .eq("event_id", event_id)
+            .eq("author_attendee_id", str(attendee_id))
+            .execute()
+            .data
+        ),
+        table_name="connection_notes",
+        event_id=event_id,
     )
     notes_by_target = {str(n["target_attendee_id"]): n["note"] for n in notes}
 
     # People I've explicitly saved (bookmarked) — my shortlist, for the "Saved"
     # filter. Owner-private. (One query.)
-    bookmarks = (
-        db.table("connection_bookmarks")
-        .select("target_attendee_id")
-        .eq("event_id", event_id)
-        .eq("owner_attendee_id", str(attendee_id))
-        .execute()
-        .data
-        or []
+    bookmarks = _optional_signal_rows(
+        lambda: (
+            db.table("connection_bookmarks")
+            .select("target_attendee_id")
+            .eq("event_id", event_id)
+            .eq("owner_attendee_id", str(attendee_id))
+            .execute()
+            .data
+        ),
+        table_name="connection_bookmarks",
+        event_id=event_id,
     )
     saved_ids = {str(b["target_attendee_id"]) for b in bookmarks}
 
@@ -156,3 +167,17 @@ def build_connection_entries(db: Client, event: dict, attendee: dict) -> Connect
         matches_count=sum(1 for e in entries if e.mutual),
         connections=entries,
     )
+
+
+def _optional_signal_rows(load, *, table_name: str, event_id: str) -> list[dict]:
+    """Best-effort read for auxiliary rolodex signals.
+
+    The core rolodex is table assignments + attendee profiles. Likes, notes, and
+    bookmarks are useful polish, but an out-of-date local DB should not turn the
+    whole connections page into a 500.
+    """
+    try:
+        return load() or []
+    except Exception:
+        logger.warning("optional rolodex signal unavailable", extra={"table": table_name, "event_id": event_id})
+        return []

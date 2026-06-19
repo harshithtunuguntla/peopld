@@ -56,6 +56,12 @@ The detailed feature scope, data models, API endpoints, and tech stack are defin
 
 ---
 
+## Flow Guardian Agent
+
+Before non-trivial implementation work, use `.agents/flow-guardian.md` as the vendor-neutral change-safety agent. It checks whether a user's request or developer-planned change alters existing app flows, expands scope, increases load/cost, or changes privacy/reliability boundaries. If it finds a meaningful behavior, cost, or risk tradeoff, ask the user for confirmation before coding.
+
+---
+
 ## Strategic Direction
 
 This prototype validates the core of a larger Event Intelligence Platform.

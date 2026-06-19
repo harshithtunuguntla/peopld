@@ -198,6 +198,7 @@ export function LiveShell({
   right,
   eventId,
   onRefresh,
+  className,
 }: {
   children: ReactNode;
   right?: ReactNode;
@@ -206,12 +207,13 @@ export function LiveShell({
    *  realtime doorbell doesn't fire, so the attendee can re-pull their state
    *  without reloading the whole page. */
   onRefresh?: () => void;
+  className?: string;
 }) {
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
       <AuroraBackground intensity={0.4} />
       <div className="pointer-events-none absolute inset-0 grid-paper-light opacity-[0.12]" aria-hidden />
-      <div className="relative z-10 mx-auto flex w-full max-w-md flex-col px-5 pb-16 pt-7">
+      <div className={cn("relative z-10 mx-auto flex w-full max-w-md flex-col px-5 pb-16 pt-7", className)}>
         <div className="flex items-center justify-between">
           <Link
             href="/home"

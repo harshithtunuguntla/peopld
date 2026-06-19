@@ -100,13 +100,13 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
   }
 
   return (
-    <LiveShell eventId={eventId} right={<Link href="/home" className="text-xs text-muted-foreground transition-colors hover:text-foreground">Home</Link>}>
+    <LiveShell eventId={eventId} className="max-w-5xl">
       {/* Hero */}
       <motion.header
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="text-center"
+        className="mx-auto max-w-2xl text-center"
       >
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-accent-foreground">
           <PartyPopper className="h-7 w-7" aria-hidden />
@@ -115,6 +115,9 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
         <h1 className="mt-2 text-balance font-display text-[clamp(28px,8vw,40px)] leading-[1.05] tracking-[-0.02em] text-foreground">
           Your night at {eventName || "the event"}
         </h1>
+        <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-muted-foreground sm:text-base">
+          A quick wrap of who you met, who matched, and where to continue the conversations.
+        </p>
         {data && people.length > 0 && (
           <div className="mt-4 flex items-center justify-center">
             <div className="flex -space-x-2">
@@ -133,7 +136,7 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
       )}
 
       {!data && !error && (
-        <div className="mt-8 grid grid-cols-2 gap-3">
+        <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="h-28 skeleton rounded-3xl border border-border" />
           ))}
@@ -143,7 +146,7 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
       {data && (
         <>
           {/* The night in numbers */}
-          <div className="mt-7 grid grid-cols-2 gap-3">
+          <div className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <RecapStat icon={Users} value={data.total_people_met} label={data.total_people_met === 1 ? "person met" : "people met"} bg={COLORS.coral} delay={0.05} />
             <RecapStat icon={Sparkles} value={data.rounds_count} label={data.rounds_count === 1 ? "round" : "rounds"} bg={COLORS.ice} delay={0.1} />
             <RecapStat icon={HandHeart} value={heartsGiven} label="hearts sent" bg={COLORS.gold} delay={0.15} />
@@ -156,7 +159,7 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.24, duration: 0.4 }}
-              className="mt-7 rounded-3xl border border-accent/30 bg-accent/[0.06] p-5"
+              className="mt-7 rounded-3xl border border-accent/30 bg-accent/[0.06] p-4 sm:p-5"
             >
               <div className="flex items-center gap-2">
                 <UserCheck className="h-4 w-4 text-accent" aria-hidden />
@@ -165,7 +168,7 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
               <p className="mt-1 text-sm text-muted-foreground">
                 {matches.length} {matches.length === 1 ? "person" : "people"} picked each other before the event.
               </p>
-              <ul className="mt-4 space-y-2.5">
+              <ul className="mt-4 grid gap-2.5 lg:grid-cols-2">
                 {matches.map((m) => (
                   <li key={m.attendee_id} className="flex items-center gap-3 rounded-2xl border border-border bg-card/50 p-3">
                     <Avatar name={m.name} seed={m.attendee_id} src={m.avatar_url} size={40} />
@@ -206,7 +209,7 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.28, duration: 0.4 }}
-            className="mt-7"
+            className="mx-auto mt-7 max-w-xl"
           >
             {people.length > 0 ? (
               <Link href={`/event/${eventId}/connections`} className={cn(buttonVariants({ variant: "accent", size: "lg" }), "glow-ember w-full gap-2")}>

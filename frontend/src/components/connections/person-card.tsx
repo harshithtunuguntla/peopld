@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Heart, Globe, Linkedin, StickyNote, Loader2, Check, CalendarDays, Bookmark } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
@@ -222,7 +222,15 @@ function NoteEditor({ eventId, targetId, initial }: { eventId: string; targetId:
   const [open, setOpen] = useState(Boolean(initial));
   const [note, setNote] = useState(initial ?? "");
   const [saved, setSaved] = useState(initial ?? "");
+  const [showSaved, setShowSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   if (!open) {
     return (
@@ -245,6 +253,9 @@ function NoteEditor({ eventId, targetId, initial }: { eventId: string; targetId:
         body: JSON.stringify({ note: note.trim() }),
       });
       setSaved(note.trim());
+      setShowSaved(true);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setShowSaved(false), 1000);
     } catch {
       // keep the text so the user can retry; nothing destructive happened
     } finally {
@@ -260,7 +271,10 @@ function NoteEditor({ eventId, targetId, initial }: { eventId: string; targetId:
       </label>
       <textarea
         value={note}
-        onChange={(e) => setNote(e.target.value)}
+        onChange={(e) => {
+          setNote(e.target.value);
+          if (showSaved) setShowSaved(false);
+        }}
         onBlur={save}
         rows={2}
         maxLength={500}
@@ -272,7 +286,7 @@ function NoteEditor({ eventId, targetId, initial }: { eventId: string; targetId:
           <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Saving…</span>
         ) : dirty ? (
           <span>Tap outside to save</span>
-        ) : saved ? (
+        ) : showSaved ? (
           <span className="inline-flex items-center gap-1 text-success"><Check className="h-3 w-3" aria-hidden /> Saved</span>
         ) : null}
       </div>

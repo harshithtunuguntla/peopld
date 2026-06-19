@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { MapPin } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Wordmark } from "@/components/brand/wordmark";
@@ -14,6 +15,8 @@ interface AuthShellProps {
   attendeeCount?: number;
   /** Eyebrow above the title. */
   eyebrow?: string;
+  /** Optional destination for the Peopld mark in the top-left. */
+  brandHref?: string;
 }
 
 /**
@@ -29,14 +32,27 @@ export function AuthShell({
   eventMeta,
   attendeeCount,
   eyebrow = "You're invited",
+  brandHref,
 }: AuthShellProps) {
+  const mark = <Wordmark size={26} />;
+
   return (
     <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-background px-5 py-12 text-foreground">
       <AuroraBackground intensity={0.5} />
       <div className="pointer-events-none absolute inset-0 grid-paper-light opacity-[0.15]" aria-hidden />
 
       <main className="relative z-10 w-full max-w-md">
-        <Wordmark size={26} className="mb-8" />
+        {brandHref ? (
+          <Link
+            href={brandHref}
+            aria-label="Go to Peopld home"
+            className="mb-8 inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            {mark}
+          </Link>
+        ) : (
+          <div className="mb-8">{mark}</div>
+        )}
 
         {eventName && (
           <header className="mb-7">

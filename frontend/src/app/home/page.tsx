@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { Loader2, LogOut, CalendarDays, KeyRound, Users, ArrowRight } from "lucide-react";
@@ -9,7 +10,6 @@ import { AuthShell, SignInPanel } from "@/components/auth";
 import { EventCard, type EventCardData } from "@/components/home/event-card";
 import { JoinByCodeDialog } from "@/components/attendee/join-by-code-dialog";
 import { Wordmark } from "@/components/brand/wordmark";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { apiFetch } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
@@ -106,9 +106,14 @@ export default function HomePage() {
       <div className="relative z-10 mx-auto w-full max-w-3xl px-5 pb-16 pt-7">
         {/* top bar */}
         <div className="flex items-center justify-between">
-          <Wordmark size={24} />
+          <Link
+            href="/home"
+            aria-label="Go to Peopld home"
+            className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <Wordmark size={24} />
+          </Link>
           <div className="flex items-center gap-2">
-            <ThemeToggle />
             <button
               type="button"
               onClick={() => supabase.auth.signOut()}

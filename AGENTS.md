@@ -78,3 +78,19 @@ The platform succeeds when:
 * AI icebreakers make conversations start faster
 * Attendees leave with a digital record of everyone they met
 * Outsiders who see the product want to use it for their own events
+
+---
+
+## Reusable Guardrail Agent
+
+Before implementing any change that may affect existing product flows, live-event
+reliability, privacy/security boundaries, infrastructure load, or LLM/API cost,
+run the vendor-neutral **Flow Sentinel** agent:
+
+→ `.agents/flow-sentinel/AGENT.md`
+
+Flow Sentinel works across Codex, Claude, Gemini, Cursor, and other LLM tools. It
+checks whether the user's prompt or developer request changes the current app
+flow, expands scope beyond `PRODUCT.md`, increases unwanted load/cost, or weakens
+security and reliability. If the risk is material, it must ask the user for
+confirmation before implementation.

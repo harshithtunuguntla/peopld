@@ -44,7 +44,7 @@ export default function OrganizerLoginPage() {
               <Lock className="h-5 w-5" aria-hidden />
             </div>
             <h1 className="font-display text-xl text-foreground">Organizer sign in</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Run your event&apos;s control room.</p>
+            <p className="mt-1 text-sm text-muted-foreground">Run your event&apos;s command center.</p>
           </header>
 
           <form onSubmit={handleLogin} className="flex flex-col gap-4">

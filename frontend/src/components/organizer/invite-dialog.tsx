@@ -102,7 +102,7 @@ export function InviteDialog({
             // eslint-disable-next-line @next/next/no-img-element
             <img src={dataUrl} alt="QR code that opens the join page" width={224} height={224} className="h-56 w-56" />
           ) : (
-            <div className="h-56 w-56 animate-pulse rounded-lg bg-muted" />
+            <div className="h-56 w-56 skeleton rounded-lg" />
           )}
         </div>
 

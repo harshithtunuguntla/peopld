@@ -247,7 +247,7 @@ function Section({
 }
 
 function Skeleton() {
-  return <div className="h-[112px] animate-pulse rounded-2xl border border-border bg-card/40" />;
+  return <div className="h-[112px] skeleton rounded-2xl border border-border" />;
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

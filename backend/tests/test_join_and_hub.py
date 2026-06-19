@@ -78,15 +78,19 @@ def test_attendee_cannot_view_code(client, db, event):
     assert res.status_code in (401, 403)
 
 
-def test_regenerate_mints_new_unique_code(client, db, event):
-    _set_code(db, event["id"], "OLD123")
+def test_generate_works_once_then_is_locked(client, db, event):
+    # Event created open -> first 'regenerate' mints the code (the one-time generate)
     res = client.post(f"/events/{event['id']}/access-code/regenerate", headers=AUTH)
     assert res.status_code == 200
-    new_code = res.json()["code"]
-    assert new_code and new_code != "OLD123"
-    # old code stops working, new one resolves
-    assert client.post("/events/join", json={"code": "OLD123"}).status_code == 404
-    assert client.post("/events/join", json={"code": new_code}).status_code == 200
+    code = res.json()["code"]
+    assert code
+    assert client.post("/events/join", json={"code": code}).status_code == 200
+    # A second call is rejected — the code is permanent, never rotated
+    res2 = client.post(f"/events/{event['id']}/access-code/regenerate", headers=AUTH)
+    assert res2.status_code == 409
+    # ...and the original code still resolves, unchanged
+    assert client.get(f"/events/{event['id']}/access-code", headers=AUTH).json()["code"] == code
+    assert client.post("/events/join", json={"code": code}).status_code == 200
 
 
 def test_other_organizer_cannot_regenerate(client, db, event):
@@ -94,13 +98,13 @@ def test_other_organizer_cannot_regenerate(client, db, event):
     assert res.status_code == 403
 
 
-def test_clear_code_opens_event(client, db, event):
+def test_clear_code_is_blocked_once_set(client, db, event):
     _set_code(db, event["id"], "MIXER7")
     res = client.delete(f"/events/{event['id']}/access-code", headers=AUTH)
-    assert res.status_code == 200
-    assert res.json()["code"] is None
-    assert client.get(f"/events/{event['id']}/access-code", headers=AUTH).json()["code"] is None
-    assert client.post("/events/join", json={"code": "MIXER7"}).status_code == 404
+    assert res.status_code == 409
+    # the code is permanent — still present and still resolving
+    assert client.get(f"/events/{event['id']}/access-code", headers=AUTH).json()["code"] == "MIXER7"
+    assert client.post("/events/join", json={"code": "MIXER7"}).status_code == 200
 
 
 # --- GET /me/connections (cross-event rolodex) ---

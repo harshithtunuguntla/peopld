@@ -60,6 +60,9 @@ def my_connections(
     return MyConnectionsResponse(
         total_people_met=len({str(e.attendee_id) for e in entries}),
         events_count=len(events_with_people),
-        matches_count=sum(1 for e in entries if e.mutual),
+        # Unique mutual people per event (dedupe by event + person), so meeting the
+        # same match in two rounds counts once, while the same person matched at
+        # two different events counts for each event.
+        matches_count=len({(str(e.event_id), str(e.attendee_id)) for e in entries if e.mutual}),
         connections=entries,
     )

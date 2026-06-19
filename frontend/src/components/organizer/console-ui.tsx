@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { COLORS } from "@/lib/design/colors";
 import { TONE } from "@/lib/design/status";
@@ -10,6 +10,20 @@ import { TONE } from "@/lib/design/status";
 
 // Maps to backend/app/models/schemas.py EventResponse status
 export type EventStatus = "upcoming" | "active" | "ended";
+
+/* ----------------------------- Loading ----------------------------- */
+
+/** Centered spinner for the "auth not resolved yet" state, shared across every
+ *  console page so the loading treatment is identical everywhere. (Data-loading
+ *  states use layout-shaped skeletons in each page.) */
+export function ConsoleLoading({ label = "Loading…" }: { label?: string }) {
+  return (
+    <div className="flex flex-col items-center gap-3 pt-16 text-sm text-muted-foreground">
+      <Loader2 className="h-6 w-6 animate-spin" aria-hidden />
+      {label}
+    </div>
+  );
+}
 
 /* ----------------------------- Brand mark ----------------------------- */
 

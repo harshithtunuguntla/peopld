@@ -287,7 +287,7 @@ export default function DirectoryPage({ params }: { params: Promise<{ eventId: s
         {!data && !error && (
           <div className="mt-7 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {[0, 1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="h-44 animate-pulse rounded-2xl border border-border bg-card/40" />
+              <div key={i} className="h-44 skeleton rounded-2xl border border-border" />
             ))}
           </div>
         )}

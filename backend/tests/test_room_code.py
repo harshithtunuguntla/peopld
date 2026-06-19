@@ -58,7 +58,7 @@ def test_regenerate_opens_checkin(client, db, event):
     res = client.post(f"/events/{event['id']}/room-code/regenerate", headers=AUTH)
     assert res.status_code == 200
     code = res.json()["code"]
-    assert code and len(code) == 4
+    assert code and len(code) == 6
     # persisted: a fresh GET returns the same code
     assert client.get(f"/events/{event['id']}/room-code", headers=AUTH).json()["code"] == code
 

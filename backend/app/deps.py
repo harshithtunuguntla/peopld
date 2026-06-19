@@ -210,10 +210,11 @@ def fetch_room_code(db: Client, event_id: str) -> str | None:
 # Unambiguous alphabet — no I/L/O/0/1, so codes are easy to read aloud and type.
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 CODE_LENGTH = 6
-# Room codes are entered at a busy door, so they're shorter than the join code.
-# They're only ever matched within one event (the arrive endpoint is event-scoped),
-# so they need no global uniqueness — just a quick, readable string.
-ROOM_CODE_LENGTH = 4
+# Room codes are entered at a busy door. They're only ever matched within one
+# event (the arrive endpoint is event-scoped), so they need no global uniqueness
+# — just a quick, readable string. 6 chars (up from 4) for a larger keyspace so a
+# code can't be casually guessed by someone outside the room.
+ROOM_CODE_LENGTH = 6
 
 
 def generate_access_code(db: Client, length: int = CODE_LENGTH) -> str:

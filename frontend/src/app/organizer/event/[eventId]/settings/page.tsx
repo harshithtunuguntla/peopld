@@ -59,6 +59,7 @@ interface OrgEvent {
   target_rounds: number | null;
   round_topics: string[];
   logo_url: string | null;
+  cover_image_url: string | null;
   show_event_logo: boolean;
   status: EventStatus;
   requires_code: boolean;
@@ -83,8 +84,9 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
   const [minutes, setMinutes] = useState("");
   const [targetRounds, setTargetRounds] = useState("");
   const [topics, setTopics] = useState<string[]>([]);
-  const [autoArrive, setAutoArrive] = useState(true);
+  const [autoArrive, setAutoArrive] = useState(false); // off by default; overwritten with the event's real value on load
   const [logoUrl, setLogoUrl] = useState("");
+  const [coverImageUrl, setCoverImageUrl] = useState("");
   const [showLogo, setShowLogo] = useState(true);
   const [sponsors, setSponsors] = useState<SponsorDraft[]>([]);
 
@@ -115,6 +117,7 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
         setTopics(ev.round_topics ?? []);
         setAutoArrive(ev.auto_arrive_on_register);
         setLogoUrl(ev.logo_url ?? "");
+        setCoverImageUrl(ev.cover_image_url ?? "");
         setShowLogo(ev.show_event_logo);
         // Sponsors live in their own table — load them separately.
         apiFetch<{ sponsors: SponsorApi[] }>(`/events/${eventId}/sponsors`)
@@ -158,6 +161,7 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
           target_rounds: targetRounds.trim() ? Number(targetRounds) : null,
           round_topics: topics.slice(0, agendaRows).map((t) => (t ?? "").trim()),
           logo_url: logoUrl.trim(), // "" clears the logo
+          cover_image_url: coverImageUrl.trim(), // "" clears the cover (back to color)
           show_event_logo: showLogo,
         }),
       });
@@ -199,8 +203,8 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
       <ConsoleShell>
         <EventHeader eventId={eventId} name={event?.name} status={event?.status} active="settings" />
         <div className="space-y-4">
-          <div className="h-48 animate-pulse rounded-2xl border border-border bg-card/50" />
-          <div className="h-64 animate-pulse rounded-2xl border border-border bg-card/40" />
+          <div className="h-48 skeleton rounded-2xl border border-border" />
+          <div className="h-64 skeleton rounded-2xl border border-border" />
         </div>
       </ConsoleShell>
     );
@@ -358,6 +362,20 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
                 )}
               </Field>
               <LogoPreview url={logoUrl} />
+            </div>
+            <div className="mt-4">
+              <Field label="Cover image URL" name="cover-url" hint="Optional — the hero image on this event's card. Blank = an auto color.">
+                {(p) => (
+                  <Input
+                    {...p}
+                    type="url"
+                    inputMode="url"
+                    placeholder="https://…/cover.jpg"
+                    value={coverImageUrl}
+                    onChange={(e) => setCoverImageUrl(e.target.value)}
+                  />
+                )}
+              </Field>
             </div>
           </div>
 

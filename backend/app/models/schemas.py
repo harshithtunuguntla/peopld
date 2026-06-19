@@ -37,11 +37,12 @@ class EventCreate(BaseModel):
     num_tables: int = Field(ge=1)
     seats_per_table: int = Field(ge=3)  # algorithm minimum table size is 3
     default_round_duration_seconds: int = Field(default=300, gt=0)
-    auto_arrive_on_register: bool = True  # on-site registration marks people arrived
+    auto_arrive_on_register: bool = False  # OFF by default: registering ≠ arrived. The organizer checks people in (or they self-arrive with the room code) so the door is deliberate.
     target_rounds: Optional[int] = Field(default=None, ge=1)  # intended round count (planning horizon)
     round_topics: List[str] = Field(default_factory=list)  # organizer-authored agenda; index i = round i+1's theme
     logo_url: Optional[str] = None          # event/host brand logo (image URL); shown when show_event_logo
     show_event_logo: bool = True            # organizer toggle: co-brand vs sponsors-only
+    cover_image_url: Optional[str] = None   # event card hero image (URL only, like logo_url — no upload). Empty = deterministic color.
     access_code: Optional[str] = None  # secret registration gate; None = open event. Stored in event_access_codes, never echoed back.
 
     @field_validator("round_topics")
@@ -66,6 +67,7 @@ class EventUpdate(BaseModel):
     round_topics: Optional[List[str]] = None  # None = leave the agenda untouched; [] clears it to defaults
     logo_url: Optional[str] = None            # None = leave untouched; "" clears the logo
     show_event_logo: Optional[bool] = None    # None = leave untouched
+    cover_image_url: Optional[str] = None     # None = leave untouched; "" clears it (back to color)
     access_code: Optional[str] = None  # set "" to clear the gate, a value to (re)set it
 
     @field_validator("round_topics")
@@ -89,10 +91,12 @@ class EventResponse(BaseModel):
     round_topics: List[str] = Field(default_factory=list)  # organizer-authored agenda (empty = canonical defaults)
     logo_url: Optional[str] = None
     show_event_logo: bool = True
+    cover_image_url: Optional[str] = None
     organizer_id: UUID
     status: Literal["upcoming", "active", "ended"]
     created_at: datetime
     requires_code: bool = False  # derived: does this event have an access code? (the code itself is never sent)
+    is_archived: bool = False  # derived: organizer soft-archived it (hidden from the dashboard by default)
 
 
 class EventStats(BaseModel):
@@ -181,10 +185,15 @@ class WalkInCreate(BaseModel):
 
 
 class AttendeeUpdate(BaseModel):
-    """Organizer control-panel edits: move someone arrived/left, or tag them
-    (attendee/speaker/host) for the directory filters."""
+    """Organizer control-panel edits: move someone arrived/left, tag them
+    (attendee/speaker/host) for the directory filters, or fix their identity
+    details (typos from hurried walk-in entry or self-registration)."""
     status: Optional[Literal["registered", "arrived", "left"]] = None
     tag: Optional[Literal["attendee", "speaker", "host"]] = None
+    name: Optional[str] = Field(default=None, min_length=1)
+    role: Optional[str] = Field(default=None, min_length=1)
+    company: Optional[str] = None
+    looking_for: Optional[str] = None
 
 
 class AttendeeSelfUpdate(BaseModel):
@@ -438,6 +447,7 @@ class LiveStateResponse(BaseModel):
     round_seconds: int  # default round duration → "N rounds · M min"
     round_topics: List[str] = Field(default_factory=list)  # organizer-authored agenda; index i = round i+1's theme
     seated: bool  # false during a round = no table for you (arrived late / not arrived)
+    rounds_completed: int = 0  # finished rounds → "Round X of N complete · next up Round X+1"
     roster: WaitingRoster  # who's already in the room (waiting-room social proof)
     round: Optional[LiveRound] = None
     seat: Optional[LiveSeat] = None
@@ -561,12 +571,40 @@ class SponsorsResponse(BaseModel):
 
 # --- Analytics ---
 
+class RoundPerf(BaseModel):
+    """Per-round stats for the recap bar chart."""
+    round_number: int
+    seated: int            # people seated that round
+    introductions: int     # NEW unique pairs created that round (not seen before)
+
+
+class TopConnector(BaseModel):
+    attendee_id: UUID
+    name: str
+    count: int             # unique distinct people this person met across the event
+
+
 class EventAnalytics(BaseModel):
     total_attendees: int
     rounds_completed: int
     avg_unique_people_met: float
-    total_likes: int = 0     # one-directional likes cast across the whole event
-    total_matches: int = 0   # mutual likes (counted once per pair)
+    total_likes: int = 0          # one-directional likes cast across the whole event
+    total_matches: int = 0        # mutual likes (counted once per pair)
+    total_introductions: int = 0  # unique pairs of people who shared a table at least once
+    pct_room_met: int = 0         # avg % of the rest of the room each person met
+    round_performance: List["RoundPerf"] = Field(default_factory=list)
+    top_connectors: List["TopConnector"] = Field(default_factory=list)
+
+
+class DashboardSummary(BaseModel):
+    """Organizer dashboard bento — honest aggregates across all of my events."""
+    events_total: int
+    events_live: int
+    events_upcoming: int
+    events_completed: int
+    guests_total: int          # attendees across all my events
+    connections_total: int     # mutual matches across all my events (per pair)
+    introductions_total: int   # unique table-pairings across all my events
 
 
 # --- Live stats (organizer "room pulse" during the event) ---
@@ -579,3 +617,4 @@ class LiveStats(BaseModel):
     likes_count: int      # likes cast so far
     matches_count: int    # mutual likes so far (per pair)
     active_round_number: Optional[int] = None
+    rounds_completed: int = 0  # finished rounds → drives the between-rounds "Round X of N" status

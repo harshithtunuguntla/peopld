@@ -135,7 +135,7 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
       {!data && !error && (
         <div className="mt-8 grid grid-cols-2 gap-3">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-28 animate-pulse rounded-3xl border border-border bg-card/40" />
+            <div key={i} className="h-28 skeleton rounded-3xl border border-border" />
           ))}
         </div>
       )}

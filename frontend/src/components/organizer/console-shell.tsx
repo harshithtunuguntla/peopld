@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
+  CalendarDays,
   Settings,
   Plus,
   Menu,
@@ -31,6 +32,7 @@ type NavItem = { href: string; label: string; icon: React.ElementType; exact?: b
  */
 const GLOBAL_NAV: NavItem[] = [
   { href: "/organizer/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { href: "/organizer/events", label: "Events", icon: CalendarDays },
   { href: "/organizer/settings", label: "Settings", icon: Settings },
 ];
 
@@ -176,7 +178,7 @@ export function ConsoleShell({
             <div className="ml-auto flex items-center gap-2">
               <ThemeToggle />
               <Link
-                href="/organizer/dashboard"
+                href="/organizer/events?new=1"
                 className="inline-flex h-9 items-center gap-1.5 rounded-full bg-accent px-4 text-sm font-medium text-accent-foreground transition-transform hover:-translate-y-0.5"
               >
                 <Plus className="h-4 w-4" />

@@ -97,6 +97,7 @@ async def get_live_state(
     rounds = rounds_res.data or []
     active = next((r for r in rounds if r["status"] == "active"), None)
     any_round = bool(rounds)
+    rounds_completed = sum(1 for r in rounds if r["status"] == "completed")
 
     now = datetime.now(timezone.utc)
     event_status = event["status"]
@@ -266,6 +267,7 @@ async def get_live_state(
         round_seconds=event.get("default_round_duration_seconds") or 300,
         round_topics=event.get("round_topics") or [],
         seated=seated,
+        rounds_completed=rounds_completed,
         roster=roster,
         round=round_payload,
         seat=seat_payload,

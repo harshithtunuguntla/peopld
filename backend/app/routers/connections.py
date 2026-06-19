@@ -164,7 +164,11 @@ def build_connection_entries(db: Client, event: dict, attendee: dict) -> Connect
     return ConnectionsResponse(
         total_people_met=len(people_met),
         rounds_count=len({rid for rid, _ in my_tables}),
-        matches_count=sum(1 for e in entries if e.mutual),
+        # Count unique mutual PEOPLE, not entries. `entries` has one row per
+        # encounter (round+table), so sitting with the same match across two
+        # rounds would otherwise count them twice. The frontend already collapses
+        # the list by person — the count must too.
+        matches_count=len({str(e.attendee_id) for e in entries if e.mutual}),
         connections=entries,
     )
 

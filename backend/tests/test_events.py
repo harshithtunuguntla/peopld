@@ -166,6 +166,10 @@ def test_analytics_empty_event(client, event):
         "avg_unique_people_met": 0.0,
         "total_likes": 0,
         "total_matches": 0,
+        "total_introductions": 0,
+        "pct_room_met": 0,
+        "round_performance": [],
+        "top_connectors": [],
     }
 
 
@@ -196,6 +200,46 @@ def test_analytics_computes_unique_people_met(client, db, event):
     assert body["total_attendees"] == 4
     assert body["rounds_completed"] == 2
     assert body["avg_unique_people_met"] == 2.0
+    # 4 pairs met in R1 (A-B, C-D) + R2 (A-C, B-D) = 4 unique introductions, all new.
+    assert body["total_introductions"] == 4
+    # Each of 4 people met 2 of the other 3 → 2/3 ≈ 67%.
+    assert body["pct_room_met"] == 67
+    perf = {p["round_number"]: p for p in body["round_performance"]}
+    assert perf[1]["seated"] == 4 and perf[1]["introductions"] == 2
+    assert perf[2]["introductions"] == 2  # all-new pairings (no repeats)
+    assert len(body["top_connectors"]) == 4
+    assert all(c["count"] == 2 for c in body["top_connectors"])
+
+
+def test_dashboard_summary_aggregates_owner_events(client, db, event):
+    # event fixture belongs to AUTH. Add 4 attendees, one completed round seating
+    # two pairs, and one mutual like.
+    a = make_attendee(db, event["id"], name="A")
+    b = make_attendee(db, event["id"], name="B")
+    make_attendee(db, event["id"], name="C")
+    make_attendee(db, event["id"], name="D")
+    r1 = make_round(db, event["id"], round_number=1, status="completed")
+    make_assignment(db, event["id"], r1["id"], a["id"], 1)
+    make_assignment(db, event["id"], r1["id"], b["id"], 1)
+    db.table("connection_likes").insert(
+        {"event_id": event["id"], "liker_attendee_id": a["id"], "liked_attendee_id": b["id"]}
+    ).execute()
+    db.table("connection_likes").insert(
+        {"event_id": event["id"], "liker_attendee_id": b["id"], "liked_attendee_id": a["id"]}
+    ).execute()
+
+    body = client.get("/events/dashboard-summary", headers=AUTH).json()
+    assert body["events_total"] == 1
+    assert body["guests_total"] == 4
+    assert body["introductions_total"] == 1  # one pair (A,B) shared a table
+    assert body["connections_total"] == 1    # one mutual match
+
+
+def test_dashboard_summary_is_owner_scoped(client, db, event):
+    # Another organizer sees none of AUTH's events.
+    body = client.get("/events/dashboard-summary", headers=OTHER_AUTH).json()
+    assert body["events_total"] == 0
+    assert body["guests_total"] == 0
 
 
 # --- Access code gate + public stats (Step 7) ---
@@ -227,15 +271,24 @@ def test_verify_code_open_event_always_valid(client):
     assert client.post(f"/events/{open_event['id']}/verify-code", json={"code": ""}).json()["valid"] is True
 
 
-def test_update_event_can_set_and_clear_code(client):
+def test_update_event_sets_code_once_then_locks(client):
     event = client.post("/events", json=EVENT_PAYLOAD, headers=AUTH).json()
     eid = event["id"]
 
+    # First set (event was open) is allowed.
     set_resp = client.patch(f"/events/{eid}", json={"access_code": "OPENSESAME"}, headers=AUTH)
     assert set_resp.json()["requires_code"] is True
 
+    # Changing it afterwards is rejected — the code is permanent once set.
+    change_resp = client.patch(f"/events/{eid}", json={"access_code": "NEWCODE"}, headers=AUTH)
+    assert change_resp.status_code == 409
+
+    # Clearing it is also rejected.
     clear_resp = client.patch(f"/events/{eid}", json={"access_code": ""}, headers=AUTH)
-    assert clear_resp.json()["requires_code"] is False
+    assert clear_resp.status_code == 409
+
+    # The original code is untouched.
+    assert client.get(f"/events/{eid}/access-code", headers=AUTH).json()["code"] == "OPENSESAME"
 
 
 def test_event_stats_counts_attendees(client, db, event):
@@ -299,3 +352,57 @@ def test_list_events_sorted_soonest_first(client, db):
 
 def test_list_events_empty(client):
     assert client.get("/events").json() == []
+
+
+# --- F4: soft-archive ---
+
+def _create_event(client):
+    return client.post("/events", json=EVENT_PAYLOAD, headers=AUTH).json()
+
+
+def test_archive_hides_from_dashboard_and_unarchive_restores(client):
+    keep = _create_event(client)
+    drop = client.post("/events", json={**EVENT_PAYLOAD, "name": "Test run"}, headers=AUTH).json()
+
+    archived = client.post(f"/events/{drop['id']}/archive", headers=AUTH)
+    assert archived.status_code == 200
+    assert archived.json()["is_archived"] is True
+
+    # Hidden from the default dashboard listing.
+    names = {e["name"] for e in client.get("/events/mine", headers=AUTH).json()}
+    assert names == {keep["name"]}
+
+    # Visible (and flagged) when explicitly including archived.
+    with_archived = client.get("/events/mine?include_archived=true", headers=AUTH).json()
+    by_name = {e["name"]: e for e in with_archived}
+    assert by_name["Test run"]["is_archived"] is True
+    assert by_name[keep["name"]]["is_archived"] is False
+
+    # Unarchive brings it back to the default listing.
+    restored = client.post(f"/events/{drop['id']}/unarchive", headers=AUTH)
+    assert restored.status_code == 200
+    assert restored.json()["is_archived"] is False
+    names = {e["name"] for e in client.get("/events/mine", headers=AUTH).json()}
+    assert names == {keep["name"], "Test run"}
+
+
+def test_cannot_archive_a_live_event(client):
+    ev = _create_event(client)
+    client.patch(f"/events/{ev['id']}", json={"status": "active"}, headers=AUTH)
+
+    response = client.post(f"/events/{ev['id']}/archive", headers=AUTH)
+    assert response.status_code == 409
+
+
+def test_non_owner_cannot_archive(client):
+    ev = _create_event(client)
+    response = client.post(f"/events/{ev['id']}/archive", headers=OTHER_AUTH)
+    assert response.status_code == 403
+
+
+def test_archived_event_hidden_from_public_feed(client):
+    ev = _create_event(client)
+    assert any(e["id"] == ev["id"] for e in client.get("/events").json())
+
+    client.post(f"/events/{ev['id']}/archive", headers=AUTH)
+    assert all(e["id"] != ev["id"] for e in client.get("/events").json())

@@ -121,6 +121,16 @@ def test_connections_repeat_pairing_counts_once(client, db, event):
     make_assignment(db, event["id"], r2["id"], me["id"], 4)
     make_assignment(db, event["id"], r2["id"], b["id"], 4)
 
+    # ...and it's a mutual like (a match). Met across two rounds -> 2 entries,
+    # but it must still count as ONE person met and ONE match (regression: the
+    # count used to sum per-entry and report 2).
+    db.table("connection_likes").insert(
+        {"event_id": event["id"], "liker_attendee_id": me["id"], "liked_attendee_id": b["id"]}
+    ).execute()
+    db.table("connection_likes").insert(
+        {"event_id": event["id"], "liker_attendee_id": b["id"], "liked_attendee_id": me["id"]}
+    ).execute()
+
     response = client.get(
         f"/events/{event['id']}/attendees/{me['id']}/connections",
         headers=ATTENDEE_AUTH,
@@ -128,3 +138,5 @@ def test_connections_repeat_pairing_counts_once(client, db, event):
     body = response.json()
     assert body["total_people_met"] == 1
     assert len(body["connections"]) == 2
+    assert body["matches_count"] == 1
+    assert all(e["mutual"] for e in body["connections"])

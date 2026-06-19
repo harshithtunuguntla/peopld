@@ -535,9 +535,17 @@ export function RoomCodeCheckIn({
   );
 }
 
-export function BetweenRounds({ eventId }: { eventId?: string }) {
+export function BetweenRounds({ state, eventId }: { state: LiveState; eventId?: string }) {
   const branding = useEventBranding(eventId);
   const sponsors = branding?.sponsors ?? [];
+
+  // Give the wait context: which round just finished, and what's next. The next
+  // round number is "completed + 1"; its theme comes from the organizer agenda.
+  const done = state.rounds_completed;
+  const total = state.target_rounds ?? null;
+  const isFinal = total != null && done >= total;
+  const nextNumber = done + 1;
+  const nextTheme = agendaFor(nextNumber - 1, state.round_topics);
 
   // Same brand treatment as the waiting room and the "next round is yours" screen:
   // logo → hourglass → message → the sponsor flip. The hourglass IS the waiting
@@ -547,11 +555,36 @@ export function BetweenRounds({ eventId }: { eventId?: string }) {
     <div className="space-y-5">
       <div className="flex flex-col items-center pt-2 text-center">
         <EventLogo branding={branding} className="mb-4" />
+        <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground ring-1 ring-inset ring-border">
+          Round {done}{total ? ` of ${total}` : ""} complete
+        </span>
         <Hourglass size={104} />
-        <h1 className="mt-3 font-display text-2xl text-foreground">Round complete</h1>
-        <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">
-          Nice one. The next table is being set up — hang tight, you&apos;ll be moved in a few seconds.
-        </p>
+        <h1 className="mt-3 font-display text-2xl text-foreground">
+          {isFinal ? "That was the last round" : "Round complete"}
+        </h1>
+        {isFinal ? (
+          <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">
+            Nice one — that wraps the rounds. Hang tight while the host closes things out.
+          </p>
+        ) : (
+          <>
+            <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">
+              Nice one. The next table is being set up — hang tight, you&apos;ll be moved in a few seconds.
+            </p>
+            <div className="mt-4 w-full max-w-[300px] rounded-2xl border border-border bg-card/60 p-4 text-left">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Next up</div>
+              <div className="mt-1 flex items-center gap-2.5">
+                <span
+                  className="inline-flex shrink-0 items-center justify-center rounded-xl px-2.5 py-1 font-display text-lg leading-none"
+                  style={{ background: nextTheme.bg, color: nextTheme.ink }}
+                >
+                  R{nextNumber}
+                </span>
+                <span className="truncate font-display text-lg text-foreground">{nextTheme.name}</span>
+              </div>
+            </div>
+          </>
+        )}
       </div>
       <SponsorBlock sponsors={sponsors} />
     </div>

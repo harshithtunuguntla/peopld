@@ -134,8 +134,8 @@ export default function MyConnectionsPage() {
 
         {!data && !error && (
           <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="h-24 animate-pulse rounded-2xl border border-border bg-card/40" />
-            <div className="h-24 animate-pulse rounded-2xl border border-border bg-card/40" />
+            <div className="h-24 skeleton rounded-2xl border border-border" />
+            <div className="h-24 skeleton rounded-2xl border border-border" />
           </div>
         )}
 

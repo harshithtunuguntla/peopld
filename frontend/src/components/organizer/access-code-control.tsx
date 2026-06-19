@@ -1,16 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, KeyRound, Copy, Check, RefreshCw, X } from "lucide-react";
+import { Loader2, KeyRound, Copy, Check } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 /**
- * Per-event access code: view, copy, regenerate, or remove. The secret value is
- * fetched lazily (owner-only endpoint) the first time it's needed. This is the
- * code attendees use on the hub's "Join via access code" / QR. Shared by the
- * dashboard event card and the event Settings page.
+ * Per-event access code: view + copy. This is the code attendees use on the hub's
+ * "Join via access code" / QR.
+ *
+ * The code is set ONCE — at event creation, or via a one-time "Generate" here if
+ * the event was created open. After that it's permanent: it can't be regenerated
+ * or removed, because attendees may already have it on a card / QR and rotating
+ * it would silently lock them out. The backend enforces this (409 on any change);
+ * the UI simply stops offering the actions once a code exists.
+ *
+ * Shared by the dashboard event card and the event Settings page.
  */
 export function AccessCodeControl({ eventId, initialHasCode }: { eventId: string; initialHasCode: boolean }) {
   const [code, setCode] = useState<string | null | undefined>(initialHasCode ? undefined : null);
@@ -24,25 +29,13 @@ export function AccessCodeControl({ eventId, initialHasCode }: { eventId: string
       .catch(() => setCode(null));
   }, [eventId, initialHasCode]);
 
-  async function regenerate() {
+  async function generate() {
     setBusy(true);
     try {
       const r = await apiFetch<{ code: string | null }>(`/events/${eventId}/access-code/regenerate`, { method: "POST" });
       setCode(r.code);
     } catch {
       /* leave the current value; the organizer can retry */
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove() {
-    setBusy(true);
-    try {
-      await apiFetch(`/events/${eventId}/access-code`, { method: "DELETE" });
-      setCode(null);
-    } catch {
-      /* no-op */
     } finally {
       setBusy(false);
     }
@@ -69,45 +62,22 @@ export function AccessCodeControl({ eventId, initialHasCode }: { eventId: string
           <button
             type="button"
             onClick={copy}
-            title="Copy code"
+            title="Copy code — it's permanent once set"
             className="inline-flex items-center gap-1.5 font-display text-lg tracking-[0.2em] text-foreground transition-colors hover:text-accent"
           >
             {code}
-            {copied ? <Check className="h-3.5 w-3.5 text-success" aria-hidden /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />}
+            {copied ? <Check className="ml-auto h-3.5 w-3.5 text-success" aria-hidden /> : <Copy className="ml-auto h-3.5 w-3.5 text-muted-foreground" aria-hidden />}
           </button>
-          <div className="ml-auto flex items-center gap-1">
-            <CodeBtn label="Regenerate code" onClick={regenerate} busy={busy}>
-              <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} aria-hidden />
-            </CodeBtn>
-            <CodeBtn label="Remove code (make open)" onClick={remove} busy={busy}>
-              <X className="h-3.5 w-3.5" aria-hidden />
-            </CodeBtn>
-          </div>
         </>
       ) : (
         <>
           <span className="text-sm text-muted-foreground">No code — open event</span>
-          <Button variant="outline" size="sm" onClick={regenerate} disabled={busy} className="ml-auto gap-1.5">
+          <Button variant="outline" size="sm" onClick={generate} disabled={busy} className="ml-auto gap-1.5">
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
             Generate code
           </Button>
         </>
       )}
     </div>
-  );
-}
-
-function CodeBtn({ label, onClick, busy, children }: { label: string; onClick: () => void; busy: boolean; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      aria-label={label}
-      title={label}
-      className="flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-    >
-      {children}
-    </button>
   );
 }

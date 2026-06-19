@@ -21,6 +21,7 @@ from app.deps import (
 from app.models.schemas import (
     AccessCodeResponse,
     AttendeeResponse,
+    DashboardSummary,
     EventAnalytics,
     EventBrowseItem,
     EventCreate,
@@ -31,6 +32,8 @@ from app.models.schemas import (
     JoinResponse,
     LiveStats,
     RoomCodeResponse,
+    RoundPerf,
+    TopConnector,
     VerifyCodeRequest,
     VerifyCodeResponse,
 )
@@ -39,8 +42,10 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 
 def _attach_requires_code(db: Client, row: dict) -> dict:
-    """Add the derived `requires_code` flag. The code value itself is never sent."""
+    """Add the derived `requires_code` + `is_archived` flags. The access code value
+    itself is never sent."""
     row["requires_code"] = fetch_access_code(db, str(row["id"])) is not None
+    row["is_archived"] = bool(row.get("archived_at"))
     return row
 
 
@@ -55,6 +60,7 @@ def _attach_requires_code_bulk(db: Client, rows: list[dict]) -> list[dict]:
     coded_ids = {str(c["event_id"]) for c in coded}
     for r in rows:
         r["requires_code"] = str(r["id"]) in coded_ids
+        r["is_archived"] = bool(r.get("archived_at"))
     return rows
 
 
@@ -85,12 +91,14 @@ def list_events(
     """
     rows = (
         db.table("events")
-        .select("id,name,date,time,location,status")
+        .select("id,name,date,time,location,status,archived_at")
         .order("date", desc=False)
         .execute()
         .data
         or []
     )
+    # Archived events are hidden from the public attendee feed too (test/retired events).
+    rows = [r for r in rows if not r.get("archived_at")]
     if not rows:
         return []
 
@@ -147,8 +155,13 @@ def list_events(
 def list_my_events(
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
+    include_archived: bool = False,
 ):
-    """Organizer dashboard - all events created by the authenticated organizer."""
+    """Organizer dashboard - all events created by the authenticated organizer.
+
+    Archived events are hidden by default (dashboard hygiene); pass
+    ?include_archived=true to include them (so they can be unarchived).
+    """
     result = (
         db.table("events")
         .select("*")
@@ -156,7 +169,94 @@ def list_my_events(
         .order("created_at", desc=True)
         .execute()
     )
-    return _attach_requires_code_bulk(db, result.data or [])
+    rows = result.data or []
+    if not include_archived:
+        rows = [r for r in rows if not r.get("archived_at")]
+    return _attach_requires_code_bulk(db, rows)
+
+
+def _unique_table_pairs(assignments: list[dict]) -> set[frozenset]:
+    """All unique pairs of people who shared a table in at least one round.
+    Grouped by (round, table); a pair seen in two rounds counts once."""
+    groups: dict[tuple, list] = {}
+    for a in assignments:
+        groups.setdefault((a["round_id"], a["table_number"]), []).append(str(a["attendee_id"]))
+    pairs: set[frozenset] = set()
+    for members in groups.values():
+        for i in range(len(members)):
+            for j in range(i + 1, len(members)):
+                pairs.add(frozenset((members[i], members[j])))
+    return pairs
+
+
+@router.get("/dashboard-summary", response_model=DashboardSummary)
+def dashboard_summary(
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Honest, event-wide aggregates for the organizer dashboard bento — computed
+    server-side in a handful of bulk queries (not per-event round-trips). Archived
+    events are excluded so the headline numbers match the visible event list."""
+    events = (
+        db.table("events").select("id, status, archived_at").eq("organizer_id", organizer_id).execute().data
+        or []
+    )
+    events = [e for e in events if not e.get("archived_at")]
+    event_ids = [str(e["id"]) for e in events]
+
+    summary = DashboardSummary(
+        events_total=len(events),
+        events_live=sum(1 for e in events if e["status"] == "active"),
+        events_upcoming=sum(1 for e in events if e["status"] == "upcoming"),
+        events_completed=sum(1 for e in events if e["status"] == "ended"),
+        guests_total=0,
+        connections_total=0,
+        introductions_total=0,
+    )
+    if not event_ids:
+        return summary
+
+    attendees = (
+        db.table("attendees").select("id, event_id").in_("event_id", event_ids).execute().data or []
+    )
+    assignments = (
+        db.table("table_assignments")
+        .select("event_id, round_id, table_number, attendee_id")
+        .in_("event_id", event_ids)
+        .execute()
+        .data
+        or []
+    )
+    likes = (
+        db.table("connection_likes")
+        .select("event_id, liker_attendee_id, liked_attendee_id")
+        .in_("event_id", event_ids)
+        .execute()
+        .data
+        or []
+    )
+
+    summary.guests_total = len(attendees)
+
+    # Introductions = unique table pairs, computed per event then summed.
+    by_event_assign: dict[str, list] = {}
+    for a in assignments:
+        by_event_assign.setdefault(str(a["event_id"]), []).append(a)
+    summary.introductions_total = sum(
+        len(_unique_table_pairs(rows)) for rows in by_event_assign.values()
+    )
+
+    # Matches = mutual likes, per pair, per event.
+    by_event_directed: dict[str, set] = {}
+    for l in likes:
+        by_event_directed.setdefault(str(l["event_id"]), set()).add(
+            (str(l["liker_attendee_id"]), str(l["liked_attendee_id"]))
+        )
+    summary.connections_total = sum(
+        sum(1 for a, b in directed if a < b and (b, a) in directed)
+        for directed in by_event_directed.values()
+    )
+    return summary
 
 
 @router.post("", response_model=EventResponse, status_code=201)
@@ -253,8 +353,16 @@ def update_event(
 
     changes = body.model_dump(mode="json", exclude_none=True)
     # access_code is a secret in its own table — pull it out of the events update.
+    # It's set ONCE (here or at creation) and then permanent: attendees may already
+    # be typing it / have it on a QR, so silently rotating or clearing it would lock
+    # them out. Once a non-empty code exists, any change or clear is rejected.
     access_code = changes.pop("access_code", None)
     if access_code is not None:
+        if (fetch_access_code(db, event_id) or "").strip():
+            raise HTTPException(
+                status_code=409,
+                detail="The access code is set once and can't be changed or removed afterwards.",
+            )
         _upsert_access_code(db, event_id, access_code)
 
     if not changes:
@@ -301,6 +409,55 @@ def end_event(
     return _attach_requires_code(db, result.data[0])
 
 
+@router.post("/{event_id}/archive", response_model=EventResponse)
+def archive_event(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Soft-archive an event: hide it from the dashboard without destroying data
+    (reversible via /unarchive). Owner only. A live event must be ended first so
+    archiving can't yank a running room out from under attendees."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    if event["status"] == "active":
+        raise HTTPException(status_code=409, detail="End the live event before archiving it")
+
+    now = datetime.now(timezone.utc).isoformat()
+    result = db.table("events").update({"archived_at": now}).eq("id", event_id).execute()
+    record_audit(
+        db,
+        action="event.archived",
+        entity_type="event",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=event_id,
+    )
+    return _attach_requires_code(db, result.data[0])
+
+
+@router.post("/{event_id}/unarchive", response_model=EventResponse)
+def unarchive_event(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Restore a soft-archived event back to the dashboard. Owner only."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+
+    result = db.table("events").update({"archived_at": None}).eq("id", event_id).execute()
+    record_audit(
+        db,
+        action="event.unarchived",
+        entity_type="event",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=event_id,
+    )
+    return _attach_requires_code(db, result.data[0])
+
+
 @router.get("/{event_id}/access-code", response_model=AccessCodeResponse)
 def get_access_code(
     event_id: str,
@@ -320,14 +477,22 @@ def regenerate_access_code(
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
-    """Mint a fresh, unique code for the event (owner only). Old code stops working."""
+    """Mint the event's access code (owner only) — but ONLY the first time. The
+    code is permanent once set (attendees may already have it / a QR), so a second
+    call returns 409 instead of rotating it. This stays as the one-time 'generate'
+    for an event created open."""
     event = fetch_event_or_404(db, event_id)
     require_event_owner(event, organizer_id)
+    if (fetch_access_code(db, event_id) or "").strip():
+        raise HTTPException(
+            status_code=409,
+            detail="The access code is set once and can't be regenerated.",
+        )
     code = generate_access_code(db)
     _upsert_access_code(db, event_id, code)
     record_audit(
         db,
-        action="event.code_regenerated",
+        action="event.code_set",
         entity_type="event",
         actor_user_id=organizer_id,
         event_id=event_id,
@@ -343,18 +508,15 @@ def clear_access_code(
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
-    """Remove the code — the event becomes open (link/QR is the only gate)."""
+    """Removal is not allowed once a code is set — it's permanent (attendees may
+    already have it / a QR). Returns 409 when a code exists; a no-op otherwise."""
     event = fetch_event_or_404(db, event_id)
     require_event_owner(event, organizer_id)
-    _upsert_access_code(db, event_id, "")  # "" clears the row
-    record_audit(
-        db,
-        action="event.code_cleared",
-        entity_type="event",
-        actor_user_id=organizer_id,
-        event_id=event_id,
-        entity_id=event_id,
-    )
+    if (fetch_access_code(db, event_id) or "").strip():
+        raise HTTPException(
+            status_code=409,
+            detail="The access code is permanent and can't be removed.",
+        )
     return AccessCodeResponse(code=None)
 
 
@@ -492,12 +654,50 @@ def get_analytics(
 
     total_likes, total_matches = _likes_and_matches(db, event_id)
 
+    # Unique introductions = distinct pairs who ever shared a table.
+    total_introductions = len(_unique_table_pairs(assignments))
+
+    # Avg % of the rest of the room each person met (a single, intuitive headline).
+    pct_room_met = (
+        round(avg_met / max(len(attendees) - 1, 1) * 100) if attendees else 0
+    )
+
+    # Per-round performance: seated count + NEW pairs created that round (so the
+    # bar chart shows fresh connections per round, not cumulative). Rounds in order.
+    names = {str(a["id"]): a["name"] for a in attendees}
+    completed_rounds = sorted(
+        (r for r in rounds if r["status"] == "completed"), key=lambda r: r["round_number"]
+    )
+    assigns_by_round: dict[str, list] = {}
+    for a in assignments:
+        assigns_by_round.setdefault(str(a["round_id"]), []).append(a)
+    seen_pairs: set[frozenset] = set()
+    round_performance: list[RoundPerf] = []
+    for r in completed_rounds:
+        rows = assigns_by_round.get(str(r["id"]), [])
+        round_pairs = _unique_table_pairs(rows)
+        new_pairs = round_pairs - seen_pairs
+        seen_pairs |= round_pairs
+        round_performance.append(
+            RoundPerf(round_number=r["round_number"], seated=len(rows), introductions=len(new_pairs))
+        )
+
+    # Top connectors: who met the most distinct people.
+    top_connectors = [
+        TopConnector(attendee_id=aid, name=names.get(str(aid), "—"), count=len(people))
+        for aid, people in sorted(met.items(), key=lambda kv: len(kv[1]), reverse=True)[:5]
+    ]
+
     return EventAnalytics(
         total_attendees=len(attendees),
         rounds_completed=rounds_completed,
         avg_unique_people_met=avg_met,
         total_likes=total_likes,
         total_matches=total_matches,
+        total_introductions=total_introductions,
+        pct_room_met=pct_room_met,
+        round_performance=round_performance,
+        top_connectors=top_connectors,
     )
 
 
@@ -517,15 +717,12 @@ def get_live_stats(
     registered = len(attendees)
     arrived = sum(1 for a in attendees if a["status"] == "arrived")
 
-    active = (
-        db.table("rounds")
-        .select("id, round_number")
-        .eq("event_id", event_id)
-        .eq("status", "active")
-        .limit(1)
-        .execute()
-        .data
+    all_rounds = (
+        db.table("rounds").select("id, round_number, status").eq("event_id", event_id).execute().data
+        or []
     )
+    rounds_completed = sum(1 for r in all_rounds if r["status"] == "completed")
+    active = [r for r in all_rounds if r["status"] == "active"][:1]
     seated_now = 0
     active_round_number = None
     if active:
@@ -550,4 +747,5 @@ def get_live_stats(
         likes_count=total_likes,
         matches_count=total_matches,
         active_round_number=active_round_number,
+        rounds_completed=rounds_completed,
     )

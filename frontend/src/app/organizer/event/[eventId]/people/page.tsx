@@ -2,12 +2,12 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Loader2, Plus, UserCheck, UserMinus, Undo2, QrCode, Download, Search, UsersRound, ArrowDownUp, Star } from "lucide-react";
+import { Loader2, Plus, UserCheck, UserMinus, Undo2, QrCode, Download, Search, UsersRound, ArrowDownUp, Star, Pencil, X } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { ConsoleShell } from "@/components/organizer/console-shell";
-import { Card } from "@/components/organizer/console-ui";
+import { Card, ConsoleLoading } from "@/components/organizer/console-ui";
 import { EventHeader, EventAccessError, type EventStatus } from "@/components/organizer/event-header";
 import { Avatar } from "@/components/brand/avatar";
 import { InviteDialog } from "@/components/organizer/invite-dialog";
@@ -78,6 +78,7 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
   const [denied, setDenied] = useState<null | "forbidden" | "missing">(null);
   const [adding, setAdding] = useState(false);
   const [inviting, setInviting] = useState(false);
+  const [editing, setEditing] = useState<Attendee | null>(null);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("name");
@@ -175,7 +176,7 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
     return (
       <ConsoleShell>
         <EventHeader eventId={eventId} name={eventName} status={eventStatus} active="people" />
-        <Centered label="Loading…" />
+        <ConsoleLoading />
       </ConsoleShell>
     );
   }
@@ -266,6 +267,18 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
 
       {inviting && <InviteDialog eventId={eventId} eventName={eventName} onClose={() => setInviting(false)} />}
 
+      {editing && (
+        <EditAttendeeDialog
+          eventId={eventId}
+          person={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
+
       {adding && (
         <WalkInForm
           eventId={eventId}
@@ -286,7 +299,7 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
       {people === null && !error && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {[0, 1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-40 animate-pulse rounded-2xl border border-border bg-card/40" />
+            <div key={i} className="h-40 skeleton rounded-2xl border border-border" />
           ))}
         </div>
       )}
@@ -300,7 +313,14 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
       {visible && visible.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {visible.map((p, i) => (
-            <PersonCard key={p.id} person={p} index={i} onSet={(s) => setStatus(p.id, s)} onTag={(t) => setTag(p.id, t)} />
+            <PersonCard
+              key={p.id}
+              person={p}
+              index={i}
+              onSet={(s) => setStatus(p.id, s)}
+              onTag={(t) => setTag(p.id, t)}
+              onEdit={() => setEditing(p)}
+            />
           ))}
         </div>
       )}
@@ -353,11 +373,13 @@ function PersonCard({
   index,
   onSet,
   onTag,
+  onEdit,
 }: {
   person: Attendee;
   index: number;
   onSet: (s: Attendee["status"]) => void;
   onTag: (t: Tag) => void;
+  onEdit: () => void;
 }) {
   const interests = (person.interests ?? []).slice(0, 3);
   const extra = (person.interests?.length ?? 0) - interests.length;
@@ -387,6 +409,15 @@ function PersonCard({
               </div>
             )}
           </div>
+          <button
+            type="button"
+            onClick={onEdit}
+            aria-label={`Edit ${person.name}'s details`}
+            title="Edit details"
+            className="shrink-0 rounded-full border border-border p-1.5 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Pencil className="h-3.5 w-3.5" aria-hidden />
+          </button>
         </div>
 
         {person.looking_for && (
@@ -453,6 +484,107 @@ function IconBtn({ label, onClick, children }: { label: string; onClick: () => v
   );
 }
 
+/** Organizer edits an attendee's identity details (fix a hurried walk-in typo,
+ *  etc.). Modal so it doesn't disturb the directory grid. */
+function EditAttendeeDialog({
+  eventId,
+  person,
+  onClose,
+  onSaved,
+}: {
+  eventId: string;
+  person: Attendee;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(person.name);
+  const [role, setRole] = useState(person.role);
+  const [company, setCompany] = useState(person.company ?? "");
+  const [lookingFor, setLookingFor] = useState(person.looking_for ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch(`/events/${eventId}/attendees/${person.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: name.trim(),
+          role: role.trim(),
+          company: company.trim(), // "" → backend clears it
+          looking_for: lookingFor.trim(),
+        }),
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save changes");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Edit ${person.name}`}
+      onClick={onClose}
+    >
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={submit}
+        className="relative w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-2xl"
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <X className="h-4 w-4" aria-hidden />
+        </button>
+
+        <h2 className="font-display text-lg text-foreground">Edit details</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Fix a typo or update how this person shows up everywhere.</p>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Name" name="edit-name" required>
+            {(p) => <Input {...p} required value={name} onChange={(e) => setName(e.target.value)} />}
+          </Field>
+          <Field label="Role" name="edit-role" required>
+            {(p) => <Input {...p} required value={role} onChange={(e) => setRole(e.target.value)} placeholder="Founder at Acme" />}
+          </Field>
+          <Field label="Company" name="edit-company" className="sm:col-span-2">
+            {(p) => <Input {...p} value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Acme Labs" />}
+          </Field>
+          <Field label="Looking for" name="edit-looking" className="sm:col-span-2">
+            {(p) => <Input {...p} value={lookingFor} onChange={(e) => setLookingFor(e.target.value)} placeholder="investors, designers…" />}
+          </Field>
+        </div>
+
+        {error && (
+          <p role="alert" className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
+            {error}
+          </p>
+        )}
+
+        <div className="mt-5 flex gap-2">
+          <Button type="submit" variant="accent" disabled={busy} className="flex-1">
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+            {busy ? "Saving…" : "Save changes"}
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function WalkInForm({ eventId, onAdded, onCancel }: { eventId: string; onAdded: () => void; onCancel: () => void }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
@@ -502,14 +634,5 @@ function WalkInForm({ eventId, onAdded, onCancel }: { eventId: string; onAdded: 
         </Button>
       </div>
     </form>
-  );
-}
-
-function Centered({ label }: { label: string }) {
-  return (
-    <div className="flex flex-col items-center gap-3 pt-16 text-sm text-muted-foreground">
-      <Loader2 className="h-6 w-6 animate-spin" aria-hidden />
-      {label}
-    </div>
   );
 }

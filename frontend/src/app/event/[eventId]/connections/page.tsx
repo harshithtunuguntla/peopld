@@ -87,7 +87,7 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
   }
 
   return (
-    <LiveShell eventId={eventId} className="max-w-5xl">
+    <LiveShell className="max-w-5xl">
       <header className="max-w-2xl">
         <p className="text-[11px] uppercase tracking-[0.3em] text-accent">Your rolodex</p>
         <h1 className="mt-2 text-balance font-display text-3xl leading-tight tracking-[-0.02em] text-foreground sm:text-4xl">

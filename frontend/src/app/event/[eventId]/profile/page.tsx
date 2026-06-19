@@ -62,7 +62,7 @@ export default function ProfileEditPage({ params }: { params: Promise<{ eventId:
 
   if (!authChecked || !user || (!me && !error)) {
     return (
-      <LiveShell eventId={eventId}>
+      <LiveShell>
         <Centered label="Loading your profile…" />
       </LiveShell>
     );
@@ -70,7 +70,6 @@ export default function ProfileEditPage({ params }: { params: Promise<{ eventId:
 
   return (
     <LiveShell
-      eventId={eventId}
       right={
         <Link href={`/event/${eventId}/live`} className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Event

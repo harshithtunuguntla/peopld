@@ -100,7 +100,7 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
   }
 
   return (
-    <LiveShell eventId={eventId} className="max-w-5xl">
+    <LiveShell className="max-w-5xl">
       {/* Hero */}
       <motion.header
         initial={{ opacity: 0, y: 12 }}

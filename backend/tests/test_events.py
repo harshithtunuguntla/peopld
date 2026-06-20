@@ -166,10 +166,16 @@ def test_analytics_empty_event(client, event):
         "avg_unique_people_met": 0.0,
         "total_likes": 0,
         "total_matches": 0,
+        "liked_pairs": 0,
         "total_introductions": 0,
         "pct_room_met": 0,
+        "seated_attendees": 0,
+        "possible_introductions": 0,
+        "min_people_met": 0,
         "round_performance": [],
         "top_connectors": [],
+        "graph_nodes": [],
+        "graph_edges": [],
     }
 
 
@@ -209,6 +215,41 @@ def test_analytics_computes_unique_people_met(client, db, event):
     assert perf[2]["introductions"] == 2  # all-new pairings (no repeats)
     assert len(body["top_connectors"]) == 4
     assert all(c["count"] == 2 for c in body["top_connectors"])
+    # Connection web + coverage: 4 seated people, 6 possible pairs, 4 actually met.
+    assert body["seated_attendees"] == 4
+    assert body["possible_introductions"] == 6
+    assert body["min_people_met"] == 2  # nobody left behind
+    assert len(body["graph_nodes"]) == 4
+    assert len(body["graph_edges"]) == 4  # one per pair who met
+    assert all(e["matched"] is False for e in body["graph_edges"])  # no likes in this event
+
+
+def test_analytics_funnel_and_matched_edges(client, db, event):
+    """Likes drive the funnel (introductions ≥ sparked ≥ matched) and flag the
+    matched line in the connection web."""
+    a = make_attendee(db, event["id"], name="A")
+    b = make_attendee(db, event["id"], name="B")
+    c = make_attendee(db, event["id"], name="C")
+    r1 = make_round(db, event["id"], round_number=1, status="completed")
+    # All three at one table → 3 pairs meet: A-B, A-C, B-C.
+    make_assignment(db, event["id"], r1["id"], a["id"], 1)
+    make_assignment(db, event["id"], r1["id"], b["id"], 1)
+    make_assignment(db, event["id"], r1["id"], c["id"], 1)
+    # A↔B mutual; A→C one-way.
+    for liker, liked in [(a["id"], b["id"]), (b["id"], a["id"]), (a["id"], c["id"])]:
+        db.seed(
+            "connection_likes",
+            {"event_id": event["id"], "liker_attendee_id": liker, "liked_attendee_id": liked},
+        )
+
+    body = client.get(f"/events/{event['id']}/analytics", headers=AUTH).json()
+    assert body["total_introductions"] == 3
+    assert body["liked_pairs"] == 2     # {A,B}, {A,C}
+    assert body["total_matches"] == 1   # only {A,B} mutual
+    assert body["total_likes"] == 3     # directed likes
+    matched = [e for e in body["graph_edges"] if e["matched"]]
+    assert len(matched) == 1
+    assert {matched[0]["a"], matched[0]["b"]} == {a["id"], b["id"]}
 
 
 def test_dashboard_summary_aggregates_owner_events(client, db, event):

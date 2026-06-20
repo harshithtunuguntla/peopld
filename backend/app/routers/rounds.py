@@ -12,6 +12,8 @@ from app.algorithm import (
     draft_snapshot_hash,
     generate_rotation,
     plan_rounds,
+    table_capacity,
+    table_ceiling,
 )
 from app.audit import record_audit
 from app.icebreakers import engine as icebreaker_engine
@@ -20,8 +22,13 @@ from app.deps import fetch_event_or_404, get_current_organizer_id, require_event
 from app.models.schemas import (
     RoundCancelResponse,
     RoundDraftResponse,
+    RoundExtendRequest,
+    RoundMoveRequest,
     RoundResponse,
     RoundWithAssignmentsResponse,
+    RunSheet,
+    RunSheetRound,
+    RunSheetTable,
     TableAssignmentResponse,
 )
 
@@ -92,6 +99,11 @@ def _fetch_draft(db: Client, event_id: str) -> dict | None:
 # present, not to be shuffled between tables — they're excluded from seating
 # (and, per Phase 3a, can't be picked either). Default 'attendee' is always seated.
 NON_SEATED_TAGS = ("speaker", "host")
+
+
+def _table_bounds(event: dict) -> tuple[int | None, int | None]:
+    """Organizer-set (min, max) per-table size, or (None, None) for the defaults."""
+    return event.get("min_per_table"), event.get("max_per_table")
 
 
 def _arrived_pool(db: Client, event_id: str) -> list[dict]:
@@ -235,9 +247,10 @@ def _seating_for_next_round(
     pool = _arrived_pool(db, event_id)
     arrived_ids = sorted(str(a["id"]) for a in pool)
     num_tables, seats = event["num_tables"], event["seats_per_table"]
-    # The draft hash is attendance-only (stale-publish guard); the plan cache key
-    # also folds in the seated picks so a mid-event pick change re-plans the tail.
-    arrived_hash = draft_snapshot_hash(arrived_ids, num_tables, seats)
+    min_size, max_size = _table_bounds(event)
+    # The draft hash is attendance + table config (stale-publish guard); the plan
+    # cache key also folds in the seated picks so a mid-event pick change re-plans.
+    arrived_hash = draft_snapshot_hash(arrived_ids, num_tables, seats, min_size, max_size)
     intents = _meeting_intents(db, event_id, set(arrived_ids))
     plan_hash = _plan_cache_hash(arrived_hash, intents)
     next_number = _next_round_number(db, event_id)
@@ -254,7 +267,7 @@ def _seating_for_next_round(
     horizon = _resolve_horizon(event, len(arrived_ids), next_number)
     try:
         result = plan_rounds(arrived_ids, pair_counts, num_tables, seats, horizon,
-                             intents=intents)
+                             intents=intents, min_size=min_size, max_size=max_size)
         seatings = result.rounds
     except RotationError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -263,7 +276,8 @@ def _seating_for_next_round(
         # fall back to greedy for this round so the event never stalls.
         logger.exception("planner failed — falling back to greedy", extra={"event_id": event_id})
         try:
-            rotation = generate_rotation(arrived_ids, pair_counts, num_tables, seats)
+            rotation = generate_rotation(arrived_ids, pair_counts, num_tables, seats,
+                                         min_size=min_size, max_size=max_size)
         except RotationError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         return rotation.tables, arrived_hash, pair_counts
@@ -297,7 +311,34 @@ def _build_draft_row(db: Client, event: dict, event_id: str,
     return row, {str(a["id"]): a for a in pool}
 
 
-def _draft_response(draft: dict, attendees_by_id: dict[str, dict]) -> dict:
+def _capacity_warning(event: dict, assignments: list[dict]) -> dict | None:
+    """Heads-up when the draft overfills past the max table size (room over capacity).
+
+    The plan always seats everyone (no one is dropped); this just tells the organizer
+    a few tables are above the ceiling so they can add a table or accept the squeeze.
+    None when everything fits under the ceiling.
+    """
+    if not assignments:
+        return None
+    sizes: dict[int, int] = {}
+    for a in assignments:
+        sizes[a["table_number"]] = sizes.get(a["table_number"], 0) + 1
+    min_size, max_size = _table_bounds(event)
+    ceil_ = table_ceiling(event["seats_per_table"], min_size, max_size)
+    biggest = max(sizes.values())
+    if biggest <= ceil_:
+        return None
+    return {
+        "seated": len(assignments),
+        "capacity": table_capacity(event["num_tables"], event["seats_per_table"], min_size, max_size),
+        "num_tables": event["num_tables"],
+        "max_per_table": ceil_,
+        "biggest_table": biggest,
+        "overfilled_tables": sum(1 for c in sizes.values() if c > ceil_),
+    }
+
+
+def _draft_response(event: dict, draft: dict, attendees_by_id: dict[str, dict]) -> dict:
     assignments = [
         {
             "attendee_id": a["attendee_id"],
@@ -315,6 +356,7 @@ def _draft_response(draft: dict, attendees_by_id: dict[str, dict]) -> dict:
         "table_count": len({a["table_number"] for a in assignments}),
         "repeat_pairings": draft.get("repeat_pairings", 0),
         "assignments": assignments,
+        "capacity_warning": _capacity_warning(event, draft["assignments"]),
         "created_at": draft["created_at"],
     }
 
@@ -366,7 +408,7 @@ def start_round(
             "repeat_pairings": stored["repeat_pairings"],
         },
     )
-    return _draft_response(stored, attendees_by_id)
+    return _draft_response(event, stored, attendees_by_id)
 
 
 @router.post("/regenerate", response_model=RoundDraftResponse)
@@ -404,7 +446,7 @@ def regenerate_draft(
             "repeat_pairings": updated["repeat_pairings"],
         },
     )
-    return _draft_response(updated, attendees_by_id)
+    return _draft_response(event, updated, attendees_by_id)
 
 
 @router.get("/draft", response_model=RoundDraftResponse)
@@ -422,7 +464,74 @@ def get_draft(
     attendees = (
         db.table("attendees").select("*").eq("event_id", event_id).execute().data or []
     )
-    return _draft_response(draft, {str(a["id"]): a for a in attendees})
+    return _draft_response(event, draft, {str(a["id"]): a for a in attendees})
+
+
+@router.post("/draft/move", response_model=RoundDraftResponse)
+def move_draft_seat(
+    event_id: str,
+    body: RoundMoveRequest,
+    background_tasks: BackgroundTasks,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Manual override: move one person to another existing table in the pending
+    draft, before publishing. The organizer always gets the final say over seating
+    — the auto-plan is a strong starting point, not a cage. Recomputes the repeat
+    count so the trust signal stays honest; the arrived pool is unchanged so the
+    publish stale-guard still passes.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    draft = _fetch_draft(db, event_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="No draft to edit — start a round first")
+
+    assignments = draft["assignments"]
+    target_id = str(body.attendee_id)
+    if not any(str(a["attendee_id"]) == target_id for a in assignments):
+        raise HTTPException(status_code=404, detail="That person isn't in this round")
+    table_numbers = {a["table_number"] for a in assignments}
+    if body.table_number not in table_numbers:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Table {body.table_number} isn't part of this round",
+        )
+
+    new_assignments = [
+        {**a, "table_number": body.table_number} if str(a["attendee_id"]) == target_id else a
+        for a in assignments
+    ]
+    seating = {str(a["attendee_id"]): a["table_number"] for a in new_assignments}
+    repeats = _round_repeat_pairings(seating, _pair_counts(db, event_id))
+    updated = (
+        db.table("round_drafts")
+        .update({"assignments": new_assignments, "repeat_pairings": repeats})
+        .eq("id", draft["id"])
+        .execute()
+        .data[0]
+    )
+
+    # The cached multi-round plan was optimized around the ORIGINAL seating for this
+    # round; a manual edit makes the look-ahead stale. Drop it so the next round
+    # re-plans from the actual published history (correctness over the cache).
+    db.table("round_plans").delete().eq("event_id", event_id).execute()
+
+    background_tasks.add_task(
+        record_audit,
+        db,
+        action="round.draft_edited",
+        entity_type="round_draft",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=draft["id"],
+        metadata={"round_number": updated["round_number"], "table_number": body.table_number},
+    )
+
+    attendees = (
+        db.table("attendees").select("*").eq("event_id", event_id).execute().data or []
+    )
+    return _draft_response(event, updated, {str(a["id"]): a for a in attendees})
 
 
 @router.post("/publish", response_model=RoundWithAssignmentsResponse, status_code=201)
@@ -457,8 +566,9 @@ def publish_round(
         raise HTTPException(status_code=409, detail="End the current round first")
 
     pool_ids = [str(a["id"]) for a in _arrived_pool(db, event_id)]
+    min_size, max_size = _table_bounds(event)
     current_hash = draft_snapshot_hash(
-        pool_ids, event["num_tables"], event["seats_per_table"]
+        pool_ids, event["num_tables"], event["seats_per_table"], min_size, max_size
     )
     if current_hash != draft["arrived_hash"]:
         raise HTTPException(
@@ -466,7 +576,11 @@ def publish_round(
             detail="Attendance or table settings changed since this preview — regenerate the draft",
         )
 
-    now = datetime.now(timezone.utc).isoformat()
+    # Publish makes the SEATING live (phones show their table) but does NOT start
+    # the clock. started_at stays null until the organizer hits "Start round", so
+    # people have time to actually find their seats before the timer eats into the
+    # conversation. The countdown everywhere derives from started_at, so a null
+    # one simply renders as "waiting for the host to start".
     try:
         round_row = (
             db.table("rounds")
@@ -475,7 +589,7 @@ def publish_round(
                     "event_id": event_id,
                     "round_number": _next_round_number(db, event_id),
                     "duration_seconds": draft["duration_seconds"],
-                    "started_at": now,
+                    "started_at": None,
                     "ended_at": None,
                     "status": "active",
                 }
@@ -543,6 +657,81 @@ def publish_round(
     result = dict(round_row)
     result["assignments"] = assignments
     return result
+
+
+@router.post("/begin", response_model=RoundResponse)
+def begin_round(
+    event_id: str,
+    background_tasks: BackgroundTasks,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Start the timer on a published-but-not-yet-started round.
+
+    Publish reveals the seating; this begins the countdown for everyone at once
+    (stamps started_at=now). Idempotent: starting an already-running round just
+    returns it, so a double-tap can't reset the clock.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    active = _fetch_active_round(db, event_id)  # 404 if there's no current round
+    if active.get("started_at"):
+        return active  # already running — idempotent, never restart the clock
+    now = datetime.now(timezone.utc).isoformat()
+    result = (
+        db.table("rounds")
+        .update({"started_at": now})
+        .eq("id", active["id"])
+        .execute()
+    )
+    background_tasks.add_task(
+        record_audit,
+        db,
+        action="round.started",
+        entity_type="round",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=active["id"],
+        metadata={"round_number": active["round_number"]},
+    )
+    return result.data[0]
+
+
+@router.post("/extend", response_model=RoundResponse)
+def extend_round(
+    event_id: str,
+    body: RoundExtendRequest,
+    background_tasks: BackgroundTasks,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Add time to the current round (the "+ Add time" escape hatch).
+
+    Bumps duration_seconds, which the effective-end math everywhere is derived
+    from — so it works whether the round is running, paused, or already at zero
+    (a few seconds past the buzzer the organizer can still grant more time).
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    active = _fetch_active_round(db, event_id)
+    new_duration = int(active["duration_seconds"]) + int(body.seconds)
+    result = (
+        db.table("rounds")
+        .update({"duration_seconds": new_duration})
+        .eq("id", active["id"])
+        .execute()
+    )
+    background_tasks.add_task(
+        record_audit,
+        db,
+        action="round.extended",
+        entity_type="round",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=active["id"],
+        metadata={"round_number": active["round_number"], "added_seconds": int(body.seconds)},
+    )
+    return result.data[0]
 
 
 @router.post("/end", response_model=RoundResponse)
@@ -690,6 +879,80 @@ def cancel_round(
         metadata={"round_number": active["round_number"], "seated_count": seated_count},
     )
     return RoundCancelResponse(event_id=event_id, round_number=active["round_number"])
+
+
+@router.get("/run-sheet", response_model=RunSheet)
+def get_run_sheet(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Pre-generate the WHOLE event's seating as a printable backup (REQ: event-day
+    resilience). Plans every round at once from a clean slate so the organizer has a
+    paper fallback if the app dies mid-event.
+
+    Built over the people already arrived; before doors (fewer than 3 arrived) it
+    falls back to the registered crowd so the sheet is useful as pre-event insurance.
+    Caveat the UI states: it assumes these are the people who show up.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+
+    pool = _arrived_pool(db, event_id)
+    basis = "arrived"
+    if len(pool) < 3:
+        rows = (
+            db.table("attendees")
+            .select("*")
+            .eq("event_id", event_id)
+            .neq("status", "left")
+            .execute()
+            .data
+            or []
+        )
+        pool = [a for a in rows if (a.get("tag") or "attendee") not in NON_SEATED_TAGS]
+        basis = "registered"
+
+    num_tables, seats = event["num_tables"], event["seats_per_table"]
+    names = {str(a["id"]): a["name"] for a in pool}
+    ids = sorted(str(a["id"]) for a in pool)
+
+    base = RunSheet(
+        event_name=event["name"],
+        basis=basis,
+        num_tables=num_tables,
+        seats_per_table=seats,
+        total_people=len(ids),
+        rounds=[],
+    )
+    if len(ids) < 3:
+        return base  # not enough people to seat yet — empty sheet, no error
+
+    intents = _meeting_intents(db, event_id, set(ids))
+    horizon = _resolve_horizon(event, len(ids), 1)  # full plan from round 1
+    min_size, max_size = _table_bounds(event)
+    try:
+        # Clean slate (no pairing history) — this is the canonical plan for the night.
+        result = plan_rounds(ids, {}, num_tables, seats, horizon, intents=intents,
+                             min_size=min_size, max_size=max_size)
+    except RotationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    topics = event.get("round_topics") or []
+    rounds_out: list[RunSheetRound] = []
+    for idx, seating in enumerate(result.rounds):
+        by_table: dict[int, list[str]] = {}
+        for aid, table_number in seating.items():
+            by_table.setdefault(table_number, []).append(names.get(aid, "—"))
+        tables = [
+            RunSheetTable(table_number=t, people=sorted(people))
+            for t, people in sorted(by_table.items())
+        ]
+        theme = topics[idx] if idx < len(topics) and topics[idx] else None
+        rounds_out.append(RunSheetRound(round_number=idx + 1, theme=theme, tables=tables))
+
+    base.rounds = rounds_out
+    return base
 
 
 @router.get("/current", response_model=RoundWithAssignmentsResponse)

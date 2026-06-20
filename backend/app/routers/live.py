@@ -48,6 +48,105 @@ def _parse_iso(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def _build_recent_seat(db: Client, event_id: str, attendee: dict, round_id: str) -> LiveSeat | None:
+    """The attendee's table from a just-finished round, with the same ❤️/wanted/note
+    state as the live table — so the between-rounds screen lets them tag people they
+    just met before the next round whisks the list away. Quiet phase, so this runs
+    as plain sequential reads (no need for the active path's parallel batching)."""
+    attendee_id = str(attendee["id"])
+    my_seat = (
+        db.table("table_assignments")
+        .select("table_number")
+        .eq("round_id", round_id)
+        .eq("attendee_id", attendee_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not my_seat:
+        return None  # wasn't seated that round (late arrival / guest)
+    table_number = my_seat[0]["table_number"]
+
+    table_rows = (
+        db.table("table_assignments")
+        .select("attendee_id")
+        .eq("round_id", round_id)
+        .eq("table_number", table_number)
+        .execute()
+        .data
+        or []
+    )
+    all_attendees = (
+        db.table("attendees").select("*").eq("event_id", event_id).execute().data or []
+    )
+    attendees_by_id = {str(r["id"]): r for r in all_attendees}
+    liked_ids = {
+        str(l["liked_attendee_id"])
+        for l in (
+            db.table("connection_likes")
+            .select("liked_attendee_id")
+            .eq("event_id", event_id)
+            .eq("liker_attendee_id", attendee_id)
+            .execute()
+            .data
+            or []
+        )
+    }
+    wanted_ids = {
+        str(i["liked_attendee_id"])
+        for i in (
+            db.table("meeting_intents")
+            .select("liked_attendee_id")
+            .eq("event_id", event_id)
+            .eq("liker_attendee_id", attendee_id)
+            .execute()
+            .data
+            or []
+        )
+    }
+    notes_by_target = {
+        str(n["target_attendee_id"]): n["note"]
+        for n in (
+            db.table("connection_notes")
+            .select("target_attendee_id, note")
+            .eq("event_id", event_id)
+            .eq("author_attendee_id", attendee_id)
+            .execute()
+            .data
+            or []
+        )
+    }
+    my_interest_set = {str(t).casefold() for t in (attendee.get("interests") or [])}
+
+    mates: list[Tablemate] = []
+    for row in table_rows:
+        aid = str(row["attendee_id"])
+        if aid == attendee_id:
+            continue
+        info = attendees_by_id.get(aid)
+        if not info:
+            continue
+        their_interests = [str(t) for t in (info.get("interests") or [])]
+        shared = [t for t in their_interests if t.casefold() in my_interest_set]
+        mates.append(
+            Tablemate(
+                attendee_id=aid,
+                name=info["name"],
+                role=info["role"],
+                company=info.get("company"),
+                looking_for=info.get("looking_for"),
+                interests=their_interests,
+                shared_interests=shared,
+                avatar_url=info.get("avatar_url"),
+                liked=aid in liked_ids,
+                wanted=aid in wanted_ids,
+                note=notes_by_target.get(aid),
+            )
+        )
+    mates.sort(key=lambda m: m.name.lower())
+    return LiveSeat(table_number=table_number, tablemates=mates)
+
+
 def _build_roster(rows: list[dict]) -> WaitingRoster:
     """WaitingRoster from a list of attendee rows (already filtered to non-left)."""
     preview = [
@@ -114,6 +213,8 @@ async def get_live_state(
     round_payload: LiveRound | None = None
     seat_payload: LiveSeat | None = None
     icebreaker_payload: LiveIcebreaker | None = None
+    recent_seat_payload: LiveSeat | None = None
+    recent_round_number: int | None = None
     seated = False
     roster: WaitingRoster
 
@@ -254,6 +355,20 @@ async def get_live_state(
         )
         roster = _build_roster(roster_res.data or [])
 
+        # Between rounds: surface the table you just left so the "❤️ / note before
+        # the next round" moment isn't lost when phones go back in pockets.
+        if phase == "between_rounds":
+            completed = [
+                r for r in rounds if r["status"] == "completed" and r.get("ended_at")
+            ]
+            if completed:
+                last = max(completed, key=lambda r: r["ended_at"])
+                recent_seat_payload = await asyncio.to_thread(
+                    _build_recent_seat, db, event_id, attendee, last["id"]
+                )
+                if recent_seat_payload:
+                    recent_round_number = last["round_number"]
+
     return LiveStateResponse(
         server_time=now,
         event_status=event_status,
@@ -272,4 +387,6 @@ async def get_live_state(
         round=round_payload,
         seat=seat_payload,
         icebreaker=icebreaker_payload,
+        recent_seat=recent_seat_payload,
+        recent_round_number=recent_round_number,
     )

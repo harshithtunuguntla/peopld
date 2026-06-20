@@ -1,7 +1,8 @@
 "use client";
 
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw, Users, Armchair, Heart, Sparkles, AlertTriangle } from "lucide-react";
+import Link from "next/link";
+import { RefreshCw, Users, Armchair, Heart, Sparkles, AlertTriangle, FileText } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
@@ -83,7 +84,8 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
   // Realtime doorbell + slow poll. The control room used to blind-poll every 12s
   // (4–5 calls each tick). Now it reloads on actual round/seating changes via
   // Supabase Realtime — debounced so a publish (one INSERT per attendee) is a
-  // single reload — and falls back to a 25s poll for stats freshness.
+  // single reload — and falls back to a 60s poll for stats freshness (the Refresh
+  // button is there for an instant manual pull).
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reload = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -108,7 +110,7 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
 
     const id = setInterval(() => {
       if (!busyRef.current) load();
-    }, 25_000);
+    }, 60_000);
 
     return () => {
       if (channel) supabase.removeChannel(channel);
@@ -180,15 +182,27 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
         status={event?.status}
         active="live"
         actions={
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={refreshing || busy}
-            aria-label="Refresh"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-          >
-            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} aria-hidden />
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/organizer/event/${eventId}/run-sheet`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open a printable seating backup for the whole event"
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <FileText className="h-4 w-4" aria-hidden />
+              <span className="hidden sm:inline">Run sheet</span>
+            </Link>
+            <button
+              type="button"
+              onClick={refresh}
+              disabled={refreshing || busy}
+              aria-label="Refresh"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+            >
+              <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} aria-hidden />
+            </button>
+          </div>
         }
       />
 
@@ -231,6 +245,22 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
             busy={busy}
             onPublish={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/publish`, { method: "POST" }); })}
             onRegenerate={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/regenerate`, { method: "POST" }); })}
+            onMove={(attendeeId, tableNumber) => act(async () => {
+              await apiFetch(`/events/${eventId}/rounds/draft/move`, {
+                method: "POST",
+                body: JSON.stringify({ attendee_id: attendeeId, table_number: tableNumber }),
+              });
+            })}
+            onAddTable={() => act(async () => {
+              // Bump the venue's table count, then re-plan the draft so the extra
+              // table absorbs the overfill. Keeps the organizer in control of capacity.
+              const next = (event?.num_tables ?? 0) + 1;
+              await apiFetch(`/events/${eventId}`, {
+                method: "PATCH",
+                body: JSON.stringify({ num_tables: next }),
+              });
+              await apiFetch(`/events/${eventId}/rounds/regenerate`, { method: "POST" });
+            })}
           />
         )}
         {phase.kind === "active" && (
@@ -238,6 +268,9 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
             round={phase.round}
             byId={byId}
             busy={busy}
+            autoAdvance={event?.auto_advance ?? true}
+            onBegin={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/begin`, { method: "POST" }); })}
+            onExtend={(seconds) => act(async () => { await apiFetch(`/events/${eventId}/rounds/extend`, { method: "POST", body: JSON.stringify({ seconds }) }); })}
             onEnd={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/end`, { method: "POST" }); })}
             onCancel={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/cancel`, { method: "POST" }); })}
             onPause={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/pause`, { method: "POST" }); })}

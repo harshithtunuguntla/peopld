@@ -9,6 +9,7 @@ export interface EventInfo {
   default_round_duration_seconds: number;
   target_rounds: number | null;
   round_topics: string[];
+  auto_advance: boolean; // end a round automatically when its timer runs out
   status: "upcoming" | "active" | "ended";
 }
 
@@ -27,6 +28,15 @@ export interface DraftAssignment {
   table_number: number;
 }
 
+export interface CapacityWarning {
+  seated: number;
+  capacity: number;
+  num_tables: number;
+  max_per_table: number;
+  biggest_table: number;
+  overfilled_tables: number;
+}
+
 export interface RoundDraft {
   id: string;
   round_number: number;
@@ -35,6 +45,7 @@ export interface RoundDraft {
   table_count: number;
   repeat_pairings: number;
   assignments: DraftAssignment[];
+  capacity_warning: CapacityWarning | null;
 }
 
 export interface ActiveAssignment {

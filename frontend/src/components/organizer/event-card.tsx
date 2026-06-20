@@ -201,7 +201,7 @@ export function CreateEventForm({ onCreated, onCancel }: { onCreated: () => void
           </Field>
         </div>
         <Field label="Date" name="ev-date" required>
-          {(p) => <Input {...p} type="date" required value={form.date} onChange={set("date")} />}
+          {(p) => <Input {...p} type="date" required max="9999-12-31" value={form.date} onChange={set("date")} />}
         </Field>
         <Field label="Start time" name="ev-time" required>
           {(p) => <Input {...p} type="time" required value={form.time} onChange={set("time")} />}
@@ -214,7 +214,7 @@ export function CreateEventForm({ onCreated, onCancel }: { onCreated: () => void
         <Field label="Tables" name="ev-tables" required>
           {(p) => <Input {...p} type="number" min={1} required value={form.num_tables} onChange={set("num_tables")} />}
         </Field>
-        <Field label="Seats per table" name="ev-seats" required hint="Minimum 3.">
+        <Field label="Max per table" name="ev-seats" required hint="The largest a table gets (min 3). Tune the minimum later in settings.">
           {(p) => <Input {...p} type="number" min={3} required value={form.seats_per_table} onChange={set("seats_per_table")} />}
         </Field>
         <Field label="Round length (minutes)" name="ev-dur" required hint="Minutes each round runs.">

@@ -28,6 +28,8 @@ from app.models.schemas import (
     EventResponse,
     EventStats,
     EventUpdate,
+    GraphEdge,
+    GraphNode,
     JoinRequest,
     JoinResponse,
     LiveStats,
@@ -652,10 +654,36 @@ def get_analytics(
         round(sum(len(s) for s in met.values()) / len(met), 2) if met else 0.0
     )
 
-    total_likes, total_matches = _likes_and_matches(db, event_id)
+    # Likes once, so we can derive both the counts AND the matched-pair set (the
+    # latter highlights the mutual connections in the connection web).
+    likes_rows = (
+        db.table("connection_likes")
+        .select("liker_attendee_id, liked_attendee_id")
+        .eq("event_id", event_id)
+        .execute()
+        .data
+        or []
+    )
+    directed = {(str(l["liker_attendee_id"]), str(l["liked_attendee_id"])) for l in likes_rows}
+    total_likes = len(directed)
+    matched_pairs = {frozenset((a, b)) for (a, b) in directed if (b, a) in directed}
+    total_matches = len(matched_pairs)
+    # Unique unordered pairs where at least one person liked the other → the funnel's
+    # middle stage (always between introductions and mutual matches).
+    liked_pairs = len({frozenset((a, b)) for (a, b) in directed})
 
     # Unique introductions = distinct pairs who ever shared a table.
-    total_introductions = len(_unique_table_pairs(assignments))
+    met_pairs = _unique_table_pairs(assignments)
+    total_introductions = len(met_pairs)
+
+    # People actually seated at least once = the population the connection metrics
+    # are about (a registrant who never sat down can't have "met" anyone).
+    seated_ids = {str(a["attendee_id"]) for a in assignments}
+    seated_attendees = len(seated_ids)
+    possible_introductions = seated_attendees * (seated_attendees - 1) // 2
+    # Nobody-left-behind: the fewest distinct people any seated person met. Someone
+    # seated alone for a round (no tablemates) has 0 — that's worth surfacing.
+    min_people_met = min((len(met.get(aid, set())) for aid in seated_ids), default=0)
 
     # Avg % of the rest of the room each person met (a single, intuitive headline).
     pct_room_met = (
@@ -688,16 +716,34 @@ def get_analytics(
         for aid, people in sorted(met.items(), key=lambda kv: len(kv[1]), reverse=True)[:5]
     ]
 
+    # Connection web: one node per seated person, one edge per pair who met (with
+    # the mutual matches flagged so the frontend can light them up). Sorted by name
+    # for a stable circular layout. Pilot-scale (~40) so the full graph is tiny.
+    graph_nodes = [
+        GraphNode(attendee_id=aid, name=names.get(aid, "—"), met=len(met.get(aid, set())))
+        for aid in sorted(seated_ids, key=lambda x: names.get(x, "").lower())
+    ]
+    graph_edges = []
+    for pair in met_pairs:
+        a, b = tuple(pair)
+        graph_edges.append(GraphEdge(a=a, b=b, matched=pair in matched_pairs))
+
     return EventAnalytics(
         total_attendees=len(attendees),
         rounds_completed=rounds_completed,
         avg_unique_people_met=avg_met,
         total_likes=total_likes,
         total_matches=total_matches,
+        liked_pairs=liked_pairs,
         total_introductions=total_introductions,
         pct_room_met=pct_room_met,
+        seated_attendees=seated_attendees,
+        possible_introductions=possible_introductions,
+        min_people_met=min_people_met,
         round_performance=round_performance,
         top_connectors=top_connectors,
+        graph_nodes=graph_nodes,
+        graph_edges=graph_edges,
     )
 
 

@@ -18,7 +18,7 @@ from app.algorithm import (
     plan_table_sizes,
 )
 
-# --- plan_table_sizes: the design's remainder rules (target 4, min 3, max 5) ---
+# --- plan_table_sizes: MIN-DRIVEN packing (fill every table to min, sprinkle the rest) ---
 
 
 def test_plan_exact_multiple():
@@ -26,8 +26,12 @@ def test_plan_exact_multiple():
     assert plan_table_sizes(40, 4, 10) == [4] * 10
 
 
-def test_plan_remainder_one_makes_one_table_of_five():
-    assert plan_table_sizes(13, 4, 10) == [5, 4, 4]
+def test_plan_packs_to_min_then_sprinkles_leftovers():
+    # Default min is 3: pack as many 3s as possible, leftovers bump tables to 4.
+    # 22 people → six tables of 3 + one of 4 (the user's worked example).
+    assert plan_table_sizes(22, 4, 10) == [4, 3, 3, 3, 3, 3, 3]
+    # 13 → four tables, one leftover → [4,3,3,3] (no longer a fuller table of 5)
+    assert plan_table_sizes(13, 4, 10) == [4, 3, 3, 3]
     assert plan_table_sizes(5, 4, 10) == [5]
 
 
@@ -36,7 +40,7 @@ def test_plan_remainder_two_makes_two_tables_of_three():
     assert plan_table_sizes(6, 4, 10) == [3, 3]
 
 
-def test_plan_remainder_three_makes_one_table_of_three():
+def test_plan_remainder_three():
     assert plan_table_sizes(11, 4, 10) == [4, 4, 3]
     assert plan_table_sizes(7, 4, 10) == [4, 3]
 
@@ -46,21 +50,24 @@ def test_plan_small_pools():
     assert plan_table_sizes(4, 4, 10) == [4]
 
 
-def test_plan_never_a_table_of_two():
+def test_plan_never_a_table_below_floor():
+    # Default floor is 3 with plenty of tables → no size ever drops below it.
     for pool in range(3, 60):
-        for size in plan_table_sizes(pool, 4, 20):
-            assert 3 <= size <= 5, f"pool={pool} produced size {size}"
+        assert min(plan_table_sizes(pool, 4, 20)) >= 3, f"pool={pool}"
 
 
-def test_plan_fewer_than_three_raises():
+def test_plan_fewer_than_min_raises():
     with pytest.raises(RotationError, match="at least 3 arrived"):
         plan_table_sizes(2, 4, 10)
 
 
-def test_plan_over_capacity_raises():
-    # 10 tables x 5 max = 50; 51 must be rejected with config advice
-    with pytest.raises(RotationError, match="exceed venue capacity"):
-        plan_table_sizes(51, 4, 10)
+def test_plan_over_capacity_overfills_instead_of_erroring():
+    # 10 tables, ceiling 4 → 40 comfortable seats. 51 people no longer errors:
+    # everyone is seated by overfilling some tables past the ceiling.
+    sizes = plan_table_sizes(51, 4, 10)
+    assert len(sizes) == 10
+    assert sum(sizes) == 51  # nobody dropped
+    assert max(sizes) > 4  # at least one table is overfilled past the ceiling
 
 
 def test_plan_capacity_boundary_fits():
@@ -75,9 +82,39 @@ def test_plan_caps_table_count_at_num_tables():
     assert sorted(sizes, reverse=True) == [5, 5, 4]
 
 
-def test_plan_seats_below_minimum_raises():
-    with pytest.raises(RotationError, match="seats_per_table"):
-        plan_table_sizes(10, 2, 10)
+# --- organizer-set min/max per-table bounds ---
+
+
+def test_table_bounds_higher_min_makes_bigger_tables():
+    # Min IS the size the algorithm packs toward: min 4 → 32 people = eight tables of 4.
+    assert plan_table_sizes(32, 4, 10, min_size=4) == [4, 4, 4, 4, 4, 4, 4, 4]
+
+
+def test_table_bounds_low_min_makes_many_small_tables():
+    # min 2 is now allowed → pack toward 2, leftovers become 3s.
+    assert plan_table_sizes(22, 4, 10, min_size=2, max_size=3) == [3, 3, 2, 2, 2, 2, 2, 2, 2, 2]
+
+
+def test_table_bounds_custom_min_forces_fewer_tables():
+    # min 5 means no table may drop below 5 → 20 people = four tables of 5.
+    assert plan_table_sizes(20, 5, 8, min_size=5, max_size=6) == [5, 5, 5, 5]
+
+
+def test_table_bounds_allows_two_but_never_one():
+    # min 2 is honored (tables of 2 appear); asking for 1 is clamped up to 2.
+    sizes_two = plan_table_sizes(9, 3, 10, min_size=2)
+    assert min(sizes_two) == 2
+    assert min(plan_table_sizes(9, 3, 10, min_size=1)) >= 2  # never a lonely 1
+
+
+def test_table_bounds_max_below_min_raises():
+    with pytest.raises(RotationError, match="smaller than the minimum"):
+        plan_table_sizes(20, 4, 8, min_size=5, max_size=4)
+
+
+def test_table_bounds_default_to_existing_behavior():
+    # No bounds passed → identical to the unset result.
+    assert plan_table_sizes(32, 3, 10) == plan_table_sizes(32, 3, 10, min_size=None, max_size=None)
 
 
 # --- generate_rotation: greedy fill + restarts ---
@@ -257,9 +294,12 @@ def test_plan_invalid_horizon_raises():
         plan_rounds(_ids(12), {}, 10, 4, horizon=0)
 
 
-def test_plan_over_capacity_raises():
-    with pytest.raises(RotationError, match="exceed venue capacity"):
-        plan_rounds(_ids(51), {}, num_tables=10, seats_per_table=4, horizon=3)
+def test_plan_over_capacity_overfills_everyone():
+    # Over capacity no longer raises — the planner overfills so nobody is unseated.
+    people = _ids(51)
+    plan = plan_rounds(people, {}, num_tables=10, seats_per_table=4, horizon=3)
+    for seating in plan.rounds:
+        assert sorted(seating.keys()) == sorted(people)  # all 51 placed every round
 
 
 # --- draft_snapshot_hash: the stale-draft guard ---

@@ -22,16 +22,32 @@ interface TopConnector {
   name: string;
   count: number;
 }
+interface GraphNode {
+  attendee_id: string;
+  name: string;
+  met: number;
+}
+interface GraphEdge {
+  a: string;
+  b: string;
+  matched: boolean;
+}
 interface Analytics {
   total_attendees: number;
   rounds_completed: number;
   avg_unique_people_met: number;
   total_likes: number;
   total_matches: number;
+  liked_pairs: number;
   total_introductions: number;
   pct_room_met: number;
+  seated_attendees: number;
+  possible_introductions: number;
+  min_people_met: number;
   round_performance: RoundPerf[];
   top_connectors: TopConnector[];
+  graph_nodes: GraphNode[];
+  graph_edges: GraphEdge[];
 }
 
 /**
@@ -85,6 +101,35 @@ export function EventRecap({ eventId }: { eventId: string }) {
               info="On average, each guest met this share of everyone else in the room." />
             <BentoTile value={`${matchRate}%`} label="match rate" bg="#D9FF4D" fg="#15130E" icon={Percent}
               info="Of all the conversations we created, this share turned into a mutual connection." />
+          </div>
+
+          {/* The room as a network — the headline visual */}
+          <Card className="p-5 sm:p-6">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ the room, connected</span>
+              <InfoHint text="Every dot is a person; every line is two people we seated together. Brighter lines became mutual matches. Bigger dots met more people." />
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">A night of strangers, turned into a network.</p>
+            <div className="mt-4">
+              <ConnectionWeb nodes={stats.graph_nodes} edges={stats.graph_edges} />
+            </div>
+          </Card>
+
+          {/* How introductions converted + how much of the room we reached */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card className="p-5 sm:p-6">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ from hello to connection</span>
+                <InfoHint text="Of the pairs we sat together, how many showed interest (a heart), and how many became a mutual match." />
+              </div>
+              <IntroFunnel introductions={stats.total_introductions} liked={stats.liked_pairs} matches={stats.total_matches} />
+            </Card>
+            <CoverageCard
+              made={stats.total_introductions}
+              possible={stats.possible_introductions}
+              minMet={stats.min_people_met}
+              seated={stats.seated_attendees}
+            />
           </div>
 
           {/* Secondary line */}
@@ -178,5 +223,181 @@ function Metric({ value, label, info }: { value: number; label: string; info?: s
       <div className="font-display text-2xl leading-none text-foreground">{value}</div>
       <div className="mt-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
     </div>
+  );
+}
+
+/**
+ * The connection web — the room as a network. Every dot is a person; every line
+ * is two people we seated together; brighter lines became mutual matches; bigger
+ * dots met more people. A plain circular (chord) layout: legible at a glance and
+ * needs no graph library. The lines stagger in (CSS) so the network visibly forms.
+ */
+function ConnectionWeb({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEdge[] }) {
+  if (nodes.length < 2) {
+    return (
+      <p className="py-10 text-center text-sm text-muted-foreground">
+        The web fills in once people have been seated together.
+      </p>
+    );
+  }
+  const SIZE = 460;
+  const c = SIZE / 2;
+  const R = c - 34;
+  const pos = new Map<string, { x: number; y: number }>();
+  nodes.forEach((n, i) => {
+    const ang = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
+    pos.set(n.attendee_id, { x: c + R * Math.cos(ang), y: c + R * Math.sin(ang) });
+  });
+  const maxMet = Math.max(1, ...nodes.map((n) => n.met));
+  const plain = edges.filter((e) => !e.matched);
+  const matched = edges.filter((e) => e.matched);
+
+  return (
+    <div className="w-full">
+      <svg
+        viewBox={`0 0 ${SIZE} ${SIZE}`}
+        className="mx-auto h-auto w-full max-w-[420px]"
+        role="img"
+        aria-label="Connection web — each line is two people who met; brighter lines are mutual matches"
+      >
+        {/* plain "met" edges underneath */}
+        {plain.map((e, i) => {
+          const p = pos.get(e.a);
+          const q = pos.get(e.b);
+          if (!p || !q) return null;
+          return (
+            <line
+              key={`p${i}`}
+              x1={p.x} y1={p.y} x2={q.x} y2={q.y}
+              stroke="hsl(var(--foreground))" strokeOpacity={0.1} strokeWidth={1}
+              className="web-edge" style={{ animationDelay: `${Math.min(i * 5, 900)}ms` }}
+            />
+          );
+        })}
+        {/* matched edges on top so they pop */}
+        {matched.map((e, i) => {
+          const p = pos.get(e.a);
+          const q = pos.get(e.b);
+          if (!p || !q) return null;
+          return (
+            <line
+              key={`m${i}`}
+              x1={p.x} y1={p.y} x2={q.x} y2={q.y}
+              stroke="hsl(var(--accent))" strokeOpacity={0.75} strokeWidth={1.75}
+              className="web-edge" style={{ animationDelay: `${900 + Math.min(i * 10, 700)}ms` }}
+            />
+          );
+        })}
+        {/* people */}
+        {nodes.map((n) => {
+          const p = pos.get(n.attendee_id)!;
+          return (
+            <circle
+              key={n.attendee_id}
+              cx={p.x} cy={p.y} r={3 + (n.met / maxMet) * 5}
+              fill="hsl(var(--accent))" fillOpacity={0.85}
+              stroke="hsl(var(--background))" strokeWidth={1.5}
+            />
+          );
+        })}
+      </svg>
+      <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-0.5 w-5 rounded-full" style={{ background: "hsl(var(--foreground) / 0.25)" }} /> met
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-0.5 w-5 rounded-full" style={{ background: "hsl(var(--accent))" }} /> matched
+        </span>
+        <span>· bigger dot met more people</span>
+      </div>
+    </div>
+  );
+}
+
+/** Sat together → sparked interest → matched. A true funnel (each stage ⊆ the one
+ *  above), so the conversion line is always ≤ 100% — easy for anyone to read. */
+function IntroFunnel({
+  introductions,
+  liked,
+  matches,
+}: {
+  introductions: number;
+  liked: number;
+  matches: number;
+}) {
+  const max = Math.max(1, introductions, liked, matches);
+  const stages = [
+    { label: "Introductions", value: introductions, color: "#FF5A3C" },
+    { label: "Sparked interest", value: liked, color: "#B66CFF" },
+    { label: "Mutual matches", value: matches, color: "#D9FF4D" },
+  ];
+  const pct = (v: number, base: number) => (base > 0 ? Math.round((v / base) * 100) : 0);
+  return (
+    <div className="mt-4 space-y-3.5">
+      {stages.map((s, i) => (
+        <div key={s.label}>
+          <div className="mb-1 flex items-baseline justify-between text-sm">
+            <span className="font-medium text-foreground">{s.label}</span>
+            <span className="font-display text-lg text-foreground">{s.value.toLocaleString()}</span>
+          </div>
+          <div className="h-3 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(2, (s.value / max) * 100)}%`, background: s.color }} />
+          </div>
+          {i < stages.length - 1 && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {pct(stages[i + 1].value, s.value)}% went on to {stages[i + 1].label.toLowerCase()}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Room coverage: how many of the possible pairs we actually introduced, plus the
+ *  honest "nobody left behind" read (the fewest people anyone met). */
+function CoverageCard({
+  made,
+  possible,
+  minMet,
+  seated,
+}: {
+  made: number;
+  possible: number;
+  minMet: number;
+  seated: number;
+}) {
+  const pct = possible > 0 ? Math.round((made / possible) * 100) : 0;
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ room coverage</span>
+        <InfoHint text="Of every possible pair of people in the room, how many we actually introduced. 100% would mean everyone met everyone." />
+      </div>
+      <div className="mt-4 flex items-baseline gap-2">
+        <span className="font-display text-4xl leading-none text-foreground">{pct}%</span>
+        <span className="text-sm text-muted-foreground">of the room connected</span>
+      </div>
+      <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {made.toLocaleString()} of {possible.toLocaleString()} possible introductions made.
+      </p>
+      {seated > 0 && (
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-border bg-background/40 p-3">
+          <Users className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
+          <p className="text-xs text-muted-foreground">
+            {minMet > 0 ? (
+              <>
+                <span className="font-medium text-foreground">Nobody left behind</span> — everyone met at least {minMet} {minMet === 1 ? "person" : "people"}.
+              </>
+            ) : (
+              <>At least one person wasn&apos;t seated with anyone — worth a personal intro next time.</>
+            )}
+          </p>
+        </div>
+      )}
+    </Card>
   );
 }

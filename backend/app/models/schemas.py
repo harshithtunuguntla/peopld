@@ -35,9 +35,12 @@ class EventCreate(BaseModel):
     location: str
     description: Optional[str] = None
     num_tables: int = Field(ge=1)
-    seats_per_table: int = Field(ge=3)  # algorithm minimum table size is 3
+    seats_per_table: int = Field(ge=3)  # the comfortable size = default ceiling (max) when max_per_table is unset
+    min_per_table: Optional[int] = Field(default=None, ge=2)  # size the algorithm packs toward (else 3); 2 allowed, never a lonely 1
+    max_per_table: Optional[int] = Field(default=None, ge=2)  # hard ceiling (else seats_per_table); tables overfill past it only when the room is over capacity
     default_round_duration_seconds: int = Field(default=300, gt=0)
     auto_arrive_on_register: bool = False  # OFF by default: registering ≠ arrived. The organizer checks people in (or they self-arrive with the room code) so the door is deliberate.
+    auto_advance: bool = True  # when a round's timer runs out, end it automatically (the organizer console drives this on its poll). The manual "End round" tap always works too.
     target_rounds: Optional[int] = Field(default=None, ge=1)  # intended round count (planning horizon)
     round_topics: List[str] = Field(default_factory=list)  # organizer-authored agenda; index i = round i+1's theme
     logo_url: Optional[str] = None          # event/host brand logo (image URL); shown when show_event_logo
@@ -61,8 +64,11 @@ class EventUpdate(BaseModel):
     status: Optional[Literal["upcoming", "active", "ended"]] = None
     num_tables: Optional[int] = Field(default=None, ge=1)
     seats_per_table: Optional[int] = Field(default=None, ge=3)
+    min_per_table: Optional[int] = Field(default=None, ge=2)  # None = leave untouched
+    max_per_table: Optional[int] = Field(default=None, ge=2)  # None = leave untouched
     default_round_duration_seconds: Optional[int] = Field(default=None, gt=0)
     auto_arrive_on_register: Optional[bool] = None
+    auto_advance: Optional[bool] = None  # None = leave untouched
     target_rounds: Optional[int] = Field(default=None, ge=1)
     round_topics: Optional[List[str]] = None  # None = leave the agenda untouched; [] clears it to defaults
     logo_url: Optional[str] = None            # None = leave untouched; "" clears the logo
@@ -85,8 +91,11 @@ class EventResponse(BaseModel):
     description: Optional[str]
     num_tables: int
     seats_per_table: int
+    min_per_table: Optional[int] = None
+    max_per_table: Optional[int] = None
     default_round_duration_seconds: int
     auto_arrive_on_register: bool
+    auto_advance: bool = True
     target_rounds: Optional[int] = None
     round_topics: List[str] = Field(default_factory=list)  # organizer-authored agenda (empty = canonical defaults)
     logo_url: Optional[str] = None
@@ -339,6 +348,42 @@ class RoundWithAssignmentsResponse(RoundResponse):
     assignments: list[TableAssignmentResponse] = []
 
 
+class RoundExtendRequest(BaseModel):
+    """Add time to the running round (the organizer's "+ Add time" control)."""
+    seconds: int = Field(gt=0, le=3600)  # 1s–1h; the UI offers +1/+2/+5 min and a custom field
+
+
+class RoundMoveRequest(BaseModel):
+    """Move one person to another (existing) table in the pending draft — the
+    organizer's manual override before publishing."""
+    attendee_id: UUID
+    table_number: int = Field(ge=1)
+
+
+class RunSheetTable(BaseModel):
+    table_number: int
+    people: list[str]  # names, sorted — the printable list for this table
+
+
+class RunSheetRound(BaseModel):
+    round_number: int
+    theme: Optional[str] = None  # organizer agenda name for this round, if set
+    tables: list[RunSheetTable]
+
+
+class RunSheet(BaseModel):
+    """A pre-generated, printable seating plan for the whole event — the event-day
+    backup. If the app falls over, the organizer hands these tables out (or reads
+    them aloud) and the night continues. `basis` says whether it was built over the
+    people already arrived or the full registered list (pre-doors insurance)."""
+    event_name: str
+    basis: Literal["arrived", "registered"]
+    num_tables: int
+    seats_per_table: int
+    total_people: int
+    rounds: list[RunSheetRound]
+
+
 class RoundCancelResponse(BaseModel):
     """Result of cancelling a published round (REQ-RT-02). The round + its
     assignments are deleted so they leave no trace in pairing history."""
@@ -355,6 +400,18 @@ class DraftAssignment(BaseModel):
     table_number: int
 
 
+class CapacityWarning(BaseModel):
+    """Set on a draft when the room can't seat everyone under the max table size, so
+    the plan overfills some tables. The organizer decides: add a table, or accept the
+    squeeze. Nobody is ever left unseated — this is a heads-up, not a failure."""
+    seated: int  # people in this draft
+    capacity: int  # comfortable seats = tables x max-per-table
+    num_tables: int
+    max_per_table: int  # the ceiling that's being exceeded
+    biggest_table: int  # the fullest table in the overfilled plan
+    overfilled_tables: int  # how many tables sit above the ceiling
+
+
 class RoundDraftResponse(BaseModel):
     """Seating preview. Lives in round_drafts (no client RLS access) — attendee
     phones learn nothing until the organizer publishes."""
@@ -366,6 +423,7 @@ class RoundDraftResponse(BaseModel):
     table_count: int
     repeat_pairings: int  # pairs in this draft who already met — organizer trust signal
     assignments: list[DraftAssignment]
+    capacity_warning: Optional[CapacityWarning] = None  # set when the plan overfills past max
     created_at: datetime
 
 
@@ -452,6 +510,8 @@ class LiveStateResponse(BaseModel):
     round: Optional[LiveRound] = None
     seat: Optional[LiveSeat] = None
     icebreaker: Optional[LiveIcebreaker] = None
+    recent_seat: Optional[LiveSeat] = None  # between rounds: the table you JUST left, so you can still ❤️/note the people you met before the next round
+    recent_round_number: Optional[int] = None  # which round recent_seat is from
 
 
 # --- Icebreaker ---
@@ -584,16 +644,36 @@ class TopConnector(BaseModel):
     count: int             # unique distinct people this person met across the event
 
 
+class GraphNode(BaseModel):
+    """A person in the connection web (recap visual). Owner-only endpoint."""
+    attendee_id: UUID
+    name: str
+    met: int = 0           # how many distinct people they met (node weight)
+
+
+class GraphEdge(BaseModel):
+    """A line in the connection web: two people who shared a table."""
+    a: UUID
+    b: UUID
+    matched: bool = False  # this pair also became a mutual match → highlight it
+
+
 class EventAnalytics(BaseModel):
     total_attendees: int
     rounds_completed: int
     avg_unique_people_met: float
     total_likes: int = 0          # one-directional likes cast across the whole event
     total_matches: int = 0        # mutual likes (counted once per pair)
+    liked_pairs: int = 0          # unique pairs where ≥1 person liked the other (funnel middle stage)
     total_introductions: int = 0  # unique pairs of people who shared a table at least once
     pct_room_met: int = 0         # avg % of the rest of the room each person met
+    seated_attendees: int = 0     # people seated at least once (graph nodes; coverage denominator base)
+    possible_introductions: int = 0  # n·(n-1)/2 over seated people — the coverage ceiling
+    min_people_met: int = 0       # fewest distinct people any seated person met ("nobody left behind")
     round_performance: List["RoundPerf"] = Field(default_factory=list)
     top_connectors: List["TopConnector"] = Field(default_factory=list)
+    graph_nodes: List["GraphNode"] = Field(default_factory=list)  # the connection web
+    graph_edges: List["GraphEdge"] = Field(default_factory=list)
 
 
 class DashboardSummary(BaseModel):

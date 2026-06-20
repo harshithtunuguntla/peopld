@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { Loader2, Check, Save, KeyRound, CalendarDays, SlidersHorizontal, ListChecks, Megaphone, Plus, Trash2 } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
@@ -54,8 +54,11 @@ interface OrgEvent {
   description: string | null;
   num_tables: number;
   seats_per_table: number;
+  min_per_table: number | null;
+  max_per_table: number | null;
   default_round_duration_seconds: number;
   auto_arrive_on_register: boolean;
+  auto_advance: boolean;
   target_rounds: number | null;
   round_topics: string[];
   logo_url: string | null;
@@ -81,10 +84,12 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
   const [description, setDescription] = useState("");
   const [tables, setTables] = useState("");
   const [seats, setSeats] = useState("");
+  const [minPer, setMinPer] = useState("");
   const [minutes, setMinutes] = useState("");
   const [targetRounds, setTargetRounds] = useState("");
   const [topics, setTopics] = useState<string[]>([]);
   const [autoArrive, setAutoArrive] = useState(false); // off by default; overwritten with the event's real value on load
+  const [autoAdvance, setAutoAdvance] = useState(true); // on by default; auto-end a round when its timer runs out
   const [logoUrl, setLogoUrl] = useState("");
   const [coverImageUrl, setCoverImageUrl] = useState("");
   const [showLogo, setShowLogo] = useState(true);
@@ -93,8 +98,15 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // Hydrate the form ONCE per event. The auth listener hands us a fresh `user`
+  // object whenever Supabase refreshes the token (which happens on tab refocus) —
+  // without this guard, coming back to the tab would re-run the load and wipe any
+  // unsaved typing (sponsor URLs, logo, etc.). Use the Refresh/reload to re-pull.
+  const hydratedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!user) return;
+    if (hydratedRef.current === eventId) return; // already loaded — don't clobber edits
+    hydratedRef.current = eventId;
     // /events/mine is owner-scoped — if this event isn't in it, the caller
     // doesn't own it (or it's gone), so we gate access the same way live/people do.
     apiFetch<OrgEvent[]>("/events/mine")
@@ -112,10 +124,12 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
         setDescription(ev.description ?? "");
         setTables(String(ev.num_tables));
         setSeats(String(ev.seats_per_table));
+        setMinPer(ev.min_per_table ? String(ev.min_per_table) : "");
         setMinutes(String(Math.max(1, Math.round(ev.default_round_duration_seconds / 60))));
         setTargetRounds(ev.target_rounds ? String(ev.target_rounds) : "");
         setTopics(ev.round_topics ?? []);
         setAutoArrive(ev.auto_arrive_on_register);
+        setAutoAdvance(ev.auto_advance ?? true);
         setLogoUrl(ev.logo_url ?? "");
         setCoverImageUrl(ev.cover_image_url ?? "");
         setShowLogo(ev.show_event_logo);
@@ -135,13 +149,22 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
           .catch(() => {});
       })
       .catch((e) => {
-        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) setDenied("forbidden");
-        else setError(e instanceof Error ? e.message : "Couldn't load this event");
+        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+          setDenied("forbidden"); // terminal — leave the guard set, don't retry-loop
+        } else {
+          hydratedRef.current = null; // transient failure — allow a retry on the next auth tick
+          setError(e instanceof Error ? e.message : "Couldn't load this event");
+        }
       });
   }, [user, eventId]);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    // Catch a min > max mix-up here, not live at round-start (reliability first).
+    if (minPer.trim() && Number(seats) && Number(minPer) > Number(seats)) {
+      setError(`Min per table (${minPer}) can't be larger than the max (${seats}).`);
+      return;
+    }
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -155,9 +178,13 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
           time: time.length === 5 ? `${time}:00` : time,
           description: description.trim() || null,
           num_tables: Number(tables),
+          // "Seats per table" is the max/ceiling; "Max per table" override is retired
+          // from the UI (one ceiling, no duplication), so we never send max_per_table.
           seats_per_table: Number(seats),
+          min_per_table: minPer.trim() ? Number(minPer) : null,
           default_round_duration_seconds: Math.max(1, Number(minutes)) * 60,
           auto_arrive_on_register: autoArrive,
+          auto_advance: autoAdvance,
           target_rounds: targetRounds.trim() ? Number(targetRounds) : null,
           round_topics: topics.slice(0, agendaRows).map((t) => (t ?? "").trim()),
           logo_url: logoUrl.trim(), // "" clears the logo
@@ -210,6 +237,8 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
     );
   }
 
+  // Comfortable capacity = tables x max-per-table (the "Seats per table" ceiling).
+  // The room can still overfill past this — the live preview warns when it does.
   const capacity = (Number(tables) || 0) * (Number(seats) || 0);
   // How many agenda rows to edit: one per planned round, else a sensible default.
   const agendaRows = Math.min(
@@ -241,7 +270,7 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
               {(p) => <Input {...p} required value={name} onChange={(e) => setName(e.target.value)} />}
             </Field>
             <Field label="Date" name="s-date" required>
-              {(p) => <Input {...p} type="date" required value={date} onChange={(e) => setDate(e.target.value)} />}
+              {(p) => <Input {...p} type="date" required max="9999-12-31" value={date} onChange={(e) => setDate(e.target.value)} />}
             </Field>
             <Field label="Start time" name="s-time" required>
               {(p) => <Input {...p} type="time" required value={time} onChange={(e) => setTime(e.target.value)} />}
@@ -261,19 +290,26 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
             <Field label="Tables" name="s-tables" required>
               {(p) => <Input {...p} type="number" min={1} required value={tables} onChange={(e) => setTables(e.target.value)} />}
             </Field>
-            <Field label="Seats per table" name="s-seats" required hint="Minimum 3.">
-              {(p) => <Input {...p} type="number" min={3} required value={seats} onChange={(e) => setSeats(e.target.value)} />}
-            </Field>
             <Field label="Round length" name="s-min" required hint="Minutes each round runs.">
               {(p) => <Input {...p} type="number" min={1} required value={minutes} onChange={(e) => setMinutes(e.target.value)} />}
+            </Field>
+            <Field label="Max per table" name="s-seats" required hint="The largest a table gets — the comfortable size.">
+              {(p) => <Input {...p} type="number" min={3} required value={seats} onChange={(e) => setSeats(e.target.value)} />}
+            </Field>
+            <Field label="Min per table" name="s-minper" hint="Optional. Blank = auto (3). Lowest is 2.">
+              {(p) => <Input {...p} type="number" min={2} value={minPer} onChange={(e) => setMinPer(e.target.value)} placeholder="auto" />}
             </Field>
             <Field label="Planned rounds" name="s-rounds" hint="Leave blank to auto-plan from room size.">
               {(p) => <Input {...p} type="number" min={1} value={targetRounds} onChange={(e) => setTargetRounds(e.target.value)} />}
             </Field>
           </div>
 
-          <p className="mt-1 text-xs text-muted-foreground">
-            Seats up to <span className="font-medium text-foreground">{capacity || "—"}</span> people per round.
+          <p className="mt-2 text-xs text-muted-foreground">
+            Seats up to <span className="font-medium text-foreground">{capacity || "—"}</span> people per round. Every
+            table fills to the <span className="font-medium text-foreground">min</span> first, then leftover people join
+            existing tables (growing toward the <span className="font-medium text-foreground">max</span>) — e.g. 22 at
+            min 3 become one table of 4 and six of 3, never a table of 2. If the room can&apos;t fit everyone under the
+            max, nobody&apos;s dropped: the preview overfills and warns you so you can add a table or accept the squeeze.
           </p>
 
           {/* Auto check-in toggle — the one that controls the People "Check in all" flow */}
@@ -287,6 +323,19 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
               </p>
             </div>
             <Toggle checked={autoArrive} onChange={setAutoArrive} />
+          </div>
+
+          {/* Auto-advance toggle — when a round's timer runs out, end it automatically. */}
+          <div className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-border bg-background/40 p-4">
+            <div>
+              <div className="text-sm font-medium text-foreground">Auto-end rounds when the timer runs out</div>
+              <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                On: when a round&apos;s clock hits zero, the control room ends it for you (keep the
+                live page open). Off: rounds run until you tap <span className="font-medium text-foreground">End round</span>.
+                Either way you can <span className="font-medium text-foreground">Add time</span> or end early.
+              </p>
+            </div>
+            <Toggle checked={autoAdvance} onChange={setAutoAdvance} />
           </div>
         </Section>
 

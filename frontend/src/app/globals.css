@@ -202,6 +202,21 @@
   animation: skeleton-shimmer 1.6s ease-in-out infinite;
 }
 
+/* Connection-web edge "draw in". `both` fill + per-edge animation-delay (inline)
+   staggers the lines so the room's network visibly forms. Under reduced motion the
+   safety net below collapses the duration, so every edge is simply visible. */
+@keyframes web-edge-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.web-edge {
+  animation: web-edge-in 0.5s ease both;
+}
+
 /* Reduced-motion safety net. Components also guard JS animations via
    useReducedMotion() / a media check. See DESIGN_SYSTEM §5. */
 @media (prefers-reduced-motion: reduce) {

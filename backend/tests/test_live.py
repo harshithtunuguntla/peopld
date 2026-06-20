@@ -210,6 +210,43 @@ def test_live_between_rounds(client, db, event):
     assert body["round"] is None
 
 
+def test_live_between_rounds_surfaces_recent_table(client, db, event):
+    """Between rounds, the table you just left comes back (recent_seat) so you can
+    still ❤️/note the people you met before the next round whisks them away."""
+    me = _me(db, event["id"])
+    mate = make_attendee(db, event["id"], name="Bobby", status="arrived")
+    other = make_attendee(db, event["id"], name="FarAway", status="arrived")
+    rnd = make_round(
+        db, event["id"], round_number=1, status="completed",
+        ended_at="2026-07-01T18:30:00+00:00",
+    )
+    make_assignment(db, event["id"], rnd["id"], me["id"], table_number=4)
+    make_assignment(db, event["id"], rnd["id"], mate["id"], table_number=4)
+    make_assignment(db, event["id"], rnd["id"], other["id"], table_number=9)
+
+    body = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH).json()
+    assert body["phase"] == "between_rounds"
+    assert body["recent_round_number"] == 1
+    assert body["recent_seat"]["table_number"] == 4
+    names = [m["name"] for m in body["recent_seat"]["tablemates"]]
+    assert names == ["Bobby"]  # self + the person at table 9 excluded
+
+
+def test_live_between_rounds_no_recent_seat_when_unseated(client, db, event):
+    """A late arrival who never had a table that round gets no recent_seat."""
+    _me(db, event["id"])
+    seated = make_attendee(db, event["id"], name="Bobby", status="arrived")
+    rnd = make_round(
+        db, event["id"], round_number=1, status="completed",
+        ended_at="2026-07-01T18:30:00+00:00",
+    )
+    make_assignment(db, event["id"], rnd["id"], seated["id"], table_number=1)
+
+    body = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH).json()
+    assert body["phase"] == "between_rounds"
+    assert body["recent_seat"] is None
+
+
 def test_live_ended(client, db, event):
     db.table("events").update({"status": "ended"}).eq("id", event["id"]).execute()
     _me(db, event["id"])

@@ -62,6 +62,8 @@ export interface LiveState {
   round: LiveRound | null;
   seat: LiveSeat | null;
   icebreaker: LiveIcebreaker | null;
+  recent_seat: LiveSeat | null; // between rounds: the table you just left, so you can still like/note
+  recent_round_number: number | null;
 }
 
 export interface UseLiveState {

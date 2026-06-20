@@ -7,6 +7,7 @@ import { Flag, Users, Heart, Handshake, Trophy, Percent, BarChart3, ArrowRight, 
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 import { apiFetch } from "@/lib/api";
+import { RelationshipInsights } from "@/components/organizer/analytics/relationship-sections";
 import { Card } from "@/components/organizer/console-ui";
 import { BentoTile, InfoHint } from "@/components/organizer/metric-tile";
 import { Avatar } from "@/components/brand/avatar";
@@ -195,6 +196,10 @@ export function EventRecap({ eventId }: { eventId: string }) {
               )}
             </Card>
           </div>
+
+          {/* Relationship intelligence — readable, decision-oriented insights from
+              the same weighted graph data (no extra API call). */}
+          <RelationshipInsights nodes={stats.graph_nodes} edges={stats.graph_edges} />
 
           {/* The room as a network — the signature exploration experience, last so
               it reads as a deep-dive rather than a mid-page chart. */}

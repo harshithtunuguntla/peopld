@@ -6,33 +6,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 // touches `window`) never runs on the server. Static import lets us hold a real
 // ref to call zoomToFit/centerAt.
 import ForceGraph2D from "react-force-graph-2d";
-import { X, Maximize2, Heart, Repeat, Sparkles, Users } from "lucide-react";
+import { X, Maximize2, Heart, Repeat, Sparkles, Users, type LucideIcon } from "lucide-react";
 
 import { Avatar } from "@/components/brand/avatar";
+import { COMMUNITY_COLORS, detectCommunities, tierOf, type GraphNode, type GraphEdge, type TierKey } from "./graph-utils";
 
-export interface GraphNode {
-  attendee_id: string;
-  name: string;
-  met: number;
-  company?: string | null;
-  role?: string | null;
-  rounds_present?: number;
-  mutual_likes?: number;
-}
-export interface GraphEdge {
-  a: string;
-  b: string;
-  matched: boolean;
-  liked?: boolean;
-  weight?: number;
-  rounds?: number[];
-}
+export type { GraphNode, GraphEdge };
 
-// On-brand palette for community tinting (natural groups that formed).
-const COMMUNITY = ["#FF5A3C", "#B66CFF", "#39C2FF", "#D9FF4D", "#FF8FB1", "#5BE0A8", "#FFC24B", "#7C9CFF"];
 const ACCENT = "#FF5A3C";
 const MATCH = "#B66CFF";
 const REPEAT = "#FFC24B";
+
+const TIER_ICON: Record<TierKey, LucideIcon> = { matched: Heart, repeat: Repeat, spark: Sparkles, met: Users };
 
 type FNode = GraphNode & { id: string; community: number; _r: number; x?: number; y?: number };
 type FLink = { source: string; target: string; weight: number; rounds: number[]; matched: boolean; liked: boolean };
@@ -44,54 +29,6 @@ interface Neighbor {
   rounds: number[];
   matched: boolean;
   liked: boolean;
-}
-
-/** Relationship strength tier for an edge — drives color + the panel badge. */
-function tierOf(e: { matched: boolean; weight: number; liked: boolean }) {
-  if (e.matched) return { label: "Matched", color: MATCH, icon: Heart };
-  if (e.weight >= 2) return { label: "Repeat", color: REPEAT, icon: Repeat };
-  if (e.liked) return { label: "Spark", color: "#39C2FF", icon: Sparkles };
-  return { label: "Met", color: "#9aa0aa", icon: Users };
-}
-
-/** Label-propagation community detection — light, deterministic, good enough at
- *  pilot scale to reveal the natural groups that circulated together. */
-function detectCommunities(nodes: { id: string }[], links: { source: string; target: string }[]): Map<string, number> {
-  const adj = new Map<string, string[]>();
-  nodes.forEach((n) => adj.set(n.id, []));
-  links.forEach((l) => {
-    adj.get(l.source)?.push(l.target);
-    adj.get(l.target)?.push(l.source);
-  });
-  const ids = nodes.map((n) => n.id).sort();
-  const label = new Map<string, string>(ids.map((id) => [id, id]));
-  for (let iter = 0; iter < 12; iter++) {
-    let changed = false;
-    for (const id of ids) {
-      const counts = new Map<string, number>();
-      for (const nb of adj.get(id) || []) {
-        const l = label.get(nb)!;
-        counts.set(l, (counts.get(l) || 0) + 1);
-      }
-      if (!counts.size) continue;
-      let best = label.get(id)!;
-      let bestC = -1;
-      for (const [l, c] of [...counts].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-        if (c > bestC) {
-          bestC = c;
-          best = l;
-        }
-      }
-      if (best !== label.get(id)) {
-        label.set(id, best);
-        changed = true;
-      }
-    }
-    if (!changed) break;
-  }
-  const uniq = [...new Set(ids.map((id) => label.get(id)!))];
-  const idx = new Map(uniq.map((l, i) => [l, i]));
-  return new Map(ids.map((id) => [id, idx.get(label.get(id)!)!]));
 }
 
 function idOf(end: string | { id: string }): string {
@@ -144,8 +81,8 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
       liked: e.liked ?? false,
     }));
     const community = detectCommunities(
-      nodes.map((n) => ({ id: n.attendee_id })),
-      links,
+      nodes.map((n) => n.attendee_id),
+      edges,
     );
     const fnodes: FNode[] = nodes.map((n) => ({
       ...n,
@@ -241,7 +178,7 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
             }
             ctx.beginPath();
             ctx.arc(n.x!, n.y!, n._r, 0, 2 * Math.PI);
-            ctx.fillStyle = dim ? "#6b7280" : COMMUNITY[n.community % COMMUNITY.length];
+            ctx.fillStyle = dim ? "#6b7280" : COMMUNITY_COLORS[n.community % COMMUNITY_COLORS.length];
             ctx.fill();
             ctx.shadowBlur = 0;
             ctx.lineWidth = (isSel ? 2.5 : 1.2) / scale;
@@ -353,7 +290,7 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
             <ul className="mt-2 space-y-1.5">
               {selectedNbrs.slice(0, 8).map((nb) => {
                 const t = tierOf(nb);
-                const Icon = t.icon;
+                const Icon = TIER_ICON[t.key];
                 return (
                   <li key={nb.id}>
                     <button

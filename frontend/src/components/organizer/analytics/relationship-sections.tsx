@@ -1,14 +1,12 @@
 "use client";
 
 import { useMemo } from "react";
-import { Heart, Repeat, Sparkles, Users, UserMinus, Crown, ShieldCheck, type LucideIcon } from "lucide-react";
+import { Heart, UserMinus, Crown, ShieldCheck } from "lucide-react";
 
 import { Card } from "@/components/organizer/console-ui";
 import { InfoHint } from "@/components/organizer/metric-tile";
 import { Avatar } from "@/components/brand/avatar";
-import { computeInsights, tierOf, COMMUNITY_COLORS, type GraphNode, type GraphEdge, type TierKey } from "./graph-utils";
-
-const TIER_ICON: Record<TierKey, LucideIcon> = { matched: Heart, repeat: Repeat, spark: Sparkles, met: Users };
+import { computeInsights, meetingStrength, COMMUNITY_COLORS, type GraphNode, type GraphEdge } from "./graph-utils";
 
 function SectionHead({ title, info }: { title: string; info: string }) {
   return (
@@ -36,15 +34,14 @@ export function RelationshipInsights({ nodes, edges }: { nodes: GraphNode[]; edg
         <Card className="p-5 sm:p-6">
           <SectionHead
             title="strongest relationships"
-            info="The bonds the night built — pairs who met repeatedly and/or matched. The strongest signal of value created (and the best candidates to reconnect at the next event)."
+            info="The bonds the night built. Strength is how many times a pair shared a table — Met once, Building (2×), or Strong (3+×); a heart marks a mutual match. The best candidates to reconnect at the next event."
           />
           {ins.strongest.length === 0 ? (
             <p className="mt-4 text-sm text-muted-foreground">No relationships recorded yet.</p>
           ) : (
             <ul className="mt-4 space-y-2.5">
               {ins.strongest.slice(0, 6).map((p) => {
-                const t = tierOf(p);
-                const Icon = TIER_ICON[t.key];
+                const s = meetingStrength(p.weight);
                 return (
                   <li key={`${p.a}-${p.b}`} className="flex items-center gap-3">
                     <div className="flex shrink-0 -space-x-2">
@@ -60,8 +57,8 @@ export function RelationshipInsights({ nodes, edges }: { nodes: GraphNode[]; edg
                         {p.rounds.length ? `R${p.rounds.join(", R")}` : ""}
                       </div>
                     </div>
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium" style={{ background: `${t.color}22`, color: t.color }}>
-                      <Icon className="h-3 w-3" aria-hidden /> {t.label}
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium" style={{ background: `${s.color}22`, color: s.color }}>
+                      {p.matched && <Heart className="h-3 w-3" aria-hidden />} {s.label}
                     </span>
                   </li>
                 );

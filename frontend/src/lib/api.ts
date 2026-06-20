@@ -13,6 +13,29 @@ export class ApiError extends Error {
   }
 }
 
+/** FastAPI returns `detail` as a plain string for our own HTTPExceptions, but as
+ * an ARRAY of {loc, msg, ...} objects for request-validation (422) failures.
+ * Flatten both into a human-readable line so the UI never shows "[object Object]". */
+function messageFromDetail(detail: unknown, status: number): string {
+  if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((e) => {
+        if (e && typeof e === "object" && "msg" in e) {
+          const loc = Array.isArray((e as { loc?: unknown[] }).loc)
+            ? (e as { loc: unknown[] }).loc.filter((l) => l !== "body")
+            : [];
+          const field = loc.length ? `${loc.join(".")}: ` : "";
+          return `${field}${(e as { msg: string }).msg}`;
+        }
+        return null;
+      })
+      .filter(Boolean);
+    if (parts.length) return parts.join("; ");
+  }
+  return `API error ${status}`;
+}
+
 // Calls the FastAPI backend, attaching the Supabase JWT when signed in.
 export async function apiFetch<T>(
   path: string,
@@ -31,7 +54,7 @@ export async function apiFetch<T>(
   const res = await fetch(`${API_URL}${path}`, { ...options, headers });
   if (!res.ok) {
     const error = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, error.detail ?? `API error ${res.status}`);
+    throw new ApiError(res.status, messageFromDetail(error.detail, res.status));
   }
   return res.json();
 }

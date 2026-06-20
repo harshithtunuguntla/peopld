@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from itertools import combinations
 from math import exp
 
-MIN_TABLE_SIZE = 3
+MIN_TABLE_SIZE = 3  # default minimum when the organizer sets none (pack toward 3)
+HARD_FLOOR = 2  # smallest table an organizer may ask for — a table of 1 isn't networking
 DEFAULT_RESTARTS = 20
 DEFAULT_TIME_BUDGET_S = 3.0  # hard wall-clock cap on the planner — never hang the console
 
@@ -44,55 +45,99 @@ class Rotation:
     repeat_pairings: int  # seated pairs that have already met in a previous round
 
 
-def draft_snapshot_hash(arrived_ids: list[str], num_tables: int, seats_per_table: int) -> str:
+def draft_snapshot_hash(
+    arrived_ids: list[str],
+    num_tables: int,
+    seats_per_table: int,
+    min_size: int | None = None,
+    max_size: int | None = None,
+) -> str:
     """Fingerprint of everything a draft depends on (arrived set + table config).
 
     Publish compares this against a fresh snapshot — any change means the
-    preview no longer matches reality and must be regenerated.
+    preview no longer matches reality and must be regenerated. Table-size bounds
+    are part of the config, so changing them invalidates a pending draft too.
     """
-    material = f"{num_tables}:{seats_per_table}:" + ",".join(sorted(arrived_ids))
+    material = (
+        f"{num_tables}:{seats_per_table}:{min_size or ''}:{max_size or ''}:"
+        + ",".join(sorted(arrived_ids))
+    )
     return hashlib.sha256(material.encode()).hexdigest()
 
 
-def plan_table_sizes(pool_size: int, seats_per_table: int, num_tables: int) -> list[int]:
-    """Decide how many tables of which sizes, per the design rules.
+def table_floor(min_size: int | None = None) -> int:
+    """The minimum table size the algorithm packs toward. Organizer-set `min_size`
+    (clamped to HARD_FLOOR so it's never below 2), else the default of 3."""
+    return max(HARD_FLOOR, min_size or MIN_TABLE_SIZE)
 
-    Target = seats_per_table; min 3, max seats_per_table + 1; never 2.
-    Remainder of 1 -> one bigger table; remainder of 2+ -> extra smaller
-    tables (prefer 3s over 5s). Fewest tables, sizes descending.
+
+def table_ceiling(
+    seats_per_table: int, min_size: int | None = None, max_size: int | None = None
+) -> int:
+    """The largest a table may grow to. An explicit `max_size` wins; otherwise the
+    event's seats_per_table is the comfortable ceiling — but never below floor + 1,
+    so the natural "sprinkle one leftover" (a min+1 table) never trips a false
+    over-capacity warning."""
+    floor = table_floor(min_size)
+    if max_size:
+        return max_size
+    return max(seats_per_table, floor + 1)
+
+
+def table_capacity(
+    num_tables: int, seats_per_table: int,
+    min_size: int | None = None, max_size: int | None = None,
+) -> int:
+    """Comfortable seats in the room = tables x ceiling. A pool above this still
+    seats (tables overfill past the ceiling), but the caller should warn about it."""
+    return num_tables * table_ceiling(seats_per_table, min_size, max_size)
+
+
+def plan_table_sizes(
+    pool_size: int,
+    seats_per_table: int,
+    num_tables: int,
+    *,
+    min_size: int | None = None,
+    max_size: int | None = None,
+) -> list[int]:
+    """How many tables, of which sizes. MIN-DRIVEN: make as many tables as possible
+    at the minimum size, then hand the leftover people out one per table (so a few
+    become min+1), growing past min+1 toward the ceiling only when the room runs
+    out of tables. This is exactly "fill every table to the minimum, then split the
+    remaining people across existing tables".
+
+    Rules honored:
+    - never a table below the floor (organizer min, clamped to 2);
+    - leftovers join existing tables rather than forming an undersized one;
+    - nobody is ever left unseated — an over-capacity room OVERFILLS past the
+      ceiling instead of erroring, and the caller surfaces that as a warning so the
+      organizer can add a table or accept the squeeze.
+
+    Decides bucket SIZES only; which people share a table is the optimizer's job
+    (novelty + mutuals + honored picks), which this does not touch.
     """
-    if seats_per_table < MIN_TABLE_SIZE:
-        raise RotationError(f"seats_per_table must be at least {MIN_TABLE_SIZE}")
-    if pool_size < MIN_TABLE_SIZE:
+    if num_tables < 1:
+        raise RotationError("The event needs at least one table.")
+    floor = table_floor(min_size)
+    ceil_ = table_ceiling(seats_per_table, min_size, max_size)
+    if ceil_ < floor:
         raise RotationError(
-            f"Need at least {MIN_TABLE_SIZE} arrived attendees to start a round "
+            f"Max per table ({ceil_}) can't be smaller than the minimum ({floor}). "
+            "Adjust the table sizes in the event settings."
+        )
+    if pool_size < floor:
+        raise RotationError(
+            f"Need at least {floor} arrived attendees to start a round "
             f"({pool_size} currently)"
         )
-    max_size = seats_per_table + 1
-    capacity = num_tables * max_size
-    if pool_size > capacity:
-        raise RotationError(
-            f"{pool_size} arrived attendees exceed venue capacity "
-            f"({num_tables} tables x {max_size} max seats = {capacity}). "
-            "Increase tables or seats per table in the event settings."
-        )
 
-    full_tables, remainder = divmod(pool_size, seats_per_table)
-    table_count = full_tables if remainder <= 1 else full_tables + 1
-    table_count = max(1, min(table_count, num_tables))
-    # Splitting further would create tables under the minimum — merge instead.
-    while table_count > 1 and pool_size // table_count < MIN_TABLE_SIZE:
-        table_count -= 1
-
+    # As many tables as possible while each keeps at least `floor` people. When the
+    # physical table count binds, tables grow above the floor (and, for an
+    # over-capacity room, past the ceiling — an intentional overfill, not an error).
+    table_count = max(1, min(num_tables, pool_size // floor))
     base, extra = divmod(pool_size, table_count)
-    sizes = [base + 1] * extra + [base] * (table_count - extra)
-    if sizes[0] > max_size:
-        raise RotationError(
-            f"No valid table split for {pool_size} attendees with tables of "
-            f"{seats_per_table} (min {MIN_TABLE_SIZE}, max {max_size} per table). "
-            "Adjust seats per table in the event settings."
-        )
-    return sizes
+    return [base + 1] * extra + [base] * (table_count - extra)
 
 
 def generate_rotation(
@@ -102,6 +147,8 @@ def generate_rotation(
     seats_per_table: int,
     rng: random.Random | None = None,
     restarts: int = DEFAULT_RESTARTS,
+    min_size: int | None = None,
+    max_size: int | None = None,
 ) -> Rotation:
     """Greedy fill with random restarts; keeps the lowest-repeat arrangement.
 
@@ -109,7 +156,8 @@ def generate_rotation(
     thing is milliseconds. Raises RotationError when no valid plan exists.
     """
     rng = rng or random.Random()
-    sizes = plan_table_sizes(len(arrived_ids), seats_per_table, num_tables)
+    sizes = plan_table_sizes(len(arrived_ids), seats_per_table, num_tables,
+                             min_size=min_size, max_size=max_size)
 
     best_tables: dict[str, int] = {}
     best_score: int | None = None
@@ -244,6 +292,8 @@ def plan_rounds(
     sa_iters: int | None = None,
     time_budget_s: float = DEFAULT_TIME_BUDGET_S,
     intents: set[tuple[str, str]] | None = None,
+    min_size: int | None = None,
+    max_size: int | None = None,
 ) -> RotationPlan:
     """Plan up to `horizon` rounds for the arrived pool, minimizing future overlap.
 
@@ -257,7 +307,8 @@ def plan_rounds(
     rng = rng or random.Random()
     if horizon < 1:
         raise RotationError("Planning horizon must be at least 1 round.")
-    sizes = plan_table_sizes(len(arrived_ids), seats_per_table, num_tables)
+    sizes = plan_table_sizes(len(arrived_ids), seats_per_table, num_tables,
+                             min_size=min_size, max_size=max_size)
 
     n = len(arrived_ids)
     index = {aid: i for i, aid in enumerate(arrived_ids)}

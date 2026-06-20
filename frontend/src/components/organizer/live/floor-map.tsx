@@ -66,10 +66,15 @@ export function FloorMap({
   tables,
   theme,
   seatsPerTable,
+  onMovePerson,
+  moveBusy = false,
 }: {
   tables: { table_number: number; seats: Seat[] }[];
   theme: Round;
   seatsPerTable: number;
+  /** Draft mode only: move a person to another table (manual override). */
+  onMovePerson?: (attendeeId: string, tableNumber: number) => void;
+  moveBusy?: boolean;
 }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [q, setQ] = useState("");
@@ -202,7 +207,23 @@ export function FloorMap({
                 {sel.seats.map((s) => (
                   <li key={s.attendee_id} className="flex items-center gap-2.5 rounded-xl px-2 py-1.5">
                     <Avatar name={s.name} seed={s.attendee_id} src={s.avatar_url} size={32} />
-                    <span className="truncate text-sm text-foreground">{s.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">{s.name}</span>
+                    {onMovePerson && tables.length > 1 && (
+                      <select
+                        value={sel.table_number}
+                        disabled={moveBusy}
+                        onChange={(e) => onMovePerson(s.attendee_id, Number(e.target.value))}
+                        aria-label={`Move ${s.name} to another table`}
+                        title="Move to another table"
+                        className="shrink-0 rounded-lg border border-border bg-background px-2 py-1 text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus:border-accent disabled:opacity-50"
+                      >
+                        {tables.map((t) => (
+                          <option key={t.table_number} value={t.table_number}>
+                            {t.table_number === sel.table_number ? `Table ${t.table_number}` : `→ Table ${t.table_number}`}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </li>
                 ))}
               </ul>

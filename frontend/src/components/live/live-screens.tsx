@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { Loader2, PartyPopper, Sparkles, Heart, UserRound, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star } from "lucide-react";
+import { Loader2, PartyPopper, Sparkles, Heart, UserRound, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star, MapPin } from "lucide-react";
 
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Wordmark } from "@/components/brand/wordmark";
@@ -14,12 +14,11 @@ import { buttonVariants } from "@/components/ui/button";
 import { ROUNDS, agendaFor, type Round } from "@/lib/design/rounds";
 import { COLORS } from "@/lib/design/colors";
 import { cn } from "@/lib/utils";
-import { Hourglass } from "./hourglass";
 import { apiFetch, ApiError } from "@/lib/api";
 import { CountdownPill, useCountdown } from "./countdown";
 import type { LiveState, Tablemate } from "@/lib/live/use-live-state";
 import { useEventBranding, type Sponsor } from "@/lib/live/use-branding";
-import { SponsorShowcase, EventLogo } from "./sponsor-showcase";
+import { SponsorShowcase, EventLogo, WaitingStage } from "./sponsor-showcase";
 
 /** One tablemate, with a like (❤️) toggle and a private-note affordance. Likes
  * persist and surface in the rolodex later (mutual = a match); notes are
@@ -407,7 +406,7 @@ export function WaitingRoom({ state, eventId }: { state: LiveState; eventId?: st
 
       <div className="flex flex-col items-center pt-2 text-center">
         <EventLogo branding={branding} className="mb-4" />
-        <Hourglass size={120} />
+        <WaitingStage sponsors={sponsors} hourglassSize={120} />
         <h1 className="mt-3 font-display text-2xl text-foreground">The room is filling up</h1>
         <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">
           <span className="block">Grab a drink and say hi to someone new.</span>
@@ -422,7 +421,6 @@ export function WaitingRoom({ state, eventId }: { state: LiveState; eventId?: st
       />
       <RoomRoster roster={roster} />
       {eventId && <DirectoryLink eventId={eventId} />}
-      <SponsorBlock sponsors={sponsors} />
     </div>
   );
 }
@@ -569,6 +567,7 @@ export function RoomCodeCheckIn({
 export function BetweenRounds({ state, eventId }: { state: LiveState; eventId?: string }) {
   const branding = useEventBranding(eventId);
   const sponsors = branding?.sponsors ?? [];
+  const [openNoteAttendeeId, setOpenNoteAttendeeId] = useState<string | null>(null);
 
   // Give the wait context: which round just finished, and what's next. The next
   // round number is "completed + 1"; its theme comes from the organizer agenda.
@@ -577,6 +576,12 @@ export function BetweenRounds({ state, eventId }: { state: LiveState; eventId?: 
   const isFinal = total != null && done >= total;
   const nextNumber = done + 1;
   const nextTheme = agendaFor(nextNumber - 1, state.round_topics);
+
+  // The table you just left — so you can still ❤️/note the people you met before
+  // the next round pulls them off screen. Only when we have an event id (needed
+  // for the like/note calls) and you actually had tablemates.
+  const justMet = state.recent_seat?.tablemates ?? [];
+  const showJustMet = Boolean(eventId) && justMet.length > 0;
 
   // Same brand treatment as the waiting room and the "next round is yours" screen:
   // logo → hourglass → message → the sponsor flip. The hourglass IS the waiting
@@ -589,7 +594,7 @@ export function BetweenRounds({ state, eventId }: { state: LiveState; eventId?: 
         <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground ring-1 ring-inset ring-border">
           Round {done}{total ? ` of ${total}` : ""} complete
         </span>
-        <Hourglass size={104} />
+        <WaitingStage sponsors={sponsors} hourglassSize={104} />
         <h1 className="mt-3 font-display text-2xl text-foreground">
           {isFinal ? "That was the last round" : "Round complete"}
         </h1>
@@ -617,7 +622,33 @@ export function BetweenRounds({ state, eventId }: { state: LiveState; eventId?: 
           </>
         )}
       </div>
-      <SponsorBlock sponsors={sponsors} />
+
+      {showJustMet && (
+        <section>
+          <div className="mb-2.5 flex items-center gap-2">
+            <Heart className="h-4 w-4 text-accent" aria-hidden />
+            <h2 className="text-sm font-semibold text-foreground">
+              People you just met{state.recent_round_number ? ` · Round ${state.recent_round_number}` : ""}
+            </h2>
+          </div>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Tap the heart to remember someone, or jot a private note — before the next round starts.
+          </p>
+          <ul className="space-y-2.5">
+            {justMet.map((m) => (
+              <TablemateRow
+                key={m.attendee_id}
+                mate={m}
+                eventId={eventId!}
+                notesOpen={openNoteAttendeeId === m.attendee_id}
+                onToggleNotes={() =>
+                  setOpenNoteAttendeeId((current) => (current === m.attendee_id ? null : m.attendee_id))
+                }
+              />
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }
@@ -682,7 +713,7 @@ export function NotSeated({ state, eventId }: { state: LiveState; eventId?: stri
 
       <div className="flex flex-col items-center pt-2 text-center">
         <EventLogo branding={branding} className="mb-4" />
-        <Hourglass size={104} />
+        <WaitingStage sponsors={sponsors} hourglassSize={104} />
         <h1 className="mt-3 font-display text-2xl text-foreground">Next round is yours</h1>
         <p className="mt-2 max-w-[320px] text-sm leading-relaxed text-muted-foreground">
           {currentTopic ? (
@@ -706,7 +737,6 @@ export function NotSeated({ state, eventId }: { state: LiveState; eventId?: stri
 
       <RoomRoster roster={roster} />
       {eventId && <DirectoryLink eventId={eventId} />}
-      <SponsorBlock sponsors={sponsors} />
     </div>
   );
 }
@@ -855,6 +885,9 @@ export function RoundView({
   const themed = agendaFor(round.round_number - 1, state.round_topics);
   const mates = seat.tablemates;
   const paused = Boolean(round.paused_at);
+  // Published but the host hasn't started the clock yet: the table is visible so
+  // people can go find their seat, but there's no countdown until "Start round".
+  const notStarted = !round.started_at;
   const wantedHere = mates.filter((m) => m.wanted);
   const [openNoteAttendeeId, setOpenNoteAttendeeId] = useState<string | null>(null);
 
@@ -895,7 +928,14 @@ export function RoundView({
 
       <div className="flex items-center justify-between">
         <h1 className="font-display text-xl text-foreground">Round {round.round_number}</h1>
-        <CountdownPill remaining={remaining} paused={paused} />
+        {notStarted ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-3 py-1 text-sm font-medium text-accent">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" aria-hidden />
+            Starting soon
+          </span>
+        ) : (
+          <CountdownPill remaining={remaining} paused={paused} />
+        )}
       </div>
 
       <BoardingPass
@@ -905,6 +945,16 @@ export function RoundView({
         location=""
         showIcebreaker={false}
       />
+
+      {notStarted && (
+        <div className="flex items-start gap-2.5 rounded-2xl border border-accent/30 bg-accent/[0.06] p-3.5">
+          <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
+          <p className="text-sm text-foreground">
+            Head to <span className="font-semibold">table {seat.table_number}</span> — the round
+            begins the moment the host starts it. Grab your seat and say hi while you wait.
+          </p>
+        </div>
+      )}
 
       {wantedHere.length > 0 && (
         <div className="flex items-start gap-2.5 rounded-2xl border border-accent/40 bg-accent/10 p-3.5">

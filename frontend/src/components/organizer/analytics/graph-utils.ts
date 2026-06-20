@@ -163,3 +163,80 @@ export function computeInsights(nodes: GraphNode[], edges: GraphEdge[]): Network
 
   return { strongest, repeatPairs, isolated, communities, avgMet, medianMet, maxMet };
 }
+
+// --- Graph storytelling: the headline insights surfaced above the graph -------
+
+export type StoryKind = "super" | "pair" | "group" | "isolated";
+export interface StoryInsight {
+  kind: StoryKind;
+  text: string;
+  focusId: string; // node to fly the camera to when the chip is tapped
+}
+
+/** The 3-4 things an organizer should learn at a glance — derived, not manual. */
+export function storyInsights(nodes: GraphNode[], edges: GraphEdge[]): StoryInsight[] {
+  if (nodes.length < 2) return [];
+  const ins = computeInsights(nodes, edges);
+  const out: StoryInsight[] = [];
+
+  const top = [...nodes].sort((a, b) => b.met - a.met || a.name.localeCompare(b.name))[0];
+  if (top && top.met > 0) {
+    out.push({ kind: "super", text: `${top.name} drove the room — met ${top.met} ${top.met === 1 ? "person" : "people"}`, focusId: top.attendee_id });
+  }
+  const pair = ins.strongest[0];
+  if (pair && (pair.matched || pair.weight >= 2)) {
+    const times = pair.weight > 1 ? `met ${pair.weight}×` : "met";
+    out.push({ kind: "pair", text: `${pair.aName} & ${pair.bName} ${times}${pair.matched ? " and matched" : ""}`, focusId: pair.a });
+  }
+  const g = ins.communities[0];
+  if (g && g.members.length >= 3) {
+    out.push({ kind: "group", text: `A group of ${g.members.length} formed around ${g.leader.name}`, focusId: g.leader.attendee_id });
+  }
+  const iso = ins.isolated[0];
+  if (iso && iso.met <= 1) {
+    out.push({ kind: "isolated", text: `${iso.name} stayed on the edges — worth an intro`, focusId: iso.attendee_id });
+  }
+  return out;
+}
+
+// --- Per-person future opportunity: who to reconnect / introduce next ---------
+
+export interface Suggestion {
+  id: string;
+  name: string;
+  reason: string;
+}
+
+/** Forward-looking actions for one attendee: nurture their strong-but-unmatched
+ *  ties (reconnect) and their second-degree connections worth an intro. */
+export function suggestionsFor(nodeId: string, nodes: GraphNode[], edges: GraphEdge[]): { reconnect: Suggestion[]; introduce: Suggestion[] } {
+  const nameOf = new Map(nodes.map((n) => [n.attendee_id, n.name]));
+  const adj = new Map<string, Map<string, { weight: number; matched: boolean; liked: boolean }>>();
+  nodes.forEach((n) => adj.set(n.attendee_id, new Map()));
+  edges.forEach((e) => {
+    const d = { weight: e.weight ?? 1, matched: e.matched, liked: e.liked ?? false };
+    adj.get(e.a)?.set(e.b, d);
+    adj.get(e.b)?.set(e.a, d);
+  });
+  const mine = adj.get(nodeId) ?? new Map();
+
+  const reconnect: Suggestion[] = [...mine.entries()]
+    .filter(([, d]) => !d.matched)
+    .sort((a, b) => b[1].weight + (b[1].liked ? 1 : 0) - (a[1].weight + (a[1].liked ? 1 : 0)))
+    .slice(0, 2)
+    .map(([id, d]) => ({ id, name: nameOf.get(id) || "—", reason: d.weight > 1 ? `met ${d.weight}× — no match yet` : d.liked ? "showed interest" : "met once" }));
+
+  const shared = new Map<string, number>();
+  for (const [nb] of mine) {
+    for (const [nn] of adj.get(nb) ?? new Map()) {
+      if (nn === nodeId || mine.has(nn)) continue;
+      shared.set(nn, (shared.get(nn) || 0) + 1);
+    }
+  }
+  const introduce: Suggestion[] = [...shared.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([id, c]) => ({ id, name: nameOf.get(id) || "—", reason: `${c} mutual ${c === 1 ? "connection" : "connections"}` }));
+
+  return { reconnect, introduce };
+}

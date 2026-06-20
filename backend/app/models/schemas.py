@@ -649,13 +649,22 @@ class GraphNode(BaseModel):
     attendee_id: UUID
     name: str
     met: int = 0           # how many distinct people they met (node weight)
+    company: Optional[str] = None   # profile context for the relationship panel
+    role: Optional[str] = None
+    rounds_present: int = 0  # distinct rounds this person was actually seated
+    mutual_likes: int = 0    # mutual matches involving this person
 
 
 class GraphEdge(BaseModel):
-    """A line in the connection web: two people who shared a table."""
+    """A line in the connection web: two people who shared a table. Carries the
+    full repeat-interaction history so the graph can encode relationship strength
+    (a pair seated together twice is a stronger tie than a one-time intro)."""
     a: UUID
     b: UUID
     matched: bool = False  # this pair also became a mutual match → highlight it
+    liked: bool = False    # ≥1 like in either direction (funnel "interest" stage)
+    weight: int = 1        # rounds this pair shared a table (repeat strength)
+    rounds: List[int] = Field(default_factory=list)  # the round numbers they met in
 
 
 class EventAnalytics(BaseModel):

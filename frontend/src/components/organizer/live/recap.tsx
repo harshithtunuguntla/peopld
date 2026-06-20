@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Flag, Users, Heart, Handshake, Trophy, Percent } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import Link from "next/link";
+import dynamic from "next/dynamic";
+import { Flag, Users, Heart, Handshake, Trophy, Percent, BarChart3, ArrowRight, Share2 } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
+import { RelationshipInsights } from "@/components/organizer/analytics/relationship-sections";
+import { RoundConnectionsChart } from "@/components/organizer/analytics/round-connections-chart";
 import { Card } from "@/components/organizer/console-ui";
 import { BentoTile, InfoHint } from "@/components/organizer/metric-tile";
 import { Avatar } from "@/components/brand/avatar";
 import { buttonVariants } from "@/components/ui/button";
-import { roundFor } from "@/lib/design/rounds";
 import { cn } from "@/lib/utils";
 
 interface RoundPerf {
@@ -26,12 +28,26 @@ interface GraphNode {
   attendee_id: string;
   name: string;
   met: number;
+  company?: string | null;
+  role?: string | null;
+  rounds_present?: number;
+  mutual_likes?: number;
 }
 interface GraphEdge {
   a: string;
   b: string;
   matched: boolean;
+  liked?: boolean;
+  weight?: number;
+  rounds?: number[];
 }
+// The relationship graph pulls in react-force-graph (canvas + d3-force), so it
+// loads as its own client-only chunk — only when this recap actually renders.
+const RelationshipGraph = dynamic(
+  () => import("@/components/organizer/analytics/relationship-graph").then((m) => m.RelationshipGraph),
+  { ssr: false, loading: () => <div className="h-[540px] skeleton rounded-2xl border border-border" /> },
+);
+
 interface Analytics {
   total_attendees: number;
   rounds_completed: number;
@@ -92,28 +108,7 @@ export function EventRecap({ eventId }: { eventId: string }) {
       {stats && (
         <>
           {/* Headline bento */}
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-            <BentoTile value={stats.total_introductions} label="conversations sparked" bg="#FF5A3C" fg="#fff" icon={Handshake}
-              info="Unique pairs of people we seated together — every new conversation the seating engine created." />
-            <BentoTile value={stats.total_matches} label="connections made" bg="#B66CFF" fg="#fff" icon={Heart}
-              info="Mutual likes: both people liked each other and want to stay in touch." />
-            <BentoTile value={`${stats.pct_room_met}%`} label="of the room met" bg="#A8D5FF" fg="#15130E" icon={Users}
-              info="On average, each guest met this share of everyone else in the room." />
-            <BentoTile value={`${matchRate}%`} label="match rate" bg="#D9FF4D" fg="#15130E" icon={Percent}
-              info="Of all the conversations we created, this share turned into a mutual connection." />
-          </div>
-
-          {/* The room as a network — the headline visual */}
-          <Card className="p-5 sm:p-6">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ the room, connected</span>
-              <InfoHint text="Every dot is a person; every line is two people we seated together. Brighter lines became mutual matches. Bigger dots met more people." />
-            </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">A night of strangers, turned into a network.</p>
-            <div className="mt-4">
-              <ConnectionWeb nodes={stats.graph_nodes} edges={stats.graph_edges} />
-            </div>
-          </Card>
+          <HeadlineTiles stats={stats} matchRate={matchRate} />
 
           {/* How introductions converted + how much of the room we reached */}
           <div className="grid gap-4 lg:grid-cols-2">
@@ -141,42 +136,8 @@ export function EventRecap({ eventId }: { eventId: string }) {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-            {/* New people met per round */}
-            {stats.round_performance.length > 0 && (
-              <Card className="p-5 sm:p-6">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ new people met per round</span>
-                  <InfoHint text="Fresh introductions created in each round — pairs who hadn't met before. Shows the rounds doing their job." />
-                </div>
-                <p className="mt-1.5 text-xs text-muted-foreground">New conversations created each round.</p>
-                <div className="mt-4 h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={stats.round_performance} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                      <XAxis
-                        dataKey="round_number"
-                        tickFormatter={(n) => `R${n}`}
-                        tickLine={false}
-                        axisLine={false}
-                        tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
-                        dy={6}
-                      />
-                      <YAxis tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} width={36} allowDecimals={false} />
-                      <Tooltip
-                        cursor={{ fill: "hsl(var(--accent) / 0.12)" }}
-                        contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, color: "hsl(var(--foreground))", fontSize: 12 }}
-                        labelFormatter={(n) => `Round ${n}`}
-                        formatter={(v) => [v as number, "new people"]}
-                      />
-                      <Bar dataKey="introductions" radius={[8, 8, 0, 0]}>
-                        {stats.round_performance.map((r, i) => (
-                          <Cell key={r.round_number} fill={roundFor(i).bg} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </Card>
-            )}
+            {/* New vs repeat connections per round */}
+            {stats.round_performance.length > 0 && <RoundConnectionsChart edges={stats.graph_edges} />}
 
             {/* Top connectors */}
             <Card className="p-5 sm:p-6">
@@ -200,6 +161,24 @@ export function EventRecap({ eventId }: { eventId: string }) {
               )}
             </Card>
           </div>
+
+          {/* Relationship intelligence — readable, decision-oriented insights from
+              the same weighted graph data (no extra API call). */}
+          <RelationshipInsights nodes={stats.graph_nodes} edges={stats.graph_edges} />
+
+          {/* The room as a network — the signature exploration experience, last so
+              it reads as a deep-dive rather than a mid-page chart. */}
+          <Card className="p-5 sm:p-6">
+            <div className="flex items-center gap-1.5">
+              <Share2 className="h-3.5 w-3.5 text-accent" aria-hidden />
+              <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ explore the room</span>
+              <InfoHint text="Every dot is a person; lines connect people we seated together. Thicker/amber lines met more than once; purple lines became mutual matches; node size = people met; colors are the natural groups that formed. Tap anyone to see their relationships." />
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">A night of strangers, turned into a network. Tap any person to explore who they met, how often, and how strong each tie became.</p>
+            <div className="mt-4">
+              <RelationshipGraph nodes={stats.graph_nodes} edges={stats.graph_edges} />
+            </div>
+          </Card>
         </>
       )}
 
@@ -208,6 +187,82 @@ export function EventRecap({ eventId }: { eventId: string }) {
           <Users className="h-4 w-4" aria-hidden /> View attendees
         </a>
       </div>
+    </div>
+  );
+}
+
+/** The four headline numbers — shared by the full recap (analytics page) and the
+ *  lean summary (live page ended state) so the metric language never drifts. */
+function HeadlineTiles({ stats, matchRate }: { stats: Analytics; matchRate: number }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <BentoTile value={stats.total_introductions} label="conversations sparked" bg="#FF5A3C" fg="#fff" icon={Handshake}
+        info="Unique pairs of people we seated together — every new conversation the seating engine created." />
+      <BentoTile value={stats.total_matches} label="connections made" bg="#B66CFF" fg="#fff" icon={Heart}
+        info="Mutual likes: both people liked each other and want to stay in touch." />
+      <BentoTile value={`${stats.pct_room_met}%`} label="of the room met" bg="#A8D5FF" fg="#15130E" icon={Users}
+        info="On average, each guest met this share of everyone else in the room." />
+      <BentoTile value={`${matchRate}%`} label="match rate" bg="#D9FF4D" fg="#15130E" icon={Percent}
+        info="Of all the conversations we created, this share turned into a mutual connection." />
+    </div>
+  );
+}
+
+/**
+ * Lean post-event summary shown on the LIVE command center once an event ends.
+ * Just the headline — the heavy intelligence (graph, funnel, relationship
+ * analytics) lives on the dedicated /analytics page so the live route stays light.
+ */
+export function EventRecapSummary({ eventId }: { eventId: string }) {
+  const [stats, setStats] = useState<Analytics | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    apiFetch<Analytics>(`/events/${eventId}/analytics`)
+      .then(setStats)
+      .catch(() => setStats(null))
+      .finally(() => setLoaded(true));
+  }, [eventId]);
+
+  const matchRate =
+    stats && stats.total_introductions > 0
+      ? Math.round((stats.total_matches / stats.total_introductions) * 100)
+      : 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-border bg-card/50 p-8 text-center">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-border bg-background/50 text-accent">
+          <Flag className="h-7 w-7" aria-hidden />
+        </div>
+        <h2 className="mt-5 font-display text-[clamp(24px,4vw,38px)] leading-tight tracking-[-0.02em] text-foreground">
+          That&apos;s a wrap{stats ? <> — the room sparked <em className="not-italic text-accent">{stats.total_introductions.toLocaleString()}</em> conversations</> : ""}
+        </h2>
+        <p className="mx-auto mt-2 max-w-md text-balance text-sm text-muted-foreground">
+          Rounds are closed and everyone&apos;s connections are unlocked. Here&apos;s the headline — open Analytics for the full relationship intelligence.
+        </p>
+      </div>
+
+      {!loaded && <div className="h-32 skeleton rounded-2xl border border-border" />}
+
+      {stats && (
+        <>
+          <HeadlineTiles stats={stats} matchRate={matchRate} />
+          <div className="flex flex-col items-center justify-center gap-2 pt-2 sm:flex-row">
+            <Link
+              href={`/organizer/event/${eventId}/analytics`}
+              className={cn(buttonVariants({ variant: "accent" }), "w-full gap-2 sm:w-auto")}
+            >
+              <BarChart3 className="h-4 w-4" aria-hidden /> View full analytics <ArrowRight className="h-4 w-4" aria-hidden />
+            </Link>
+            <Link
+              href={`/organizer/event/${eventId}/people`}
+              className={cn(buttonVariants({ variant: "outline" }), "w-full gap-2 sm:w-auto")}
+            >
+              <Users className="h-4 w-4" aria-hidden /> View attendees
+            </Link>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -222,94 +277,6 @@ function Metric({ value, label, info }: { value: number; label: string; info?: s
       )}
       <div className="font-display text-2xl leading-none text-foreground">{value}</div>
       <div className="mt-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-    </div>
-  );
-}
-
-/**
- * The connection web — the room as a network. Every dot is a person; every line
- * is two people we seated together; brighter lines became mutual matches; bigger
- * dots met more people. A plain circular (chord) layout: legible at a glance and
- * needs no graph library. The lines stagger in (CSS) so the network visibly forms.
- */
-function ConnectionWeb({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEdge[] }) {
-  if (nodes.length < 2) {
-    return (
-      <p className="py-10 text-center text-sm text-muted-foreground">
-        The web fills in once people have been seated together.
-      </p>
-    );
-  }
-  const SIZE = 460;
-  const c = SIZE / 2;
-  const R = c - 34;
-  const pos = new Map<string, { x: number; y: number }>();
-  nodes.forEach((n, i) => {
-    const ang = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
-    pos.set(n.attendee_id, { x: c + R * Math.cos(ang), y: c + R * Math.sin(ang) });
-  });
-  const maxMet = Math.max(1, ...nodes.map((n) => n.met));
-  const plain = edges.filter((e) => !e.matched);
-  const matched = edges.filter((e) => e.matched);
-
-  return (
-    <div className="w-full">
-      <svg
-        viewBox={`0 0 ${SIZE} ${SIZE}`}
-        className="mx-auto h-auto w-full max-w-[420px]"
-        role="img"
-        aria-label="Connection web — each line is two people who met; brighter lines are mutual matches"
-      >
-        {/* plain "met" edges underneath */}
-        {plain.map((e, i) => {
-          const p = pos.get(e.a);
-          const q = pos.get(e.b);
-          if (!p || !q) return null;
-          return (
-            <line
-              key={`p${i}`}
-              x1={p.x} y1={p.y} x2={q.x} y2={q.y}
-              stroke="hsl(var(--foreground))" strokeOpacity={0.1} strokeWidth={1}
-              className="web-edge" style={{ animationDelay: `${Math.min(i * 5, 900)}ms` }}
-            />
-          );
-        })}
-        {/* matched edges on top so they pop */}
-        {matched.map((e, i) => {
-          const p = pos.get(e.a);
-          const q = pos.get(e.b);
-          if (!p || !q) return null;
-          return (
-            <line
-              key={`m${i}`}
-              x1={p.x} y1={p.y} x2={q.x} y2={q.y}
-              stroke="hsl(var(--accent))" strokeOpacity={0.75} strokeWidth={1.75}
-              className="web-edge" style={{ animationDelay: `${900 + Math.min(i * 10, 700)}ms` }}
-            />
-          );
-        })}
-        {/* people */}
-        {nodes.map((n) => {
-          const p = pos.get(n.attendee_id)!;
-          return (
-            <circle
-              key={n.attendee_id}
-              cx={p.x} cy={p.y} r={3 + (n.met / maxMet) * 5}
-              fill="hsl(var(--accent))" fillOpacity={0.85}
-              stroke="hsl(var(--background))" strokeWidth={1.5}
-            />
-          );
-        })}
-      </svg>
-      <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-0.5 w-5 rounded-full" style={{ background: "hsl(var(--foreground) / 0.25)" }} /> met
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-0.5 w-5 rounded-full" style={{ background: "hsl(var(--accent))" }} /> matched
-        </span>
-        <span>· bigger dot met more people</span>
-      </div>
     </div>
   );
 }

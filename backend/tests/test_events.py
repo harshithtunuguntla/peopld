@@ -224,6 +224,39 @@ def test_analytics_computes_unique_people_met(client, db, event):
     assert all(e["matched"] is False for e in body["graph_edges"])  # no likes in this event
 
 
+def test_analytics_preserves_repeat_pairings(client, db, event):
+    """Repeat interactions must survive aggregation: a pair seated together in two
+    rounds is ONE edge with weight 2 and rounds [1, 2] — the foundation for
+    relationship strength. (Guards Phase 0's "don't lose repeat data" guarantee.)"""
+    a = make_attendee(db, event["id"], name="A", company="Acme", role="Founder")
+    b = make_attendee(db, event["id"], name="B")
+    c = make_attendee(db, event["id"], name="C")
+    r1 = make_round(db, event["id"], round_number=1, status="completed")
+    r2 = make_round(db, event["id"], round_number=2, status="completed")
+
+    # A & B sit together BOTH rounds (a repeat); C joins their table in R2 only.
+    make_assignment(db, event["id"], r1["id"], a["id"], 1)
+    make_assignment(db, event["id"], r1["id"], b["id"], 1)
+    make_assignment(db, event["id"], r2["id"], a["id"], 1)
+    make_assignment(db, event["id"], r2["id"], b["id"], 1)
+    make_assignment(db, event["id"], r2["id"], c["id"], 1)
+
+    body = client.get(f"/events/{event['id']}/analytics", headers=AUTH).json()
+
+    edges = {frozenset((e["a"], e["b"])): e for e in body["graph_edges"]}
+    ab = edges[frozenset((a["id"], b["id"]))]
+    assert ab["weight"] == 2 and ab["rounds"] == [1, 2]  # repeat preserved
+    ac = edges[frozenset((a["id"], c["id"]))]
+    assert ac["weight"] == 1 and ac["rounds"] == [2]  # one-time intro
+    # Three distinct pairs total (A-B, A-C, B-C); A-B counted once despite 2 rounds.
+    assert body["total_introductions"] == 3
+
+    nodes = {n["attendee_id"]: n for n in body["graph_nodes"]}
+    assert nodes[a["id"]]["rounds_present"] == 2
+    assert nodes[c["id"]]["rounds_present"] == 1
+    assert nodes[a["id"]]["company"] == "Acme" and nodes[a["id"]]["role"] == "Founder"
+
+
 def test_analytics_funnel_and_matched_edges(client, db, event):
     """Likes drive the funnel (introductions ≥ sparked ≥ matched) and flag the
     matched line in the connection web."""

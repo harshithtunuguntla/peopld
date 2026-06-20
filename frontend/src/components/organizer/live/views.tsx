@@ -35,7 +35,9 @@ import { ConfirmButton } from "./confirm-button";
 // The recap pulls in recharts (~100kB). Organizers only see it AFTER an event
 // ends, so lazy-load it — keep the live command center (used during the event)
 // lean. ssr:false because recharts is client-only.
-const EventRecap = dynamic(() => import("./recap").then((m) => m.EventRecap), {
+// The lean wrap-up summary (headline numbers + a link to the full analytics page).
+// The heavy intelligence lives on /analytics, so the live route stays light.
+const EventRecapSummary = dynamic(() => import("./recap").then((m) => m.EventRecapSummary), {
   ssr: false,
   loading: () => <div className="h-40 skeleton rounded-2xl border border-border" />,
 });
@@ -552,5 +554,5 @@ export function ActiveView({
 // The rich recap (bento + charts + top connectors) lives in ./recap to keep this
 // file lean and isolate the recharts import to the one screen that needs it.
 export function EndedView({ eventId }: { eventId: string }) {
-  return <EventRecap eventId={eventId} />;
+  return <EventRecapSummary eventId={eventId} />;
 }

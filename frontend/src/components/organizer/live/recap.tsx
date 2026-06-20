@@ -4,15 +4,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Flag, Users, Heart, Handshake, Trophy, Percent, BarChart3, ArrowRight, Share2 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 import { apiFetch } from "@/lib/api";
 import { RelationshipInsights } from "@/components/organizer/analytics/relationship-sections";
+import { RoundConnectionsChart } from "@/components/organizer/analytics/round-connections-chart";
 import { Card } from "@/components/organizer/console-ui";
 import { BentoTile, InfoHint } from "@/components/organizer/metric-tile";
 import { Avatar } from "@/components/brand/avatar";
 import { buttonVariants } from "@/components/ui/button";
-import { roundFor } from "@/lib/design/rounds";
 import { cn } from "@/lib/utils";
 
 interface RoundPerf {
@@ -137,42 +136,8 @@ export function EventRecap({ eventId }: { eventId: string }) {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-            {/* New people met per round */}
-            {stats.round_performance.length > 0 && (
-              <Card className="p-5 sm:p-6">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ new conversations per round</span>
-                  <InfoHint text="Fresh conversations created each round — pairs seated together who hadn't met before. (Room-wide pairs, not per person.) Shows the rounds doing their job." />
-                </div>
-                <p className="mt-1.5 text-xs text-muted-foreground">New conversations created each round.</p>
-                <div className="mt-4 h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={stats.round_performance} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                      <XAxis
-                        dataKey="round_number"
-                        tickFormatter={(n) => `R${n}`}
-                        tickLine={false}
-                        axisLine={false}
-                        tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
-                        dy={6}
-                      />
-                      <YAxis tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} width={36} allowDecimals={false} />
-                      <Tooltip
-                        cursor={{ fill: "hsl(var(--accent) / 0.12)" }}
-                        contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, color: "hsl(var(--foreground))", fontSize: 12 }}
-                        labelFormatter={(n) => `Round ${n}`}
-                        formatter={(v) => [v as number, "new conversations"]}
-                      />
-                      <Bar dataKey="introductions" radius={[8, 8, 0, 0]}>
-                        {stats.round_performance.map((r, i) => (
-                          <Cell key={r.round_number} fill={roundFor(i).bg} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </Card>
-            )}
+            {/* New vs repeat connections per round */}
+            {stats.round_performance.length > 0 && <RoundConnectionsChart edges={stats.graph_edges} />}
 
             {/* Top connectors */}
             <Card className="p-5 sm:p-6">

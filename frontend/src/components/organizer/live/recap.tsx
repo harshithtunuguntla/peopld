@@ -26,11 +26,18 @@ interface GraphNode {
   attendee_id: string;
   name: string;
   met: number;
+  company?: string | null;
+  role?: string | null;
+  rounds_present?: number;
+  mutual_likes?: number;
 }
 interface GraphEdge {
   a: string;
   b: string;
   matched: boolean;
+  liked?: boolean;
+  weight?: number;
+  rounds?: number[];
 }
 interface Analytics {
   total_attendees: number;
@@ -145,8 +152,8 @@ export function EventRecap({ eventId }: { eventId: string }) {
             {stats.round_performance.length > 0 && (
               <Card className="p-5 sm:p-6">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ new people met per round</span>
-                  <InfoHint text="Fresh introductions created in each round — pairs who hadn't met before. Shows the rounds doing their job." />
+                  <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ new conversations per round</span>
+                  <InfoHint text="Fresh conversations created each round — pairs seated together who hadn't met before. (Room-wide pairs, not per person.) Shows the rounds doing their job." />
                 </div>
                 <p className="mt-1.5 text-xs text-muted-foreground">New conversations created each round.</p>
                 <div className="mt-4 h-56">
@@ -165,7 +172,7 @@ export function EventRecap({ eventId }: { eventId: string }) {
                         cursor={{ fill: "hsl(var(--accent) / 0.12)" }}
                         contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, color: "hsl(var(--foreground))", fontSize: 12 }}
                         labelFormatter={(n) => `Round ${n}`}
-                        formatter={(v) => [v as number, "new people"]}
+                        formatter={(v) => [v as number, "new conversations"]}
                       />
                       <Bar dataKey="introductions" radius={[8, 8, 0, 0]}>
                         {stats.round_performance.map((r, i) => (

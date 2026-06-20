@@ -191,6 +191,28 @@ def _unique_table_pairs(assignments: list[dict]) -> set[frozenset]:
     return pairs
 
 
+def _pair_round_numbers(
+    assignments: list[dict], round_number_by_id: dict[str, int]
+) -> dict[frozenset, list[int]]:
+    """For every pair who shared a table, the sorted round numbers they met in.
+
+    Unlike `_unique_table_pairs`, this PRESERVES repeat interactions — the basis
+    for relationship strength/weights and the repeat-pairing intelligence. A pair
+    seated together in rounds 1 and 3 yields [1, 3] (weight 2) instead of being
+    collapsed to a single binary edge. This is the single source the graph,
+    coverage, and relationship analytics all derive from."""
+    groups: dict[tuple, list] = {}
+    for a in assignments:
+        groups.setdefault((a["round_id"], a["table_number"]), []).append(str(a["attendee_id"]))
+    pairs: dict[frozenset, set] = {}
+    for (round_id, _table), members in groups.items():
+        rn = round_number_by_id.get(str(round_id))
+        for i in range(len(members)):
+            for j in range(i + 1, len(members)):
+                pairs.setdefault(frozenset((members[i], members[j])), set()).add(rn)
+    return {k: sorted(r for r in v if r is not None) for k, v in pairs.items()}
+
+
 @router.get("/dashboard-summary", response_model=DashboardSummary)
 def dashboard_summary(
     organizer_id: str = Depends(get_current_organizer_id),
@@ -670,10 +692,14 @@ def get_analytics(
     total_matches = len(matched_pairs)
     # Unique unordered pairs where at least one person liked the other → the funnel's
     # middle stage (always between introductions and mutual matches).
-    liked_pairs = len({frozenset((a, b)) for (a, b) in directed})
+    liked_pair_set = {frozenset((a, b)) for (a, b) in directed}
+    liked_pairs = len(liked_pair_set)
 
-    # Unique introductions = distinct pairs who ever shared a table.
-    met_pairs = _unique_table_pairs(assignments)
+    # Weighted pair index — the single source for introductions, the graph, and all
+    # relationship intelligence. Keeps the rounds each pair met in (repeat data).
+    round_number_by_id = {str(r["id"]): r["round_number"] for r in rounds}
+    pair_rounds = _pair_round_numbers(assignments, round_number_by_id)
+    met_pairs = set(pair_rounds)  # distinct pairs who ever shared a table
     total_introductions = len(met_pairs)
 
     # People actually seated at least once = the population the connection metrics
@@ -716,17 +742,44 @@ def get_analytics(
         for aid, people in sorted(met.items(), key=lambda kv: len(kv[1]), reverse=True)[:5]
     ]
 
-    # Connection web: one node per seated person, one edge per pair who met (with
-    # the mutual matches flagged so the frontend can light them up). Sorted by name
-    # for a stable circular layout. Pilot-scale (~40) so the full graph is tiny.
+    # Connection web: one node per seated person, one weighted edge per pair who
+    # met. Each edge carries the rounds they shared (repeat strength) and whether
+    # they liked/matched, so the graph is a relationship-intelligence tool — not a
+    # decorative chart. Pilot-scale (~40) so the full graph is tiny.
+    profile = {str(a["id"]): a for a in attendees}
+    present_rounds: dict[str, set] = {}
+    for a in assignments:
+        present_rounds.setdefault(str(a["attendee_id"]), set()).add(str(a["round_id"]))
+    mutual_by_person: dict[str, int] = {}
+    for pair in matched_pairs:
+        for pid in pair:
+            mutual_by_person[pid] = mutual_by_person.get(pid, 0) + 1
+
     graph_nodes = [
-        GraphNode(attendee_id=aid, name=names.get(aid, "—"), met=len(met.get(aid, set())))
+        GraphNode(
+            attendee_id=aid,
+            name=names.get(aid, "—"),
+            met=len(met.get(aid, set())),
+            company=(profile.get(aid) or {}).get("company"),
+            role=(profile.get(aid) or {}).get("role"),
+            rounds_present=len(present_rounds.get(aid, set())),
+            mutual_likes=mutual_by_person.get(aid, 0),
+        )
         for aid in sorted(seated_ids, key=lambda x: names.get(x, "").lower())
     ]
     graph_edges = []
-    for pair in met_pairs:
+    for pair, rnds in pair_rounds.items():
         a, b = tuple(pair)
-        graph_edges.append(GraphEdge(a=a, b=b, matched=pair in matched_pairs))
+        graph_edges.append(
+            GraphEdge(
+                a=a,
+                b=b,
+                matched=pair in matched_pairs,
+                liked=pair in liked_pair_set,
+                weight=len(rnds),
+                rounds=rnds,
+            )
+        )
 
     return EventAnalytics(
         total_attendees=len(attendees),

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Flag, Users, Heart, Handshake, Trophy, Percent, BarChart3, ArrowRight } from "lucide-react";
+import dynamic from "next/dynamic";
+import { Flag, Users, Heart, Handshake, Trophy, Percent, BarChart3, ArrowRight, Share2 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 import { apiFetch } from "@/lib/api";
@@ -40,6 +41,13 @@ interface GraphEdge {
   weight?: number;
   rounds?: number[];
 }
+// The relationship graph pulls in react-force-graph (canvas + d3-force), so it
+// loads as its own client-only chunk — only when this recap actually renders.
+const RelationshipGraph = dynamic(
+  () => import("@/components/organizer/analytics/relationship-graph").then((m) => m.RelationshipGraph),
+  { ssr: false, loading: () => <div className="h-[540px] skeleton rounded-2xl border border-border" /> },
+);
+
 interface Analytics {
   total_attendees: number;
   rounds_completed: number;
@@ -101,18 +109,6 @@ export function EventRecap({ eventId }: { eventId: string }) {
         <>
           {/* Headline bento */}
           <HeadlineTiles stats={stats} matchRate={matchRate} />
-
-          {/* The room as a network — the headline visual */}
-          <Card className="p-5 sm:p-6">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ the room, connected</span>
-              <InfoHint text="Every dot is a person; every line is two people we seated together. Brighter lines became mutual matches. Bigger dots met more people." />
-            </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">A night of strangers, turned into a network.</p>
-            <div className="mt-4">
-              <ConnectionWeb nodes={stats.graph_nodes} edges={stats.graph_edges} />
-            </div>
-          </Card>
 
           {/* How introductions converted + how much of the room we reached */}
           <div className="grid gap-4 lg:grid-cols-2">
@@ -199,6 +195,20 @@ export function EventRecap({ eventId }: { eventId: string }) {
               )}
             </Card>
           </div>
+
+          {/* The room as a network — the signature exploration experience, last so
+              it reads as a deep-dive rather than a mid-page chart. */}
+          <Card className="p-5 sm:p-6">
+            <div className="flex items-center gap-1.5">
+              <Share2 className="h-3.5 w-3.5 text-accent" aria-hidden />
+              <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ explore the room</span>
+              <InfoHint text="Every dot is a person; lines connect people we seated together. Thicker/amber lines met more than once; purple lines became mutual matches; node size = people met; colors are the natural groups that formed. Tap anyone to see their relationships." />
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">A night of strangers, turned into a network. Tap any person to explore who they met, how often, and how strong each tie became.</p>
+            <div className="mt-4">
+              <RelationshipGraph nodes={stats.graph_nodes} edges={stats.graph_edges} />
+            </div>
+          </Card>
         </>
       )}
 
@@ -297,94 +307,6 @@ function Metric({ value, label, info }: { value: number; label: string; info?: s
       )}
       <div className="font-display text-2xl leading-none text-foreground">{value}</div>
       <div className="mt-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-    </div>
-  );
-}
-
-/**
- * The connection web — the room as a network. Every dot is a person; every line
- * is two people we seated together; brighter lines became mutual matches; bigger
- * dots met more people. A plain circular (chord) layout: legible at a glance and
- * needs no graph library. The lines stagger in (CSS) so the network visibly forms.
- */
-function ConnectionWeb({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEdge[] }) {
-  if (nodes.length < 2) {
-    return (
-      <p className="py-10 text-center text-sm text-muted-foreground">
-        The web fills in once people have been seated together.
-      </p>
-    );
-  }
-  const SIZE = 460;
-  const c = SIZE / 2;
-  const R = c - 34;
-  const pos = new Map<string, { x: number; y: number }>();
-  nodes.forEach((n, i) => {
-    const ang = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
-    pos.set(n.attendee_id, { x: c + R * Math.cos(ang), y: c + R * Math.sin(ang) });
-  });
-  const maxMet = Math.max(1, ...nodes.map((n) => n.met));
-  const plain = edges.filter((e) => !e.matched);
-  const matched = edges.filter((e) => e.matched);
-
-  return (
-    <div className="w-full">
-      <svg
-        viewBox={`0 0 ${SIZE} ${SIZE}`}
-        className="mx-auto h-auto w-full max-w-[420px]"
-        role="img"
-        aria-label="Connection web — each line is two people who met; brighter lines are mutual matches"
-      >
-        {/* plain "met" edges underneath */}
-        {plain.map((e, i) => {
-          const p = pos.get(e.a);
-          const q = pos.get(e.b);
-          if (!p || !q) return null;
-          return (
-            <line
-              key={`p${i}`}
-              x1={p.x} y1={p.y} x2={q.x} y2={q.y}
-              stroke="hsl(var(--foreground))" strokeOpacity={0.1} strokeWidth={1}
-              className="web-edge" style={{ animationDelay: `${Math.min(i * 5, 900)}ms` }}
-            />
-          );
-        })}
-        {/* matched edges on top so they pop */}
-        {matched.map((e, i) => {
-          const p = pos.get(e.a);
-          const q = pos.get(e.b);
-          if (!p || !q) return null;
-          return (
-            <line
-              key={`m${i}`}
-              x1={p.x} y1={p.y} x2={q.x} y2={q.y}
-              stroke="hsl(var(--accent))" strokeOpacity={0.75} strokeWidth={1.75}
-              className="web-edge" style={{ animationDelay: `${900 + Math.min(i * 10, 700)}ms` }}
-            />
-          );
-        })}
-        {/* people */}
-        {nodes.map((n) => {
-          const p = pos.get(n.attendee_id)!;
-          return (
-            <circle
-              key={n.attendee_id}
-              cx={p.x} cy={p.y} r={3 + (n.met / maxMet) * 5}
-              fill="hsl(var(--accent))" fillOpacity={0.85}
-              stroke="hsl(var(--background))" strokeWidth={1.5}
-            />
-          );
-        })}
-      </svg>
-      <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-0.5 w-5 rounded-full" style={{ background: "hsl(var(--foreground) / 0.25)" }} /> met
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-0.5 w-5 rounded-full" style={{ background: "hsl(var(--accent))" }} /> matched
-        </span>
-        <span>· bigger dot met more people</span>
-      </div>
     </div>
   );
 }

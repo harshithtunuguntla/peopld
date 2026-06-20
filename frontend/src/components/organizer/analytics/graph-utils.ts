@@ -40,6 +40,14 @@ export function edgeScore(e: { matched: boolean; weight: number; liked: boolean 
   return e.weight + (e.matched ? 3 : 0) + (e.liked ? 1 : 0);
 }
 
+/** Meeting-count strength tier (per the Peopld Relationship Explorer reference):
+ *  how many times a pair actually shared a table. Drives the inspector chips. */
+export function meetingStrength(weight: number): { label: string; color: string } {
+  if (weight >= 3) return { label: "Strong", color: "#FF5A3C" };
+  if (weight === 2) return { label: "Building", color: "#E0A13C" };
+  return { label: "Met once", color: "#9B96A6" };
+}
+
 /** Label-propagation community detection — light, deterministic, good enough at
  *  pilot scale to reveal the groups that circulated together. */
 export function detectCommunities(nodeIds: string[], edges: { a: string; b: string }[]): Map<string, number> {

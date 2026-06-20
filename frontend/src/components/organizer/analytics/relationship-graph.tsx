@@ -3,13 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { forceSimulation, forceLink, forceManyBody, forceX, forceY, forceCollide, type Simulation } from "d3-force";
 import { polygonHull } from "d3-polygon";
-import { X, Maximize2, Heart, Repeat, Sparkles, Users, Crown, Zap, UsersRound, UserMinus, Link2, ArrowRight, Plus, Minus } from "lucide-react";
+import { X, Maximize2, Heart, Sparkles, Crown, Zap, UsersRound, UserMinus, ArrowRight, Plus, Minus } from "lucide-react";
 
 import { Avatar } from "@/components/brand/avatar";
+import { cn } from "@/lib/utils";
 import {
   COMMUNITY_COLORS,
   detectCommunities,
   edgeScore,
+  meetingStrength,
   storyInsights,
   suggestionsFor,
   tierOf,
@@ -733,21 +735,30 @@ function CtrlBtn({ label, onClick, children }: { label: string; onClick: () => v
 // ---- Panel content (shared by desktop panel + mobile sheet) -----------------
 
 function usePanelData(node: PNode, links: PLink[], nodes: GraphNode[], edges: GraphEdge[]) {
-  const nameOf = useMemo(() => new Map(nodes.map((n) => [n.attendee_id, n.name])), [nodes]);
+  const info = useMemo(() => {
+    const m = new Map<string, { name: string; meta: string }>();
+    nodes.forEach((n) => m.set(n.attendee_id, { name: n.name, meta: [n.role, n.company].filter(Boolean).join(" · ") }));
+    return m;
+  }, [nodes]);
+  // Total rounds in the event — so the "rounds active" pills + per-pair round dots
+  // show the full timeline, lit where this person actually met someone.
+  const totalRounds = useMemo(() => edges.reduce((mx, e) => Math.max(mx, ...(e.rounds && e.rounds.length ? e.rounds : [0])), 0), [edges]);
   const neighbors = useMemo(
     () =>
       links
         .map((l) => {
           const otherId = l.a === node.id ? l.b : l.a;
-          return { id: otherId, name: nameOf.get(otherId) || "—", weight: l.weight, rounds: l.rounds, matched: l.matched, liked: l.liked, score: l.score };
+          const i = info.get(otherId);
+          return { id: otherId, name: i?.name || "—", meta: i?.meta || "", weight: l.weight, rounds: l.rounds, matched: l.matched, strength: meetingStrength(l.weight) };
         })
-        .sort((a, b) => b.score - a.score || b.weight - a.weight),
-    [links, node.id, nameOf],
+        .sort((a, b) => b.weight - a.weight || Number(b.matched) - Number(a.matched) || a.name.localeCompare(b.name)),
+    [links, node.id, info],
   );
-  const repeatCount = neighbors.filter((n) => n.weight >= 2).length;
-  const allRounds = [...new Set(neighbors.flatMap((n) => n.rounds))].sort((a, b) => a - b);
+  const totalMeetings = neighbors.reduce((s, n) => s + n.weight, 0); // sum of times this person shared a table
+  const strongestTie = neighbors.reduce((mx, n) => Math.max(mx, n.weight), 0); // most meetings with any one person
+  const activeRounds = useMemo(() => [...new Set(neighbors.flatMap((n) => n.rounds))].sort((a, b) => a - b), [neighbors]);
   const suggestions = useMemo(() => suggestionsFor(node.id, nodes, edges), [node.id, nodes, edges]);
-  return { neighbors, repeatCount, allRounds, suggestions };
+  return { neighbors, totalMeetings, strongestTie, activeRounds, totalRounds, suggestions };
 }
 
 function PanelHeader({ node }: { node: PNode }) {
@@ -763,6 +774,10 @@ function PanelHeader({ node }: { node: PNode }) {
           {node.isLeader && <Crown className="h-3.5 w-3.5 shrink-0" style={{ color: node.color }} aria-hidden />}
         </div>
         {(node.role || node.company) && <div className="truncate text-xs text-white/55">{[node.role, node.company].filter(Boolean).join(" · ")}</div>}
+        <span className="mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium" style={{ color: node.color, background: `${node.color}26` }}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: node.color }} />
+          {node.isSuper ? "Super-connector" : node.isLeader ? "Group leader" : "Community member"}
+        </span>
       </div>
       <div className="shrink-0 text-right">
         <div className="font-display text-xl leading-none">{node.met}</div>
@@ -772,66 +787,74 @@ function PanelHeader({ node }: { node: PNode }) {
   );
 }
 
-function PanelDetails({
-  node,
-  neighbors,
-  repeatCount,
-  allRounds,
-  suggestions,
-  onPick,
-}: {
-  node: PNode;
-  neighbors: ReturnType<typeof usePanelData>["neighbors"];
-  repeatCount: number;
-  allRounds: number[];
-  suggestions: ReturnType<typeof usePanelData>["suggestions"];
-  onPick: (id: string) => void;
-}) {
+function PanelDetails({ node, data, onPick }: { node: PNode; data: ReturnType<typeof usePanelData>; onPick: (id: string) => void }) {
+  const { neighbors, totalMeetings, strongestTie, activeRounds, totalRounds, suggestions } = data;
   return (
     <>
+      {/* KPIs — the reference metric set */}
       <div className="mt-3 grid grid-cols-4 gap-1.5">
-        <Stat icon={Users} value={node.met} label="met" />
-        <Stat icon={Repeat} value={repeatCount} label="repeat" />
-        <Stat icon={Heart} value={node.mutual} label="match" />
-        <Stat icon={Link2} value={node.roundsPresent} label="rounds" />
+        <Kpi value={totalMeetings} label="Meetings" />
+        <Kpi value={`${strongestTie}×`} label="Strongest" />
+        <Kpi value={node.mutual} label="Matches" />
+        <Kpi value={node.roundsPresent} label="Rounds" />
       </div>
 
-      {allRounds.length > 0 && (
-        <div className="mt-3 rounded-xl bg-white/5 px-3 py-2">
-          <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-white/45">Timeline</div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1">
-            {allRounds.map((r, i) => (
-              <span key={r} className="inline-flex items-center">
-                <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-white/80">R{r}</span>
-                {i < allRounds.length - 1 && <span className="px-0.5 text-white/30">→</span>}
-              </span>
-            ))}
+      {/* Rounds active */}
+      {totalRounds > 0 && (
+        <div className="mt-4">
+          <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-white/45">Rounds active</div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {Array.from({ length: totalRounds }, (_, i) => i + 1).map((r) => {
+              const on = activeRounds.includes(r);
+              return (
+                <span
+                  key={r}
+                  className={cn(
+                    "min-w-[38px] flex-1 rounded-lg border px-1 py-1.5 text-center font-mono text-[11px] font-semibold",
+                    on ? "border-transparent bg-accent text-accent-foreground" : "border-white/10 text-white/35",
+                  )}
+                >
+                  R{r}
+                </span>
+              );
+            })}
           </div>
-          <div className="mt-1.5 text-[10px] text-white/45">
-            First met R{allRounds[0]}
-            {allRounds.length > 1 && ` · most recent R${allRounds[allRounds.length - 1]}`}
-          </div>
+          {activeRounds.length > 0 && (
+            <div className="mt-1.5 text-[10px] text-white/45">
+              First met R{activeRounds[0]}
+              {activeRounds.length > 1 && ` · most recent R${activeRounds[activeRounds.length - 1]}`}
+            </div>
+          )}
         </div>
       )}
 
-      <div className="mt-3 text-[10px] font-medium uppercase tracking-[0.18em] text-white/45">Top relationships</div>
+      {/* Connections — name, round dots, meeting-strength chip */}
+      <div className="mt-4 flex items-center justify-between">
+        <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-white/45">Connections</div>
+        <div className="font-mono text-[10px] text-white/35">{neighbors.length}</div>
+      </div>
       {neighbors.length === 0 ? (
         <p className="mt-2 rounded-lg bg-white/5 px-3 py-3 text-xs text-white/55">Wasn&apos;t seated with anyone — a strong candidate for a personal intro.</p>
       ) : (
-        <ul className="mt-2 space-y-1">
-          {neighbors.slice(0, 6).map((nb) => {
-            const t = tierOf(nb);
-            return (
-              <li key={nb.id}>
-                <button type="button" onClick={() => onPick(nb.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-white/5">
-                  <Avatar name={nb.name} seed={nb.id} size={24} />
-                  <span className="min-w-0 flex-1 truncate text-sm">{nb.name}</span>
-                  {nb.weight > 1 && <span className="text-[10px] text-white/45">×{nb.weight}</span>}
-                  <span className="inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ background: `${t.color}22`, color: t.color }}>{t.label}</span>
-                </button>
-              </li>
-            );
-          })}
+        <ul className="mt-2 space-y-0.5">
+          {neighbors.map((nb) => (
+            <li key={nb.id}>
+              <button type="button" onClick={() => onPick(nb.id)} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-white/5">
+                <Avatar name={nb.name} seed={nb.id} size={28} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium leading-tight">{nb.name}</span>
+                  {nb.meta && <span className="block truncate text-[11px] text-white/45">{nb.meta}</span>}
+                </span>
+                <span className="flex shrink-0 flex-col items-end gap-1">
+                  {totalRounds > 0 && <RoundDots total={totalRounds} on={nb.rounds} />}
+                  <span className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold" style={{ color: nb.strength.color, borderColor: `${nb.strength.color}66` }}>
+                    {nb.matched && <Heart className="h-2.5 w-2.5" aria-hidden />}
+                    {nb.weight}× {nb.strength.label}
+                  </span>
+                </span>
+              </button>
+            </li>
+          ))}
         </ul>
       )}
 
@@ -879,14 +902,14 @@ function DesktopPanel({
   onPick: (id: string) => void;
   onClose: () => void;
 }) {
-  const { neighbors, repeatCount, allRounds, suggestions } = usePanelData(node, links, nodes, edges);
+  const data = usePanelData(node, links, nodes, edges);
   return (
     <div className="absolute right-3 top-3 bottom-3 w-[20rem] overflow-y-auto rounded-2xl border border-white/10 bg-[#14161c]/95 p-4 text-white shadow-2xl backdrop-blur">
       <button type="button" onClick={onClose} aria-label="Close" className="absolute right-3 top-3 z-10 text-white/50 transition-colors hover:text-white">
         <X className="h-4 w-4" aria-hidden />
       </button>
       <PanelHeader node={node} />
-      <PanelDetails node={node} neighbors={neighbors} repeatCount={repeatCount} allRounds={allRounds} suggestions={suggestions} onPick={onPick} />
+      <PanelDetails node={node} data={data} onPick={onPick} />
     </div>
   );
 }
@@ -908,7 +931,7 @@ function MobileSheet({
   onPick: (id: string) => void;
   onClose: () => void;
 }) {
-  const { neighbors, repeatCount, allRounds, suggestions } = usePanelData(node, links, nodes, edges);
+  const data = usePanelData(node, links, nodes, edges);
   const COLLAPSED = 132;
   const EXPANDED = Math.max(COLLAPSED + 80, Math.min(Math.round(cardH * 0.74), cardH - 64));
   const range = EXPANDED - COLLAPSED;
@@ -950,18 +973,28 @@ function MobileSheet({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         <PanelHeader node={node} />
-        <PanelDetails node={node} neighbors={neighbors} repeatCount={repeatCount} allRounds={allRounds} suggestions={suggestions} onPick={onPick} />
+        <PanelDetails node={node} data={data} onPick={onPick} />
       </div>
     </div>
   );
 }
 
-function Stat({ icon: Icon, value, label }: { icon: typeof Users; value: number; label: string }) {
+function Kpi({ value, label }: { value: React.ReactNode; label: string }) {
   return (
-    <div className="rounded-lg bg-white/5 px-1 py-2 text-center">
-      <Icon className="mx-auto h-3 w-3 text-white/40" aria-hidden />
-      <div className="mt-1 font-display text-base leading-none">{value}</div>
-      <div className="mt-0.5 text-[9px] uppercase tracking-wide text-white/45">{label}</div>
+    <div className="rounded-xl bg-white/5 px-2 py-3 text-center">
+      <div className="font-display text-2xl leading-none text-white">{value}</div>
+      <div className="mt-1.5 text-[9px] font-medium uppercase tracking-[0.1em] text-white/45">{label}</div>
     </div>
+  );
+}
+
+/** Per-round presence dots for one connection — lit for the rounds the pair met. */
+function RoundDots({ total, on }: { total: number; on: number[] }) {
+  return (
+    <span className="flex gap-0.5">
+      {Array.from({ length: total }, (_, i) => i + 1).map((r) => (
+        <span key={r} className="h-1.5 w-1.5 rounded-full" style={{ background: on.includes(r) ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.15)" }} />
+      ))}
+    </span>
   );
 }

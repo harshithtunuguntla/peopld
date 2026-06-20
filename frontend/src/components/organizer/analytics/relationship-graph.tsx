@@ -16,11 +16,16 @@ import {
   type GraphNode,
   type GraphEdge,
   type StoryKind,
+  type TierKey,
 } from "./graph-utils";
 
 export type { GraphNode, GraphEdge };
 
+const BG = "#0E1015";
 const STORY_ICON: Record<StoryKind, typeof Zap> = { super: Zap, pair: Heart, group: UsersRound, isolated: UserMinus };
+// Edges are the hero: most recede, only the meaningful few step forward.
+const EDGE_W: Record<TierKey, number> = { met: 0.6, spark: 1.0, repeat: 1.2, matched: 1.8 };
+const EDGE_O: Record<TierKey, number> = { met: 0.12, spark: 0.36, repeat: 0.5, matched: 0.75 };
 
 interface PNode {
   id: string;
@@ -41,15 +46,14 @@ interface PNode {
 interface PLink {
   a: string;
   b: string;
-  ax: number;
-  ay: number;
-  bx: number;
-  by: number;
+  d: string;
   weight: number;
   rounds: number[];
   matched: boolean;
   liked: boolean;
   score: number;
+  tier: TierKey;
+  color: string;
 }
 interface Hull {
   community: number;
@@ -58,7 +62,6 @@ interface Hull {
   labelX: number;
   labelY: number;
   count: number;
-  leader: string;
 }
 interface View {
   x: number;
@@ -67,17 +70,24 @@ interface View {
   h: number;
 }
 
-// d3-force mutates these in place during layout.
 type SimNode = { id: string; community: number; r: number; x: number; y: number; vx?: number; vy?: number };
 type SimLink = { source: string | SimNode; target: string | SimNode; dist: number; strength: number };
 
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const mid = (a: [number, number], b: [number, number]): [number, number] => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
 
-function mid(a: [number, number], b: [number, number]): [number, number] {
-  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+/** A gently curved edge — elegant arcs read better than a web of straight lines. */
+function edgePath(ax: number, ay: number, bx: number, by: number): string {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const L = Math.hypot(dx, dy) || 1;
+  const off = L * 0.13;
+  const mx = (ax + bx) / 2 - (dy / L) * off;
+  const my = (ay + by) / 2 + (dx / L) * off;
+  return `M${ax},${ay} Q${mx},${my} ${bx},${by}`;
 }
 
-/** A soft, smoothed region around a community's members. */
+/** A soft, smoothed region around a community's members (Flourish-style halo). */
 function regionPath(pts: [number, number][], cx: number, cy: number, pad: number): string {
   if (pts.length === 1) {
     const [x, y] = pts[0];
@@ -105,14 +115,10 @@ function regionPath(pts: [number, number][], cx: number, cy: number, pad: number
 }
 
 /**
- * The signature relationship-intelligence graph — a community-first constellation.
- *
- * Built for discovery, not display: communities are anchored into distinct regions
- * (soft clouds + boundaries + labels) so the groups read in seconds; node hierarchy
- * (size = reach, glowing halo = super-connector, crown ring = group leader) shows
- * who drove the room; edge tiers (weak → strong → matched, with glow) make the
- * meaningful relationships jump out. A story rail surfaces the headline insights;
- * clicking anyone flies the camera to their ego-network and opens a deep panel.
+ * Relationship intelligence graph — a refined, community-first constellation.
+ * Designed for restraint: most nodes are small points, edges are the hero, the few
+ * relationships and people that matter step forward, and the room is legible in
+ * seconds. "Figma meets Graphistry", not a force-graph demo.
  */
 export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEdge[] }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -135,7 +141,7 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
     return () => ro.disconnect();
   }, []);
 
-  // ---- Layout (community-first force simulation) ----------------------------
+  // ---- Community-first force layout -----------------------------------------
   const layout = useMemo(() => {
     const { w, h } = dims;
     if (w < 2 || h < 2 || nodes.length < 2) return null;
@@ -145,41 +151,49 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
       edges,
     );
     const commIds = [...new Set([...community.values()])].sort((a, b) => a - b);
+    const multi = commIds.length > 1;
     const cx = w / 2;
     const cy = h / 2 + 8;
-    const rx = w * (commIds.length > 1 ? 0.3 : 0);
-    const ry = h * (commIds.length > 1 ? 0.3 : 0);
+    const rx = w * (multi ? 0.34 : 0);
+    const ry = h * (multi ? 0.34 : 0);
     const anchor = new Map<number, { x: number; y: number }>();
     commIds.forEach((c, i) => {
       const ang = (i / commIds.length) * Math.PI * 2 - Math.PI / 2;
       anchor.set(c, { x: cx + rx * Math.cos(ang), y: cy + ry * Math.sin(ang) });
     });
 
-    const maxMet = Math.max(1, ...nodes.map((n) => n.met));
-    const rOf = (met: number) => 6 + Math.sqrt(met / maxMet) * (Math.min(w, h) * 0.05);
+    // Size sparingly: percentile-based so ~80% stay small, a few stand out.
+    const sortedMet = [...nodes.map((n) => n.met)].sort((a, b) => a - b);
+    const pctOf = (met: number) => {
+      let lo = 0;
+      while (lo < sortedMet.length && sortedMet[lo] < met) lo++;
+      return sortedMet.length > 1 ? lo / (sortedMet.length - 1) : 0;
+    };
+    const maxR = Math.min(w, h) * 0.021;
+    const rOf = (met: number) => 3 + Math.pow(pctOf(met), 2.2) * (maxR - 3 + 9);
 
     const simNodes: SimNode[] = nodes.map((n) => {
       const c = community.get(n.attendee_id) ?? 0;
       const a = anchor.get(c)!;
-      return { id: n.attendee_id, community: c, r: rOf(n.met), x: a.x + (Math.random() - 0.5) * 40, y: a.y + (Math.random() - 0.5) * 40 };
+      return { id: n.attendee_id, community: c, r: rOf(n.met), x: a.x + (Math.random() - 0.5) * 50, y: a.y + (Math.random() - 0.5) * 50 };
     });
     const simLinks: SimLink[] = edges.map((e) => {
       const s = edgeScore({ matched: e.matched, weight: e.weight ?? 1, liked: e.liked ?? false });
-      return { source: e.a, target: e.b, dist: Math.max(36, 96 - s * 7), strength: 0.05 + Math.min(s, 6) * 0.02 };
+      return { source: e.a, target: e.b, dist: Math.max(40, 112 - s * 7), strength: 0.045 + Math.min(s, 6) * 0.018 };
     });
 
     const sim: Simulation<SimNode, undefined> = forceSimulation(simNodes)
       .force("link", forceLink<SimNode, SimLink>(simLinks).id((d) => d.id).distance((l) => l.dist).strength((l) => l.strength))
-      .force("charge", forceManyBody().strength(-Math.min(w, h) * 0.5))
-      .force("x", forceX<SimNode>((d) => anchor.get(d.community)!.x).strength(0.16))
-      .force("y", forceY<SimNode>((d) => anchor.get(d.community)!.y).strength(0.16))
-      .force("collide", forceCollide<SimNode>((d) => d.r + 7))
+      .force("charge", forceManyBody().strength(-Math.min(w, h) * 0.62))
+      .force("x", forceX<SimNode>((d) => anchor.get(d.community)!.x).strength(0.17))
+      .force("y", forceY<SimNode>((d) => anchor.get(d.community)!.y).strength(0.17))
+      .force("collide", forceCollide<SimNode>((d) => d.r + 9))
       .stop();
-    for (let i = 0; i < 340; i++) sim.tick();
+    for (let i = 0; i < 360; i++) sim.tick();
 
-    const padX = 36;
-    const padTop = 52;
-    const padBottom = 36;
+    const padX = 40;
+    const padTop = 58;
+    const padBottom = 40;
     const posById = new Map<string, SimNode>();
     simNodes.forEach((n) => {
       n.x = Math.max(n.r + padX, Math.min(w - n.r - padX, n.x));
@@ -187,7 +201,6 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
       posById.set(n.id, n);
     });
 
-    // Node hierarchy: global super-connector + per-community leader.
     const superId = [...nodes].sort((a, b) => b.met - a.met || a.name.localeCompare(b.name))[0]?.attendee_id;
     const leaderByComm = new Map<number, string>();
     for (const n of nodes) {
@@ -221,18 +234,18 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
     const plinks: PLink[] = edges.map((e) => {
       const s = posById.get(e.a)!;
       const t = posById.get(e.b)!;
+      const tier = tierOf({ matched: e.matched, weight: e.weight ?? 1, liked: e.liked ?? false });
       return {
         a: e.a,
         b: e.b,
-        ax: s.x,
-        ay: s.y,
-        bx: t.x,
-        by: t.y,
+        d: edgePath(s.x, s.y, t.x, t.y),
         weight: e.weight ?? 1,
         rounds: e.rounds ?? [],
         matched: e.matched,
         liked: e.liked ?? false,
         score: edgeScore({ matched: e.matched, weight: e.weight ?? 1, liked: e.liked ?? false }),
+        tier: tier.key,
+        color: tier.color,
       };
     });
 
@@ -243,24 +256,15 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
         const pts = members.map((m) => [m.x, m.y] as [number, number]);
         const ccx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
         const ccy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
-        const maxR = Math.max(...members.map((m) => m.r));
+        const maxMR = Math.max(...members.map((m) => m.r));
         const minY = Math.min(...members.map((m) => m.y - m.r));
-        return {
-          community: c,
-          color: COMMUNITY_COLORS[c % COMMUNITY_COLORS.length],
-          path: regionPath(pts, ccx, ccy, maxR + 26),
-          labelX: ccx,
-          labelY: minY - 30,
-          count: members.length,
-          leader: members.find((m) => m.isLeader)?.name ?? "",
-        };
+        return { community: c, color: COMMUNITY_COLORS[c % COMMUNITY_COLORS.length], path: regionPath(pts, ccx, ccy, maxMR + 34), labelX: ccx, labelY: minY - 24, count: members.length };
       })
       .filter((x): x is Hull => x !== null);
 
-    return { pnodes, plinks, hulls, base: { x: 0, y: 0, w, h } as View, posById };
+    return { pnodes, plinks, hulls, base: { x: 0, y: 0, w, h } as View };
   }, [nodes, edges, dims]);
 
-  // Adjacency for the panel.
   const adjacency = useMemo(() => {
     const m = new Map<string, PLink[]>();
     layout?.plinks.forEach((l) => {
@@ -278,13 +282,13 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
     return s;
   }, [selected, adjacency, layout]);
 
-  // ---- Camera (animated viewBox) -------------------------------------------
+  // ---- Cinematic camera (animated viewBox) ---------------------------------
   const animateTo = useCallback((target: View) => {
     const svg = svgRef.current;
     if (!svg) return;
     const start = viewRef.current ?? target;
     const t0 = performance.now();
-    const dur = 650;
+    const dur = 700;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     const step = (now: number) => {
       const p = Math.min(1, (now - t0) / dur);
@@ -302,7 +306,6 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
     rafRef.current = requestAnimationFrame(step);
   }, []);
 
-  // Reset the camera whenever the layout (re)builds.
   useEffect(() => {
     if (layout) {
       viewRef.current = layout.base;
@@ -319,8 +322,8 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
       let x1 = Math.max(...ps.map((n) => n.x + n.r));
       let y0 = Math.min(...ps.map((n) => n.y - n.r));
       let y1 = Math.max(...ps.map((n) => n.y + n.r));
-      const px = (x1 - x0) * 0.28 + 60;
-      const py = (y1 - y0) * 0.28 + 60;
+      const px = (x1 - x0) * 0.3 + 70;
+      const py = (y1 - y0) * 0.3 + 70;
       x0 -= px; x1 += px; y0 -= py; y1 += py;
       let bw = x1 - x0;
       let bh = y1 - y0;
@@ -351,9 +354,7 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
   }
 
   if (nodes.length < 2) {
-    return (
-      <p className="py-12 text-center text-sm text-muted-foreground">The network fills in once people have been seated together.</p>
-    );
+    return <p className="py-12 text-center text-sm text-muted-foreground">The network fills in once people have been seated together.</p>;
   }
 
   const selNode = selected && layout ? layout.pnodes.find((n) => n.id === selected) ?? null : null;
@@ -383,119 +384,94 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
         </div>
       )}
 
-      <div ref={wrapRef} className="relative h-[460px] w-full overflow-hidden rounded-2xl border border-border bg-[#0a0910] sm:h-[600px] lg:h-[660px]">
+      <div ref={wrapRef} className="relative h-[500px] w-full overflow-hidden rounded-2xl border border-border sm:h-[640px] lg:h-[720px]" style={{ background: BG }}>
         {layout && (
           <svg ref={svgRef} className="absolute inset-0 h-full w-full select-none" role="img" aria-label="Relationship constellation — communities, connections and matches from the event">
             <defs>
               <filter id="rg-glow" x="-60%" y="-60%" width="220%" height="220%">
-                <feGaussianBlur stdDeviation="3" result="b" />
+                <feGaussianBlur stdDeviation="2" result="b" />
                 <feMerge>
                   <feMergeNode in="b" />
                   <feMergeNode in="SourceGraphic" />
                 </feMerge>
               </filter>
-              <filter id="rg-cloud" x="-80%" y="-80%" width="260%" height="260%">
-                <feGaussianBlur stdDeviation="22" />
+              <filter id="rg-cloud" x="-90%" y="-90%" width="280%" height="280%">
+                <feGaussianBlur stdDeviation="30" />
               </filter>
             </defs>
 
-            {/* background catches clicks to reset */}
             <rect x={-9999} y={-9999} width={19998} height={19998} fill="transparent" onClick={reset} />
 
-            {/* community clouds + boundaries + labels */}
-            <g style={{ opacity: selected ? 0.35 : 1, transition: "opacity 350ms", pointerEvents: "none" }}>
+            {/* community regions — soft halos, no borders */}
+            <g style={{ opacity: selected ? 0.25 : 1, transition: "opacity 400ms", pointerEvents: "none" }}>
               {layout.hulls.map((h, i) => (
                 <g key={`h${h.community}`}>
-                  <path d={h.path} fill={h.color} opacity={0.1} filter="url(#rg-cloud)" />
-                  <path d={h.path} fill="none" stroke={h.color} strokeOpacity={0.32} strokeWidth={1.25} strokeDasharray="5 6" />
-                  <text
-                    x={h.labelX}
-                    y={h.labelY}
-                    textAnchor="middle"
-                    fontSize={11}
-                    fontWeight={700}
-                    letterSpacing="0.12em"
-                    fill={h.color}
-                    fillOpacity={0.9}
-                    stroke="#0a0910"
-                    strokeWidth={3}
-                    paintOrder="stroke"
-                  >
-                    GROUP {i + 1} · {h.count}
+                  <path d={h.path} fill={h.color} opacity={0.07} filter="url(#rg-cloud)" />
+                  <text x={h.labelX} y={h.labelY} textAnchor="middle" fontSize={10} fontWeight={600} letterSpacing="0.18em" fill={h.color} fillOpacity={0.55}>
+                    GROUP {i + 1}
                   </text>
                 </g>
               ))}
             </g>
 
-            {/* edges (weak → strong; matched on top, with glow) */}
-            <g style={{ pointerEvents: "none" }}>
+            {/* edges — the hero: most recede, the meaningful few step forward */}
+            <g fill="none" style={{ pointerEvents: "none" }}>
               {[...layout.plinks]
                 .sort((a, b) => a.score - b.score)
                 .map((l, i) => {
                   const incident = selected ? l.a === selected || l.b === selected : false;
                   const faded = selected && !incident;
-                  const t = tierOf({ matched: l.matched, weight: l.weight, liked: l.liked });
-                  const base = 0.7 + (l.weight - 1) * 1.4 + (l.matched ? 1.2 : 0);
                   const strong = l.matched || l.weight >= 3;
                   return (
-                    <line
+                    <path
                       key={`l${i}`}
-                      x1={l.ax}
-                      y1={l.ay}
-                      x2={l.bx}
-                      y2={l.by}
-                      stroke={faded ? "#6b7280" : t.color}
-                      strokeOpacity={faded ? 0.05 : l.matched ? 0.9 : l.weight >= 2 ? 0.6 : 0.22}
-                      strokeWidth={incident ? base + 1.6 : base}
+                      d={l.d}
+                      stroke={faded ? "#5b6270" : l.color}
+                      strokeOpacity={faded ? 0.04 : incident ? Math.min(0.95, EDGE_O[l.tier] + 0.3) : EDGE_O[l.tier]}
+                      strokeWidth={incident ? EDGE_W[l.tier] + 1.3 : EDGE_W[l.tier] + (l.weight >= 3 ? 0.6 : 0)}
                       strokeLinecap="round"
                       filter={strong && !faded ? "url(#rg-glow)" : undefined}
-                      style={{ transition: "stroke-opacity 350ms" }}
+                      style={{ transition: "stroke-opacity 400ms" }}
                     />
                   );
                 })}
             </g>
 
-            {/* nodes */}
+            {/* nodes — small by default, hierarchy reserved for the few */}
             <g>
               {layout.pnodes.map((n) => {
                 const inEgo = !selected || (neighborIds?.has(n.id) ?? false);
                 const dim = !!selected && !inEgo;
                 const isSel = n.id === selected;
                 const isHover = n.id === hover;
-                const showLabel = n.isLeader || n.isSuper || isSel || isHover || (!!selected && inEgo);
+                const showLabel = n.isSuper || isSel || isHover || (!!selected && inEgo);
                 return (
                   <g
                     key={n.id}
-                    style={{ opacity: dim ? 0.14 : 1, transition: "opacity 350ms", cursor: "pointer" }}
+                    style={{ opacity: dim ? 0.1 : 1, transition: "opacity 400ms", cursor: "pointer" }}
                     onClick={() => focusNode(n.id)}
                     onMouseEnter={() => setHover(n.id)}
                     onMouseLeave={() => setHover(null)}
                   >
-                    {/* super-connector halo */}
-                    {n.isSuper && !dim && <circle cx={n.x} cy={n.y} r={n.r + 7} fill="none" stroke={n.color} strokeOpacity={0.5} strokeWidth={2} filter="url(#rg-glow)" />}
-                    {/* selection ring */}
-                    {(isSel || isHover) && <circle cx={n.x} cy={n.y} r={n.r + 4} fill="none" stroke="#ffffff" strokeOpacity={isSel ? 0.9 : 0.5} strokeWidth={1.5} />}
-                    {/* leader crown ring */}
-                    {n.isLeader && !n.isSuper && <circle cx={n.x} cy={n.y} r={n.r + 3} fill="none" stroke={n.color} strokeOpacity={0.7} strokeWidth={1.5} />}
-                    <circle cx={n.x} cy={n.y} r={n.r} fill={n.color} stroke="#0a0910" strokeWidth={1.5} filter={n.isSuper && !dim ? "url(#rg-glow)" : undefined} />
-                    {/* mutual-match marker */}
-                    {n.mutual > 0 && !dim && (
-                      <circle cx={n.x + n.r * 0.62} cy={n.y - n.r * 0.62} r={Math.max(3, n.r * 0.32)} fill="#B66CFF" stroke="#0a0910" strokeWidth={1} />
+                    {n.isSuper && !dim && (
+                      <circle cx={n.x} cy={n.y} r={n.r + 5} fill="none" stroke={n.color} strokeWidth={1.25}>
+                        <animate attributeName="stroke-opacity" values="0.5;0.15;0.5" dur="3.2s" repeatCount="indefinite" />
+                        <animate attributeName="r" values={`${n.r + 4};${n.r + 8};${n.r + 4}`} dur="3.2s" repeatCount="indefinite" />
+                      </circle>
                     )}
-                    {(n.isLeader || n.isSuper) && !dim && (
-                      <g transform={`translate(${n.x - 5}, ${n.y - n.r - 14})`}>
-                        <Crown x={0} y={0} width={10} height={10} color={n.color} aria-hidden />
-                      </g>
-                    )}
+                    {(isSel || isHover) && <circle cx={n.x} cy={n.y} r={n.r + 3.5} fill="none" stroke="#ffffff" strokeOpacity={isSel ? 0.85 : 0.45} strokeWidth={1.25} />}
+                    {n.isLeader && !n.isSuper && !dim && <circle cx={n.x} cy={n.y} r={n.r + 2.5} fill="none" stroke={n.color} strokeOpacity={0.45} strokeWidth={1} />}
+                    <circle cx={n.x} cy={n.y} r={n.r} fill={n.color} stroke={BG} strokeWidth={1} filter={n.isSuper && !dim ? "url(#rg-glow)" : undefined} />
                     {showLabel && (
                       <text
                         x={n.x}
-                        y={n.y + n.r + 13}
+                        y={n.y + n.r + 12}
                         textAnchor="middle"
-                        fontSize={n.isSuper ? 13 : 11}
-                        fontWeight={n.isSuper || n.isLeader ? 700 : 500}
+                        fontSize={n.isSuper ? 12 : 10.5}
+                        fontWeight={n.isSuper ? 700 : 500}
                         fill="#ffffff"
-                        stroke="#0a0910"
+                        fillOpacity={isSel || isHover || n.isSuper ? 0.95 : 0.7}
+                        stroke={BG}
                         strokeWidth={3}
                         paintOrder="stroke"
                         style={{ pointerEvents: "none" }}
@@ -510,19 +486,18 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
           </svg>
         )}
 
-        {/* controls + legend */}
+        {/* legend + reset — minimal */}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
-          <div className="pointer-events-auto flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-black/40 px-3 py-2 text-[11px] text-white/80 backdrop-blur">
-            <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-[#B66CFF]" /> matched</span>
-            <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-4 rounded-full bg-[#FFC24B]" /> met again</span>
-            <span className="inline-flex items-center gap-1.5"><Crown className="h-3 w-3 text-white/70" aria-hidden /> group leader</span>
-            <span className="inline-flex items-center gap-1.5"><Zap className="h-3 w-3 text-white/70" aria-hidden /> super-connector</span>
+          <div className="pointer-events-auto flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-white/[0.04] px-3 py-2 text-[11px] text-white/60 backdrop-blur">
+            <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: "#B66CFF" }} /> matched</span>
+            <span className="inline-flex items-center gap-1.5"><span className="h-px w-4" style={{ background: "#E7B36A" }} /> met again</span>
+            <span className="inline-flex items-center gap-1.5"><Zap className="h-3 w-3 text-white/55" aria-hidden /> connector</span>
           </div>
           {selected && (
             <button
               type="button"
               onClick={reset}
-              className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-lg bg-black/40 px-2.5 text-[11px] font-medium text-white/80 backdrop-blur transition-colors hover:text-white"
+              className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/[0.06] px-2.5 text-[11px] font-medium text-white/70 backdrop-blur transition-colors hover:text-white"
             >
               <Maximize2 className="h-3.5 w-3.5" aria-hidden /> Reset
             </button>
@@ -530,8 +505,8 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
         </div>
 
         {!selected && (
-          <p className="pointer-events-none absolute inset-x-0 bottom-3 text-center text-[11px] text-white/45">
-            Tap a person to explore their network — or tap an insight above
+          <p className="pointer-events-none absolute inset-x-0 bottom-3 text-center text-[11px] text-white/35">
+            Tap a person to explore — or tap an insight above
           </p>
         )}
 
@@ -572,12 +547,11 @@ function IntelligencePanel({
   const suggestions = useMemo(() => suggestionsFor(node.id, nodes, edges), [node.id, nodes, edges]);
 
   return (
-    <div className="absolute inset-x-3 bottom-3 max-h-[88%] overflow-y-auto rounded-2xl border border-white/10 bg-[#15141c]/95 p-4 text-white shadow-2xl backdrop-blur sm:inset-x-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[20rem]">
+    <div className="absolute inset-x-3 bottom-3 max-h-[88%] overflow-y-auto rounded-2xl border border-white/10 bg-[#14161c]/95 p-4 text-white shadow-2xl backdrop-blur sm:inset-x-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[20rem]">
       <button type="button" onClick={onClose} aria-label="Close" className="absolute right-3 top-3 text-white/50 transition-colors hover:text-white">
         <X className="h-4 w-4" aria-hidden />
       </button>
 
-      {/* Identity */}
       <div className="flex items-center gap-3 pr-6">
         <div className="relative">
           <Avatar name={node.name} seed={node.id} size={44} />
@@ -595,7 +569,6 @@ function IntelligencePanel({
         </div>
       </div>
 
-      {/* Relationship intelligence */}
       <div className="mt-3 grid grid-cols-4 gap-1.5">
         <Stat icon={Users} value={node.met} label="met" />
         <Stat icon={Repeat} value={repeatCount} label="repeat" />
@@ -603,7 +576,6 @@ function IntelligencePanel({
         <Stat icon={Link2} value={node.roundsPresent} label="rounds" />
       </div>
 
-      {/* Timeline */}
       {allRounds.length > 0 && (
         <div className="mt-3 rounded-xl bg-white/5 px-3 py-2">
           <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-white/45">Timeline</div>
@@ -622,7 +594,6 @@ function IntelligencePanel({
         </div>
       )}
 
-      {/* Top relationships */}
       <div className="mt-3 text-[10px] font-medium uppercase tracking-[0.18em] text-white/45">Top relationships</div>
       {neighbors.length === 0 ? (
         <p className="mt-2 rounded-lg bg-white/5 px-3 py-3 text-xs text-white/55">Wasn&apos;t seated with anyone — a strong candidate for a personal intro.</p>
@@ -644,7 +615,6 @@ function IntelligencePanel({
         </ul>
       )}
 
-      {/* Future opportunity */}
       {(suggestions.reconnect.length > 0 || suggestions.introduce.length > 0) && (
         <div className="mt-3 rounded-xl border border-accent/25 bg-accent/5 p-3">
           <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-accent">

@@ -20,8 +20,9 @@ export interface GraphEdge {
   rounds?: number[];
 }
 
-// On-brand palette for community tinting (the natural groups that formed).
-export const COMMUNITY_COLORS = ["#FF5A3C", "#B66CFF", "#39C2FF", "#D9FF4D", "#FF8FB1", "#5BE0A8", "#FFC24B", "#7C9CFF"];
+// Refined, analytical palette for community tinting (Linear/Stripe-leaning — muted
+// enough to feel premium on a dark canvas, distinct enough to read at a glance).
+export const COMMUNITY_COLORS = ["#7EA6FF", "#5FD3C0", "#E7B36A", "#E58FB4", "#9B8CF5", "#76C7E8", "#7FD6A0", "#E3927A"];
 
 export type TierKey = "matched" | "repeat" | "spark" | "met";
 

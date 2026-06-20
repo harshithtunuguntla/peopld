@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Flag, Users, Heart, Handshake, Trophy, Percent } from "lucide-react";
+import Link from "next/link";
+import { Flag, Users, Heart, Handshake, Trophy, Percent, BarChart3, ArrowRight } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 import { apiFetch } from "@/lib/api";
@@ -99,16 +100,7 @@ export function EventRecap({ eventId }: { eventId: string }) {
       {stats && (
         <>
           {/* Headline bento */}
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-            <BentoTile value={stats.total_introductions} label="conversations sparked" bg="#FF5A3C" fg="#fff" icon={Handshake}
-              info="Unique pairs of people we seated together — every new conversation the seating engine created." />
-            <BentoTile value={stats.total_matches} label="connections made" bg="#B66CFF" fg="#fff" icon={Heart}
-              info="Mutual likes: both people liked each other and want to stay in touch." />
-            <BentoTile value={`${stats.pct_room_met}%`} label="of the room met" bg="#A8D5FF" fg="#15130E" icon={Users}
-              info="On average, each guest met this share of everyone else in the room." />
-            <BentoTile value={`${matchRate}%`} label="match rate" bg="#D9FF4D" fg="#15130E" icon={Percent}
-              info="Of all the conversations we created, this share turned into a mutual connection." />
-          </div>
+          <HeadlineTiles stats={stats} matchRate={matchRate} />
 
           {/* The room as a network — the headline visual */}
           <Card className="p-5 sm:p-6">
@@ -215,6 +207,82 @@ export function EventRecap({ eventId }: { eventId: string }) {
           <Users className="h-4 w-4" aria-hidden /> View attendees
         </a>
       </div>
+    </div>
+  );
+}
+
+/** The four headline numbers — shared by the full recap (analytics page) and the
+ *  lean summary (live page ended state) so the metric language never drifts. */
+function HeadlineTiles({ stats, matchRate }: { stats: Analytics; matchRate: number }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <BentoTile value={stats.total_introductions} label="conversations sparked" bg="#FF5A3C" fg="#fff" icon={Handshake}
+        info="Unique pairs of people we seated together — every new conversation the seating engine created." />
+      <BentoTile value={stats.total_matches} label="connections made" bg="#B66CFF" fg="#fff" icon={Heart}
+        info="Mutual likes: both people liked each other and want to stay in touch." />
+      <BentoTile value={`${stats.pct_room_met}%`} label="of the room met" bg="#A8D5FF" fg="#15130E" icon={Users}
+        info="On average, each guest met this share of everyone else in the room." />
+      <BentoTile value={`${matchRate}%`} label="match rate" bg="#D9FF4D" fg="#15130E" icon={Percent}
+        info="Of all the conversations we created, this share turned into a mutual connection." />
+    </div>
+  );
+}
+
+/**
+ * Lean post-event summary shown on the LIVE command center once an event ends.
+ * Just the headline — the heavy intelligence (graph, funnel, relationship
+ * analytics) lives on the dedicated /analytics page so the live route stays light.
+ */
+export function EventRecapSummary({ eventId }: { eventId: string }) {
+  const [stats, setStats] = useState<Analytics | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    apiFetch<Analytics>(`/events/${eventId}/analytics`)
+      .then(setStats)
+      .catch(() => setStats(null))
+      .finally(() => setLoaded(true));
+  }, [eventId]);
+
+  const matchRate =
+    stats && stats.total_introductions > 0
+      ? Math.round((stats.total_matches / stats.total_introductions) * 100)
+      : 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-border bg-card/50 p-8 text-center">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-border bg-background/50 text-accent">
+          <Flag className="h-7 w-7" aria-hidden />
+        </div>
+        <h2 className="mt-5 font-display text-[clamp(24px,4vw,38px)] leading-tight tracking-[-0.02em] text-foreground">
+          That&apos;s a wrap{stats ? <> — the room sparked <em className="not-italic text-accent">{stats.total_introductions.toLocaleString()}</em> conversations</> : ""}
+        </h2>
+        <p className="mx-auto mt-2 max-w-md text-balance text-sm text-muted-foreground">
+          Rounds are closed and everyone&apos;s connections are unlocked. Here&apos;s the headline — open Analytics for the full relationship intelligence.
+        </p>
+      </div>
+
+      {!loaded && <div className="h-32 skeleton rounded-2xl border border-border" />}
+
+      {stats && (
+        <>
+          <HeadlineTiles stats={stats} matchRate={matchRate} />
+          <div className="flex flex-col items-center justify-center gap-2 pt-2 sm:flex-row">
+            <Link
+              href={`/organizer/event/${eventId}/analytics`}
+              className={cn(buttonVariants({ variant: "accent" }), "w-full gap-2 sm:w-auto")}
+            >
+              <BarChart3 className="h-4 w-4" aria-hidden /> View full analytics <ArrowRight className="h-4 w-4" aria-hidden />
+            </Link>
+            <Link
+              href={`/organizer/event/${eventId}/people`}
+              className={cn(buttonVariants({ variant: "outline" }), "w-full gap-2 sm:w-auto")}
+            >
+              <Users className="h-4 w-4" aria-hidden /> View attendees
+            </Link>
+          </div>
+        </>
+      )}
     </div>
   );
 }

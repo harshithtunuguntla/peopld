@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronLeft, Radio, Users, Lock, Settings } from "lucide-react";
+import { ChevronLeft, Radio, Users, Lock, Settings, BarChart3 } from "lucide-react";
 import { StatusChip, type EventStatus } from "./console-ui";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { key: "live", label: "Command Center", icon: Radio },
   { key: "people", label: "People", icon: Users },
+  { key: "analytics", label: "Analytics", icon: BarChart3 },
   { key: "settings", label: "Settings", icon: Settings },
 ] as const;
 
@@ -31,7 +32,7 @@ export function EventHeader({
   eventId: string;
   name?: string;
   status?: EventStatus;
-  active: "live" | "people" | "settings";
+  active: "live" | "people" | "analytics" | "settings";
   actions?: React.ReactNode;
 }) {
   return (

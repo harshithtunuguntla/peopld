@@ -38,7 +38,7 @@ export function RoundConnectionsChart({ edges }: { edges: GraphEdge[] }) {
         <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ new vs repeat connections</span>
         <InfoHint text="A new connection is the first time a pair shares a table; a repeat is any later round the same pair meets again. Every unique pair is counted as new exactly once — they never double-count." />
       </div>
-      <p className="mt-1.5 text-xs text-muted-foreground">Per round — fresh introductions vs. pairs who had already met.</p>
+      <p className="mt-1.5 text-xs text-muted-foreground">Per round — fresh introductions vs. pairs who had already met. Each connection is a pair of people, so the count runs higher than the guest headcount.</p>
       <div className="mt-4 h-56">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>

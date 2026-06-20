@@ -2,14 +2,14 @@
 
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { RefreshCw, Users, Armchair, Heart, Sparkles, AlertTriangle, FileText } from "lucide-react";
+import { RefreshCw, AlertTriangle, FileText } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { ConsoleShell } from "@/components/organizer/console-shell";
-import { StatCard } from "@/components/organizer/console-ui";
 import { EventHeader, EventAccessError } from "@/components/organizer/event-header";
+import { CommandBento } from "@/components/organizer/live/command-bento";
 import { cn } from "@/lib/utils";
 
 import {
@@ -206,16 +206,12 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
         }
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatCard label="Arrived" value={stats?.arrived.toString() || arrivedCount.toString()} icon={Users} />
-        <StatCard
-          label={phase.kind === "active" ? "Seated Now" : "Ready to Seat"}
-          value={phase.kind === "active" ? (stats?.seated_now.toString() || "0") : seatableCount.toString()}
-          icon={Armchair}
-        />
-        <StatCard label="Likes" value={stats?.likes_count.toString() || "0"} icon={Heart} />
-        <StatCard label="Matches" value={stats?.matches_count.toString() || "0"} icon={Sparkles} />
-      </div>
+      <CommandBento
+        stats={stats}
+        arrivedFallback={arrivedCount}
+        seatableCount={seatableCount}
+        phaseKind={phase.kind}
+      />
 
       {error && (
         <p role="alert" className="mb-5 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">

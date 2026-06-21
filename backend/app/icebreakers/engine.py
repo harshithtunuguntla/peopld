@@ -25,6 +25,7 @@ from supabase import Client
 from app.audit import record_audit
 from app.icebreakers import prompts
 from app.icebreakers.provider import LLMClient, get_llm_client
+from app.realtime import broadcast_event_changed
 from app.config import settings
 
 logger = logging.getLogger("app.icebreakers")
@@ -163,7 +164,7 @@ def _questions_for_table(
         target_idx = (i % n) + 1  # round-robin neighbour
         target_name = roster[target_idx - 1].get("name", "")
         question = prompts.fallback_question(
-            target_name, used=set(history), offset=len(history)
+            target_name, used=set(history), offset=len(history), theme=theme
         )
         out.append((i, target_idx, question, "fallback"))
     return out
@@ -255,6 +256,11 @@ def generate_for_round(db: Client, event_id: str, round_id: str, *, client: LLMC
             questions = _questions_for_table(roster, client, histories, theme)
             rows = _rows_for_table(event_id, round_id, table_number, roster, questions, generated_at)
             db.table("icebreakers").insert(rows).execute()
+            # Ring the doorbell as each table's questions land — progressive reveal
+            # (same UX as the old per-row postgres_changes) but ONE broadcast per
+            # table instead of a per-row × per-subscriber fan-out. Naturally paced
+            # by the per-table LLM latency, so it never bursts. Best-effort.
+            broadcast_event_changed(event_id, "icebreakers")
 
             llm = sum(1 for q in questions if q[3] == "llm")
             fallback = len(questions) - llm

@@ -17,6 +17,7 @@ from app.algorithm import (
 )
 from app.audit import record_audit
 from app.icebreakers import engine as icebreaker_engine
+from app.realtime import broadcast_event_changed
 from app.database import get_supabase
 from app.deps import fetch_event_or_404, get_current_organizer_id, require_event_owner
 from app.models.schemas import (
@@ -648,8 +649,14 @@ def publish_round(
         },
     )
 
-    # Async (spec §9): phones see the table now; icebreakers arrive seconds later,
-    # each INSERT a Step-5 realtime doorbell. Publish never waits on the LLM.
+    # Ring the doorbell: ONE broadcast tells every phone to re-fetch and see the
+    # new seating (replaces the heavy per-row postgres_changes fan-out). The
+    # icebreaker generation below sends its own doorbell when the questions land.
+    background_tasks.add_task(broadcast_event_changed, event_id, "publish")
+
+    # Async (spec §9): phones see the table now; icebreakers arrive seconds later.
+    # generate_for_round broadcasts a second doorbell when it finishes, so the
+    # questions pop in without waiting on the LLM. Publish never waits on the LLM.
     background_tasks.add_task(
         icebreaker_engine.generate_for_round, db, event_id, round_row["id"]
     )
@@ -694,6 +701,7 @@ def begin_round(
         entity_id=active["id"],
         metadata={"round_number": active["round_number"]},
     )
+    background_tasks.add_task(broadcast_event_changed, event_id, "begin")
     return result.data[0]
 
 
@@ -731,6 +739,7 @@ def extend_round(
         entity_id=active["id"],
         metadata={"round_number": active["round_number"], "added_seconds": int(body.seconds)},
     )
+    background_tasks.add_task(broadcast_event_changed, event_id, "extend")
     return result.data[0]
 
 
@@ -761,6 +770,7 @@ def end_round(
         entity_id=active["id"],
         metadata={"round_number": active["round_number"]},
     )
+    background_tasks.add_task(broadcast_event_changed, event_id, "round_end")
     return result.data[0]
 
 
@@ -799,6 +809,7 @@ def pause_round(
         entity_id=active["id"],
         metadata={"round_number": active["round_number"]},
     )
+    background_tasks.add_task(broadcast_event_changed, event_id, "pause")
     return result.data[0]
 
 
@@ -836,6 +847,7 @@ def resume_round(
         entity_id=active["id"],
         metadata={"round_number": active["round_number"], "total_paused_seconds": new_total},
     )
+    background_tasks.add_task(broadcast_event_changed, event_id, "resume")
     return result.data[0]
 
 
@@ -878,6 +890,7 @@ def cancel_round(
         entity_id=active["id"],
         metadata={"round_number": active["round_number"], "seated_count": seated_count},
     )
+    background_tasks.add_task(broadcast_event_changed, event_id, "cancel")
     return RoundCancelResponse(event_id=event_id, round_number=active["round_number"])
 
 

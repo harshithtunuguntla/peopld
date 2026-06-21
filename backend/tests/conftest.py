@@ -10,6 +10,8 @@ os.environ.setdefault("LLM_PROVIDER", "stub")  # deterministic, offline icebreak
 TEST_JWT_SECRET = "test-jwt-secret-not-for-production"
 os.environ.setdefault("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
 
+from types import SimpleNamespace
+
 import jwt
 import pytest
 from fastapi.testclient import TestClient
@@ -46,6 +48,21 @@ AUTH = _auth(make_token(ORGANIZER_ID, "org@test.local", role="organizer"))
 OTHER_AUTH = _auth(make_token(OTHER_ORGANIZER_ID, "org2@test.local", role="organizer"))
 ATTENDEE_AUTH = _auth(make_token(ATTENDEE_USER_ID, "asha@test.local"))
 OTHER_ATTENDEE_AUTH = _auth(make_token(OTHER_ATTENDEE_USER_ID, "ravi@test.local"))
+
+
+@pytest.fixture(autouse=True)
+def realtime_post(monkeypatch):
+    """Stub the Realtime Broadcast HTTP call (app/realtime.py) so tests never hit
+    the network, and so tests can assert the doorbell fired — and that its payload
+    is signal-only (no PII). Returns the captured call list."""
+    calls: list[dict] = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):  # noqa: A002 - mirror httpx.post
+        calls.append({"url": url, "json": json, "headers": headers})
+        return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr("app.realtime.httpx.post", fake_post)
+    return calls
 
 
 @pytest.fixture

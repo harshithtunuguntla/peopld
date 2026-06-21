@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, Lock } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
@@ -17,6 +17,25 @@ export default function OrganizerLoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  // Already signed in? Skip the form (mirrors the attendee /auth page, which the
+  // organizer side was missing). Role-aware: a signed-in *attendee* who lands
+  // here has no console to enter, so we send them to their own home rather than
+  // dumping them into a dashboard they can't use.
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getUser().then(({ data }) => {
+      if (!active) return;
+      const role = (data.user?.app_metadata as { role?: string } | undefined)?.role;
+      if (data.user && role === "organizer") router.replace("/organizer/dashboard");
+      else if (data.user) router.replace("/home");
+      else setChecking(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [router]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -29,6 +48,14 @@ export default function OrganizerLoginPage() {
       return;
     }
     router.push("/organizer/dashboard");
+  }
+
+  if (checking) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center gap-2 bg-background text-sm text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> Loading…
+      </div>
+    );
   }
 
   return (

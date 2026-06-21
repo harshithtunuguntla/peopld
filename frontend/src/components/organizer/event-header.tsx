@@ -93,12 +93,15 @@ export function EventAccessError({ notFound = false }: { notFound?: boolean }) {
         <Lock className="h-6 w-6" aria-hidden />
       </div>
       <h2 className="mt-5 font-display text-2xl text-foreground">
-        {notFound ? "Event not found" : "You don’t have access"}
+        {notFound ? "Event not found" : "Event unavailable"}
       </h2>
+      {/* Both cases stay deliberately neutral. Telling a signed-in organizer
+          "this is someone else's event" would confirm the event exists — the
+          leak-free pattern (GitHub's, for private repos) reveals nothing. */}
       <p className="mx-auto mt-2 max-w-sm text-balance text-sm text-muted-foreground">
         {notFound
           ? "This event doesn’t exist or has been removed."
-          : "Only the organizer who created this event can manage it."}
+          : "This event isn’t available on your account."}
       </p>
       <Link href="/organizer/dashboard" className={cn(buttonVariants({ variant: "outline" }), "mt-6 gap-1.5")}>
         <ChevronLeft className="h-4 w-4" aria-hidden /> Back to dashboard

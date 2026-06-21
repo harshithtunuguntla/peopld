@@ -1,9 +1,10 @@
 ﻿from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from supabase import Client
 
 from app.audit import record_audit
+from app.realtime import broadcast_event_changed
 from app.database import get_supabase
 from app.deps import (
     AuthUser,
@@ -409,6 +410,7 @@ def update_event(
 @router.post("/{event_id}/end", response_model=EventResponse)
 def end_event(
     event_id: str,
+    background_tasks: BackgroundTasks,
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
@@ -430,7 +432,30 @@ def end_event(
         event_id=event_id,
         entity_id=event_id,
     )
+    # Doorbell: every phone re-fetches and moves to the recap/ended screen.
+    background_tasks.add_task(broadcast_event_changed, event_id, "event_end")
     return _attach_requires_code(db, result.data[0])
+
+
+@router.post("/{event_id}/resync")
+def resync_event(
+    event_id: str,
+    background_tasks: BackgroundTasks,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Organizer "Re-sync room": re-ring the doorbell for every connected phone.
+
+    Owner-only and server-sent — there is no client-side broadcast path to abuse.
+    It NEVER re-runs seating (the DB is already the source of truth); it just tells
+    phones to re-fetch the authoritative snapshot, for the rare case where one
+    missed a doorbell. Returns immediately; the broadcast fires in the background
+    so the click feels instant.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    background_tasks.add_task(broadcast_event_changed, event_id, "manual")
+    return {"queued": True}
 
 
 @router.post("/{event_id}/archive", response_model=EventResponse)

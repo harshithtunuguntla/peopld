@@ -2,7 +2,6 @@
 
 import { use, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { Activity } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
@@ -61,18 +60,12 @@ export default function OrganizerAnalyticsPage({ params }: { params: Promise<{ e
         </p>
       )}
 
-      {/* Mid-event note: the numbers are real but still growing each round. */}
-      {event && event.status !== "ended" && (
-        <p className="mb-5 flex items-start gap-2 rounded-xl border border-border bg-surface-2 px-4 py-2.5 text-sm text-muted-foreground">
-          <Activity className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
-          This event is still live — these numbers update as each round completes. The full picture lands once you wrap up.
-        </p>
-      )}
-
-      {(!checked || !user) ? (
+      {/* Wait for the event so the recap renders the correct phase from the first
+          paint (live "in progress" vs the post-event "wrap"), no flicker between. */}
+      {(!checked || !user || !event) ? (
         <div className="h-40 skeleton rounded-2xl border border-border" />
       ) : (
-        <EventRecap eventId={eventId} />
+        <EventRecap eventId={eventId} live={event.status !== "ended"} />
       )}
     </ConsoleShell>
   );

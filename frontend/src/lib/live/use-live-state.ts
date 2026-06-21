@@ -75,7 +75,15 @@ export interface UseLiveState {
   refetch: () => void;
 }
 
-const POLL_MS = 20_000; // fallback for when websockets are blocked entirely
+// Adaptive polling driven by realtime CONNECTION HEALTH, not a fixed clock.
+// When the realtime doorbell is alive it does the work, so we only poll on a
+// lazy backstop heartbeat (fewer calls than the old blind 20s poll). When the
+// socket is down — blocked, dropped, backgrounded — *this client* polls fast
+// until it recovers, and refetches immediately on reconnect (realtime is
+// best-effort and never replays missed events). So we spend API calls only on
+// the phones that are actually struggling, and converge in ~5s instead of 20s.
+const HEARTBEAT_MS = 45_000; // realtime healthy → backstop only
+const RECOVERY_MS = 5_000; // realtime down → fast catch-up (this client only)
 // On publish, table_assignments fires one INSERT per attendee (40 people → 40
 // pings). Coalesce that burst into ONE /live fetch instead of dozens.
 const DEBOUNCE_MS = 250;
@@ -119,6 +127,8 @@ export function useLiveState(eventId: string): UseLiveState {
   const [loading, setLoading] = useState(cached === null); // cache hit = no spinner
   const [error, setError] = useState<string | null>(null);
   const [notRegistered, setNotRegistered] = useState(false);
+  const [realtimeUp, setRealtimeUp] = useState(false); // false → poll fast until the doorbell confirms it's live
+  const hasSubscribedRef = useRef(false); // tells a first subscribe apart from a RE-subscribe (→ catch-up fetch)
   const inFlight = useRef(false);
   const pending = useRef(false); // a ping arrived mid-fetch → fetch once more after
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -159,24 +169,45 @@ export function useLiveState(eventId: string): UseLiveState {
     debounceTimer.current = setTimeout(refetch, DEBOUNCE_MS);
   }, [refetch]);
 
+  // Realtime doorbell + connection-health tracking. TWO independent doorbells for
+  // resilience on the critical round-state path:
+  //   1. `rounds` postgres_changes — ONE row per state change (publish/begin/pause/
+  //      resume/extend/end/cancel), so ~40 messages, never a burst. Native + reliable.
+  //   2. a server-sent Broadcast ("resync") the backend rings on every change AND
+  //      the organizer's "Re-sync room" button — covers icebreaker reveal and adds
+  //      redundancy for round state.
+  // We deliberately DROPPED the `table_assignments` and `icebreakers`
+  // postgres_changes: those fanned out one message PER ROW per subscriber
+  // (a publish = 40 rows × 40 phones ≈ 1,640 messages) and overran Realtime's
+  // throughput, silently dropping events — the actual cause of missed publishes.
+  // The subscribe status callback drives the adaptive poll below and fires a
+  // catch-up fetch whenever the socket RE-connects (events aren't replayed).
   useEffect(() => {
     refetch(); // immediate authoritative fetch on mount (revalidate the cache)
 
-    // Realtime doorbell: any change to this event's rounds / seating / icebreakers
-    // triggers a debounced re-fetch of the authoritative snapshot.
     let channel: ReturnType<typeof supabase.channel> | null = null;
     try {
       channel = supabase
         .channel(`live:${eventId}`)
         .on("postgres_changes", { event: "*", schema: "public", table: "rounds", filter: `event_id=eq.${eventId}` }, ping)
-        .on("postgres_changes", { event: "*", schema: "public", table: "table_assignments", filter: `event_id=eq.${eventId}` }, ping)
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "icebreakers", filter: `event_id=eq.${eventId}` }, ping)
-        .subscribe();
+        .on("broadcast", { event: "resync" }, ping)
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            setRealtimeUp(true);
+            // Only a RE-subscribe needs a catch-up — the mount fetch already
+            // covers the very first connect, so we don't double-fetch on load.
+            if (hasSubscribedRef.current) refetch();
+            hasSubscribedRef.current = true;
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            setRealtimeUp(false); // doorbell down → fast recovery poll takes over
+          }
+        });
     } catch {
-      // Realtime unavailable (blocked/misconfigured) — polling below still covers us.
+      // Realtime unavailable (blocked/misconfigured) — realtimeUp stays false, so
+      // the recovery-cadence poll below keeps this client fresh on its own.
+      setRealtimeUp(false);
     }
 
-    const poll = setInterval(refetch, POLL_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") refetch();
     };
@@ -186,11 +217,19 @@ export function useLiveState(eventId: string): UseLiveState {
     return () => {
       if (channel) supabase.removeChannel(channel);
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      clearInterval(poll);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("online", refetch);
+      hasSubscribedRef.current = false; // next mount / event starts fresh
     };
   }, [eventId, refetch, ping]);
+
+  // Adaptive fallback poll: lazy when the doorbell is healthy, fast while it's
+  // down. Re-arms whenever health flips. This is the ONLY place the poll cadence
+  // is decided, so call volume always matches the actual connection state.
+  useEffect(() => {
+    const id = setInterval(refetch, realtimeUp ? HEARTBEAT_MS : RECOVERY_MS);
+    return () => clearInterval(id);
+  }, [realtimeUp, refetch]);
 
   return { state, loading, error, notRegistered, refetch };
 }

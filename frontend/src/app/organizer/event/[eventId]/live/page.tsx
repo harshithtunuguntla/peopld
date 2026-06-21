@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { RefreshCw, AlertTriangle, FileText } from "lucide-react";
+import { RefreshCw, AlertTriangle, FileText, Megaphone, Check } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
@@ -128,6 +128,29 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
     setRefreshing(false);
   }
 
+  // "Re-sync room": ask the backend (owner-only) to re-ring the doorbell for every
+  // connected phone. It NEVER re-runs seating (the DB is already the source of
+  // truth) — it just tells phones to re-fetch, for the rare case where one missed
+  // a doorbell. Server-sent with the service-role key, so there's no client-side
+  // broadcast path to abuse; disconnected phones are covered by their recovery poll.
+  const [resynced, setResynced] = useState(false);
+  const resyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (resyncTimer.current) clearTimeout(resyncTimer.current);
+  }, []);
+
+  const resyncRoom = useCallback(async () => {
+    try {
+      await apiFetch(`/events/${eventId}/resync`, { method: "POST" });
+      setResynced(true);
+      if (resyncTimer.current) clearTimeout(resyncTimer.current);
+      resyncTimer.current = setTimeout(() => setResynced(false), 1500);
+    } catch {
+      // Best-effort; the attendee recovery poll is the real backstop.
+    }
+  }, [eventId]);
+
   async function act(fn: () => Promise<void>) {
     setBusy(true);
     busyRef.current = true;
@@ -183,6 +206,21 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
         active="live"
         actions={
           <div className="flex items-center gap-2">
+            {event?.status !== "ended" && (
+              <button
+                type="button"
+                onClick={resyncRoom}
+                title="Force every attendee's screen to pull the latest — use if some don't see the new round"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {resynced ? (
+                  <Check className="h-4 w-4 text-emerald-500" aria-hidden />
+                ) : (
+                  <Megaphone className="h-4 w-4" aria-hidden />
+                )}
+                <span className="hidden sm:inline">{resynced ? "Synced" : "Re-sync room"}</span>
+              </button>
+            )}
             <Link
               href={`/organizer/event/${eventId}/run-sheet`}
               target="_blank"

@@ -161,6 +161,18 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
   }, []);
 
   // ---- Community-first force layout -----------------------------------------
+  // Stable layout signature — the force layout depends ONLY on node ids+met and
+  // edge endpoints/weight/match (not names/companies, which drive the panel). A
+  // live refresh that returns identical data produces the same string, so the
+  // expensive simulation below doesn't re-run. Object.is compares strings by value.
+  const layoutSig = useMemo(
+    () =>
+      nodes.map((n) => `${n.attendee_id}:${n.met}`).join("|") +
+      "#" +
+      edges.map((e) => `${e.a}~${e.b}:${e.weight ?? 1}:${e.matched ? 1 : 0}:${e.liked ? 1 : 0}`).join("|"),
+    [nodes, edges],
+  );
+
   const layout = useMemo(() => {
     const { w, h } = dims;
     if (w < 2 || h < 2 || nodes.length < 2) return null;
@@ -210,7 +222,13 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
       .force("y", forceY<SimNode>((d) => anchor.get(d.community)!.y).strength(0.14))
       .force("collide", forceCollide<SimNode>((d) => d.r + 16))
       .stop();
-    for (let i = 0; i < 380; i++) sim.tick();
+    // Run to a SETTLED state but stop as soon as the simulation cools, instead of
+    // always paying a fixed 380 iterations. Capped so a pathological graph can't
+    // hang the main thread. Combined with the lazy mount (recap) + signature memo
+    // below, the simulation runs only when the graph scrolls into view and never
+    // re-runs for unchanged data — so it never blocks the recap's first paint.
+    sim.alphaDecay(0.035);
+    for (let i = 0; i < 320 && sim.alpha() > sim.alphaMin(); i++) sim.tick();
 
     const posById = new Map<string, SimNode>();
     simNodes.forEach((n) => posById.set(n.id, n));
@@ -286,7 +304,7 @@ export function RelationshipGraph({ nodes, edges }: { nodes: GraphNode[]; edges:
     const content = { x0: x0 - pad, y0: y0 - pad, x1: x1 + pad, y1: y1 + pad };
 
     return { pnodes, plinks, hulls, base, content };
-  }, [nodes, edges, dims]);
+  }, [layoutSig, dims]); // eslint-disable-line react-hooks/exhaustive-deps -- layoutSig captures all layout inputs
 
   const adjacency = useMemo(() => {
     const m = new Map<string, PLink[]>();

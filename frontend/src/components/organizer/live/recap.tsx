@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Flag, Users, Heart, Handshake, Trophy, Percent, BarChart3, ArrowRight, Share2 } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 import { RelationshipInsights } from "@/components/organizer/analytics/relationship-sections";
 import { RoundConnectionsChart } from "@/components/organizer/analytics/round-connections-chart";
 import { Card } from "@/components/organizer/console-ui";
@@ -66,21 +67,56 @@ interface Analytics {
   graph_edges: GraphEdge[];
 }
 
+type RecapPhase = "warming" | "live" | "ended";
+
 /**
- * Post-event recap — the "wrap" screen shown on the organizer's command center
- * (and the big screen for the room) once an event ends. Every number is real,
- * computed server-side from seatings + likes. Each metric carries an info hint so
- * the audience/organizer knows exactly what it means.
+ * Event recap / analytics — phase aware. The SAME components power three states so
+ * the metric language never drifts:
+ *   - "warming" (live, no round completed yet) → a calm placeholder, no empty graph
+ *   - "live" (live, ≥1 round completed)        → current numbers, "updating live",
+ *                                                refreshed on the realtime doorbell
+ *   - "ended"                                  → the full "That's a wrap" recap
+ * `live` is passed by the page from the event status; default false keeps the
+ * post-event wrap behaviour unchanged for any other caller.
  */
-export function EventRecap({ eventId }: { eventId: string }) {
+export function EventRecap({ eventId, live = false }: { eventId: string; live?: boolean }) {
   const [stats, setStats] = useState<Analytics | null>(null);
   const [loaded, setLoaded] = useState(false);
-  useEffect(() => {
+
+  const load = useCallback(() => {
     apiFetch<Analytics>(`/events/${eventId}/analytics`)
       .then(setStats)
       .catch(() => setStats(null))
       .finally(() => setLoaded(true));
   }, [eventId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // While the event is still running, keep the numbers fresh: refetch on the same
+  // realtime doorbell the attendees use (a round completing rings it) with a slow
+  // poll backstop. One organizer viewer, so the cost is negligible. No-op once ended.
+  useEffect(() => {
+    if (!live) return;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    try {
+      channel = supabase
+        .channel(`live:${eventId}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "rounds", filter: `event_id=eq.${eventId}` }, load)
+        .on("broadcast", { event: "resync" }, load)
+        .subscribe();
+    } catch {
+      // realtime unavailable — the poll below still keeps the numbers fresh
+    }
+    const poll = setInterval(load, 30_000);
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+      clearInterval(poll);
+    };
+  }, [live, eventId, load]);
+
+  const phase: RecapPhase = !live ? "ended" : stats && stats.rounds_completed > 0 ? "live" : "warming";
 
   // Match rate = share of conversations that became mutual connections.
   const matchRate =
@@ -90,22 +126,13 @@ export function EventRecap({ eventId }: { eventId: string }) {
 
   return (
     <div className="space-y-4">
-      {/* Hero */}
-      <div className="rounded-2xl border border-border bg-card/50 p-8 text-center">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-border bg-background/50 text-accent">
-          <Flag className="h-7 w-7" aria-hidden />
-        </div>
-        <h2 className="mt-5 font-display text-[clamp(24px,4vw,38px)] leading-tight tracking-[-0.02em] text-foreground">
-          That&apos;s a wrap{stats ? <> — the room sparked <em className="not-italic text-accent">{stats.total_introductions.toLocaleString()}</em> conversations</> : ""}
-        </h2>
-        <p className="mx-auto mt-2 max-w-md text-balance text-sm text-muted-foreground">
-          Rounds are closed and everyone&apos;s connections are unlocked. Here&apos;s the night by the numbers.
-        </p>
-      </div>
+      <RecapHero phase={phase} stats={stats} />
 
       {!loaded && <div className="h-40 skeleton rounded-2xl border border-border" />}
 
-      {stats && (
+      {loaded && phase === "warming" && <WarmingState stats={stats} eventId={eventId} />}
+
+      {phase !== "warming" && stats && (
         <>
           {/* Headline bento */}
           <HeadlineTiles stats={stats} matchRate={matchRate} />
@@ -175,9 +202,7 @@ export function EventRecap({ eventId }: { eventId: string }) {
               <InfoHint text="Every dot is a person; lines connect people we seated together. Thicker/amber lines met more than once; purple lines became mutual matches; node size = people met; colors are the natural groups that formed. Tap anyone to see their relationships." />
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">A night of strangers, turned into a network. Tap any person to explore who they met, how often, and how strong each tie became.</p>
-            <div className="mt-4">
-              <RelationshipGraph nodes={stats.graph_nodes} edges={stats.graph_edges} />
-            </div>
+            <DeferredGraph nodes={stats.graph_nodes} edges={stats.graph_edges} />
           </Card>
         </>
       )}
@@ -187,6 +212,106 @@ export function EventRecap({ eventId }: { eventId: string }) {
           <Users className="h-4 w-4" aria-hidden /> View attendees
         </a>
       </div>
+    </div>
+  );
+}
+
+/** Phase-aware hero — same shape, different story per phase (warming / live / ended). */
+function RecapHero({ phase, stats }: { phase: RecapPhase; stats: Analytics | null }) {
+  const convos = stats?.total_introductions ?? 0;
+  const title =
+    phase === "ended" ? (
+      <>That&apos;s a wrap{stats ? <> — the room sparked <em className="not-italic text-accent">{convos.toLocaleString()}</em> conversations</> : ""}</>
+    ) : phase === "live" ? (
+      <>Event in progress — <em className="not-italic text-accent">{convos.toLocaleString()}</em> conversations so far</>
+    ) : (
+      <>Analytics are warming up</>
+    );
+  const sub =
+    phase === "ended"
+      ? "Rounds are closed and everyone's connections are unlocked. Here's the night by the numbers."
+      : phase === "live"
+        ? "These numbers grow as each round completes — the full picture lands once you wrap up."
+        : "Numbers appear here the moment your first round completes.";
+  return (
+    <div className="rounded-2xl border border-border bg-card/50 p-8 text-center">
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-border bg-background/50 text-accent">
+        <Flag className="h-7 w-7" aria-hidden />
+      </div>
+      {phase === "live" && (
+        <span className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-accent">
+          <span className="relative flex h-2 w-2" aria-hidden>
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+          </span>
+          Live · updating
+        </span>
+      )}
+      <h2 className="mt-3 font-display text-[clamp(24px,4vw,38px)] leading-tight tracking-[-0.02em] text-foreground">{title}</h2>
+      <p className="mx-auto mt-2 max-w-md text-balance text-sm text-muted-foreground">{sub}</p>
+    </div>
+  );
+}
+
+/** Pre-first-round placeholder — avoids showing an empty "wrap" with zeroed tiles
+ *  and an empty graph before any round has completed. */
+function WarmingState({ stats, eventId }: { stats: Analytics | null; eventId: string }) {
+  const registered = stats?.total_attendees ?? 0;
+  return (
+    <Card className="p-8 text-center">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-border bg-background/50 text-muted-foreground">
+        <BarChart3 className="h-5 w-5" aria-hidden />
+      </div>
+      <p className="mx-auto mt-4 max-w-md text-balance text-sm text-muted-foreground">
+        {registered > 0 ? (
+          <>
+            <span className="font-medium text-foreground">{registered}</span> {registered === 1 ? "guest has" : "guests have"} registered. The
+            connection graph, funnel, and relationship intelligence appear here the moment your first round completes.
+          </>
+        ) : (
+          <>The connection graph, funnel, and relationship intelligence appear here the moment your first round completes.</>
+        )}
+      </p>
+      <Link href={`/organizer/event/${eventId}/live`} className={cn(buttonVariants({ variant: "accent" }), "mt-5 gap-2")}>
+        Go to live control <ArrowRight className="h-4 w-4" aria-hidden />
+      </Link>
+    </Card>
+  );
+}
+
+/** Mounts the heavy relationship graph only when it scrolls near the viewport, so
+ *  the recap's headline numbers paint instantly and the force-layout cost never
+ *  blocks the first paint. Falls back to mounting immediately where
+ *  IntersectionObserver is unavailable. */
+function DeferredGraph({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEdge[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setShow(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setShow(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "300px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className="mt-4">
+      {show ? (
+        <RelationshipGraph nodes={nodes} edges={edges} />
+      ) : (
+        <div className="h-[540px] skeleton rounded-2xl border border-border" />
+      )}
     </div>
   );
 }

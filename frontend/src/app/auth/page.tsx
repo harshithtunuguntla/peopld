@@ -3,15 +3,13 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, ArrowUpRight, Loader2 } from "lucide-react";
+import { motion } from "framer-motion";
+import { Sparkles, Loader2 } from "lucide-react";
 
 import { SignInPanel } from "@/components/auth";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Wordmark } from "@/components/brand/wordmark";
 import { supabase } from "@/lib/supabase";
-
-type Mode = "signin" | "signup";
 
 /** Only allow same-origin relative redirects (open-redirect guard). */
 function safeNext(raw: string | null): string {
@@ -23,7 +21,6 @@ function AuthInner() {
   const router = useRouter();
   const params = useSearchParams();
   const next = safeNext(params.get("next"));
-  const [mode, setMode] = useState<Mode>("signin");
   const [checking, setChecking] = useState(true);
 
   // If already signed in, skip the form. Also catch sign-in completing here
@@ -128,73 +125,28 @@ function AuthInner() {
             <Wordmark size={26} />
           </div>
 
-          {/* Sign in / Sign up — cosmetic framing (our auth is passwordless:
-              the same Google / email-code flow creates an account or signs in). */}
-          <div className="mb-7 inline-flex items-center rounded-full border border-border bg-secondary p-1">
-            {(["signin", "signup"] as Mode[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                className="relative h-9 rounded-full px-5 text-sm font-medium transition-colors"
-                style={{ color: mode === m ? "hsl(var(--accent-foreground))" : "hsl(var(--muted-foreground))" }}
-              >
-                {mode === m && (
-                  <motion.span
-                    layoutId="auth-pill"
-                    className="absolute inset-0 rounded-full bg-accent"
-                    transition={{ type: "spring", stiffness: 320, damping: 28 }}
-                  />
-                )}
-                <span className="relative">{m === "signin" ? "Sign in" : "Sign up"}</span>
-              </button>
-            ))}
-          </div>
+          {/* One screen — our auth is passwordless, so "sign in" and "sign up"
+              are the same email-code / Google flow (it creates the account or
+              signs you in transparently). No duplicate tabs to confuse anyone,
+              and the private organizer sign-in is intentionally not linked here. */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.22 }}
+          >
+            <h1 className="font-display text-[clamp(28px,4vw,38px)] leading-[1.05] tracking-[-0.025em] text-foreground">
+              Welcome to <em className="italic text-accent">the room.</em>
+            </h1>
+            <p className="mb-7 mt-1.5 text-sm text-muted-foreground">
+              Sign in or create your account in one step — no password, no app.
+            </p>
 
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={mode}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.22 }}
-            >
-              <h1 className="font-display text-[clamp(28px,4vw,38px)] leading-[1.05] tracking-[-0.025em] text-foreground">
-                {mode === "signin" ? (
-                  <>Welcome back.</>
-                ) : (
-                  <>
-                    Join the <em className="italic text-accent">room.</em>
-                  </>
-                )}
-              </h1>
-              <p className="mb-7 mt-1.5 text-sm text-muted-foreground">
-                {mode === "signin"
-                  ? "Sign in to find your table and your people."
-                  : "No password, no app — just your email or Google."}
-              </p>
-
-              <SignInPanel
-                nextPath={next}
-                heading={mode === "signin" ? "Sign in to continue" : "Create your account"}
-                subheading={
-                  mode === "signin"
-                    ? "Quick and free — no password to remember."
-                    : "We'll email you a code — that's it."
-                }
-              />
-            </motion.div>
-          </AnimatePresence>
-
-          <div className="mt-7 border-t border-border pt-5 text-center">
-            <Link
-              href="/organizer/login"
-              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Hosting an event? <span className="font-medium text-accent">Organizer sign-in</span>
-              <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
-            </Link>
-          </div>
+            <SignInPanel
+              nextPath={next}
+              heading="Continue with email or Google"
+              subheading="We'll email you a 6-digit code — that's it."
+            />
+          </motion.div>
         </div>
       </div>
     </div>

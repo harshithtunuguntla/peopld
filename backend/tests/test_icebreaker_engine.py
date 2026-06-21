@@ -200,6 +200,77 @@ def test_no_repeat_across_rounds_with_fallback(db, event):
     assert ashas[0] != ashas[1]  # not bored: different question in round 2
 
 
+# --- theme-aware fallback buckets ---
+
+
+def test_bucket_for_theme_routes_common_topics():
+    assert prompts.bucket_for_theme("Fundraising & runway") == "fundraising"
+    assert prompts.bucket_for_theme("Finding your first customers") == "gtm"
+    assert prompts.bucket_for_theme("Hiring your founding team") == "team"
+    assert prompts.bucket_for_theme("Lessons learned the hard way") == "lessons"
+    assert prompts.bucket_for_theme("Make your ask") == "ask"
+    assert prompts.bucket_for_theme("What you're building") == "building"
+    assert prompts.bucket_for_theme("The Hyderabad ecosystem") == "local"
+
+
+def test_bucket_for_theme_defaults_to_general():
+    assert prompts.bucket_for_theme(None) == "general"
+    assert prompts.bucket_for_theme("") == "general"
+    assert prompts.bucket_for_theme("   ") == "general"
+    assert prompts.bucket_for_theme("Speed networking") == "general"
+
+
+def test_themed_fallback_draws_from_matching_bucket():
+    q = prompts.fallback_question("Bobby", theme="Fundraising")
+    fundraising = {t.format(target="Bobby") for t in prompts.FALLBACK_BANKS["fundraising"]}
+    assert q in fundraising  # offset 0, no history -> head of the themed bucket
+
+
+def test_themed_fallback_pool_includes_general_for_depth():
+    # One person across many same-theme rounds never repeats until the WHOLE
+    # combined (bucket + general) pool is used up.
+    pool_size = len(set(prompts.FALLBACK_BANKS["fundraising"]) | set(prompts.FALLBACK_BANKS["general"]))
+    used: set[str] = set()
+    picks = []
+    for offset in range(pool_size):
+        q = prompts.fallback_question("Bobby", used=used, offset=offset, theme="Fundraising")
+        picks.append(q)
+        used.add(q)
+    assert len(set(picks)) == pool_size
+
+
+def test_all_fallback_questions_are_well_formed():
+    total = 0
+    seen: set[str] = set()
+    for bucket, questions in prompts.FALLBACK_BANKS.items():
+        for q in questions:
+            total += 1
+            assert "{target}" in q, f"{bucket}: missing slot -> {q}"
+            assert q.strip().endswith("?"), f"{bucket}: not a question -> {q}"
+            assert len(q.format(target="Priyanka")) <= MAX_QUESTION_LEN
+            assert q not in seen, f"duplicate question across banks -> {q}"
+            seen.add(q)
+    assert total == 100
+
+
+def test_themed_round_uses_theme_bucket(db, event):
+    db.table("events").update({"round_topics": ["Fundraising"]}).eq("id", event["id"]).execute()
+    asha = make_attendee(db, event["id"], name="Asha", status="arrived")
+    bobby = make_attendee(db, event["id"], name="Bobby", status="arrived")
+    r1 = make_round(db, event["id"], round_number=1)
+    make_assignment(db, event["id"], r1["id"], asha["id"], 1)
+    make_assignment(db, event["id"], r1["id"], bobby["id"], 1)
+    engine.generate_for_round(db, event["id"], r1["id"], client=DisabledClient())
+
+    fundraising = {
+        t.format(target=n)
+        for t in prompts.FALLBACK_BANKS["fundraising"]
+        for n in ("Asha", "Bobby")
+    }
+    texts = [r["question_text"] for r in _icebreakers(db)]
+    assert texts and all(t in fundraising for t in texts)
+
+
 def test_llm_literal_repeat_is_rejected(db, event):
     asha = make_attendee(db, event["id"], name="Asha", status="arrived")
     bobby = make_attendee(db, event["id"], name="Bobby", status="arrived")

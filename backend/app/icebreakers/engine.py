@@ -164,7 +164,7 @@ def _questions_for_table(
         target_idx = (i % n) + 1  # round-robin neighbour
         target_name = roster[target_idx - 1].get("name", "")
         question = prompts.fallback_question(
-            target_name, used=set(history), offset=len(history)
+            target_name, used=set(history), offset=len(history), theme=theme
         )
         out.append((i, target_idx, question, "fallback"))
     return out

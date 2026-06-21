@@ -104,13 +104,39 @@ history (`icebreakers` rows for that `recipient_attendee_id`, newest first):
    (case/whitespace/trailing-punctuation insensitive) to one the person already
    got, it's discarded and that person gets a fallback instead — the LLM can't
    accidentally serve a literal repeat.
-3. **The fallback bank rotates.** `fallback_question` rotates the (12-entry) bank
-   by how many questions the person has already had and skips any they've already
-   seen — so even the no-LLM path doesn't repeat itself until the bank is
-   exhausted.
+3. **The fallback bank rotates.** `fallback_question` rotates the bank by how many
+   questions the person has already had and skips any they've already seen — so
+   even the no-LLM path doesn't repeat itself until the pool is exhausted.
 
 The **"Generate Another"** refresh rides the same path: the current question is in
 the person's history, so the refreshed one is guaranteed to differ.
+
+### 5.1.1 The fallback bank: 100 questions, theme-aware
+
+Because the LLM provider is not yet configured, the fallback bank currently carries
+**every** icebreaker the room sees — so it is **100 curated questions**, not a
+handful. They live in `prompts.FALLBACK_BANKS`, a dict grouped by **intent**:
+
+| Bucket | Count | Used when the round topic is about… |
+|---|---|---|
+| `general` | 22 | anything (default); also woven with a light Hyderabad/India thread |
+| `building` | 12 | the product / vision / what they're building |
+| `fundraising` | 11 | capital, investors, runway |
+| `gtm` | 12 | first customers, growth, distribution |
+| `team` | 11 | hiring, co-founders, culture |
+| `lessons` | 11 | mistakes, advice, changed-my-mind |
+| `ask` | 11 | the ask / how the room can help |
+| `local` | 10 | the Hyderabad / India ecosystem explicitly |
+
+`bucket_for_theme(theme)` keyword-matches the organizer's **round topic** (the same
+`round_topics` entry that already steers the LLM) to a bucket; an unrecognised or
+empty topic → `general`. The active pool is **that bucket + `general`** (deduped),
+so a themed round leans into its topic while still having ~30+ options for the
+rotation to draw on. This closes a gap: before, round topics steered only the LLM;
+now they shape the fallback too. The questions are single-`{target}` templates, so
+they drop straight into the engine's existing index→name mapping — no engine
+contract change. Voice is warm and casual but still work-focused (the same content
+guardrails as §7 apply to the human author).
 
 ## 5.2 Idempotency, cancel, refresh
 
@@ -135,8 +161,9 @@ the person's history, so the refreshed one is guaranteed to differ.
 ```
 app/icebreakers/
   prompts.py   ← THE single source of all prompt text: system prompt (guardrails),
-                 the per-table user-prompt builder, the JSON prefill, and the
-                 fallback bank. No prompt strings exist anywhere else.
+                 the per-table user-prompt builder, the JSON prefill, the
+                 intent-bucketed fallback banks (100 questions) and the
+                 theme→bucket router. No prompt strings exist anywhere else.
   provider.py  ← LLMClient protocol + VertexClaudeClient / StubClient / DisabledClient
                  + get_llm_client() chosen by env. Swap models/providers here only.
   engine.py    ← orchestration: generate_for_round / refresh_for_attendee,
@@ -229,3 +256,10 @@ bank — the app runs and the room still gets questions.
 - Streaming the question token-by-token (it pops in whole).
 - Per-attendee model personalization beyond role + "looking for".
 - Caching/reusing questions across rounds (each round is fresh).
+- **Organizer-editable fallback bank (DB-backed).** Deferred to post-pilot. The
+  100 questions live in code (`prompts.FALLBACK_BANKS`) — version-controlled,
+  zero-query, can't fail at the live event. A future feature could move them to a
+  small `icebreaker_templates` table read+cached at startup so organizers add/edit
+  their own questions and tag them by bucket; the `bucket_for_theme` routing and
+  `fallback_question` rotation would carry over unchanged. Not built now (feature
+  freeze), but the seam is clean for it.

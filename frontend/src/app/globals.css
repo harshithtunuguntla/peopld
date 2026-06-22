@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --font-inter: Inter, system-ui, sans-serif;
+  --font-fraunces: Fraunces, Georgia, serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
 @layer base {
   :root {
     /* Light (landing) — shadcn semantic tokens */

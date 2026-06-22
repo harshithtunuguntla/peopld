@@ -2,12 +2,14 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
-import { Loader2, Heart, Sparkles, Users, Bookmark } from "lucide-react";
+import { ArrowLeft, Loader2, Heart, Sparkles, Users, Bookmark } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
 import { LiveShell } from "@/components/live/live-screens";
+import { EventProfileNav } from "@/components/attendee/event-profile-nav";
 import { PersonCard, groupByPerson, type Connection } from "@/components/connections/person-card";
 import { cn } from "@/lib/utils";
 
@@ -87,7 +89,16 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
   }
 
   return (
-    <LiveShell className="max-w-5xl">
+    <LiveShell
+      className="max-w-5xl"
+      right={
+        <Link href={`/event/${eventId}/live`} className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
+          <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Event
+        </Link>
+      }
+    >
+      <EventProfileNav eventId={eventId} active="connections" />
+
       <header className="max-w-2xl">
         <p className="text-[11px] uppercase tracking-[0.3em] text-accent">Your rolodex</p>
         <h1 className="mt-2 text-balance font-display text-3xl leading-tight tracking-[-0.02em] text-foreground sm:text-4xl">

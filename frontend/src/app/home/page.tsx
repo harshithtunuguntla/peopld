@@ -28,6 +28,12 @@ function firstNameOf(user: User | null): string | null {
   return null;
 }
 
+function eventDateDesc(a: EventCardData, b: EventCardData): number {
+  const byDate = b.date.localeCompare(a.date);
+  if (byDate !== 0) return byDate;
+  return b.time.localeCompare(a.time);
+}
+
 type Dialog = null | "code";
 
 export default function HomePage() {
@@ -70,7 +76,7 @@ export default function HomePage() {
       else if (e.status === "active" || e.date === todayStr) now.push(e);
       else upcoming.push(e);
     }
-    return { now, upcoming, past };
+    return { now, upcoming: upcoming.sort(eventDateDesc), past: past.sort(eventDateDesc) };
   }, [events, todayStr]);
 
   if (!authChecked) {

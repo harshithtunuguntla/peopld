@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { ConsoleShell } from "@/components/organizer/console-shell";
+import { ConsoleGate } from "@/components/organizer/console-ui";
 import { EventHeader, EventAccessError } from "@/components/organizer/event-header";
 import { type EventInfo } from "@/components/organizer/live/types";
 
@@ -41,6 +42,9 @@ export default function OrganizerAnalyticsPage({ params }: { params: Promise<{ e
       });
   }, [user, eventId]);
 
+  // Pre-auth / redirecting: neutral splash, never the console chrome (see ConsoleGate).
+  if (!checked || !user) return <ConsoleGate />;
+
   if (denied) {
     return (
       <ConsoleShell>
@@ -62,7 +66,7 @@ export default function OrganizerAnalyticsPage({ params }: { params: Promise<{ e
 
       {/* Wait for the event so the recap renders the correct phase from the first
           paint (live "in progress" vs the post-event "wrap"), no flicker between. */}
-      {(!checked || !user || !event) ? (
+      {!event ? (
         <div className="h-40 skeleton rounded-2xl border border-border" />
       ) : (
         <EventRecap eventId={eventId} live={event.status !== "ended"} />

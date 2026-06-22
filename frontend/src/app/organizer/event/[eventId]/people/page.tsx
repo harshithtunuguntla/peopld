@@ -7,7 +7,7 @@ import { Loader2, Plus, UserCheck, UserMinus, Undo2, QrCode, Download, Search, U
 import { apiFetch, ApiError } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { ConsoleShell } from "@/components/organizer/console-shell";
-import { Card, ConsoleLoading } from "@/components/organizer/console-ui";
+import { Card, ConsoleGate } from "@/components/organizer/console-ui";
 import { EventHeader, EventAccessError, type EventStatus } from "@/components/organizer/event-header";
 import { Avatar } from "@/components/brand/avatar";
 import { InviteDialog } from "@/components/organizer/invite-dialog";
@@ -163,20 +163,14 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
     return filtered; // already name-sorted at load
   }, [people, q, filter, sort]);
 
+  // Pre-auth / redirecting: neutral splash, never the console chrome (see ConsoleGate).
+  if (!checked || !user) return <ConsoleGate />;
+
   if (denied) {
     return (
       <ConsoleShell>
         <EventHeader eventId={eventId} active="people" />
         <EventAccessError notFound={denied === "missing"} />
-      </ConsoleShell>
-    );
-  }
-
-  if (!checked || !user) {
-    return (
-      <ConsoleShell>
-        <EventHeader eventId={eventId} name={eventName} status={eventStatus} active="people" />
-        <ConsoleLoading />
       </ConsoleShell>
     );
   }

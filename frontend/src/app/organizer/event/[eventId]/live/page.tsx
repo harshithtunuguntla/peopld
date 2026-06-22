@@ -8,6 +8,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { ConsoleShell } from "@/components/organizer/console-shell";
+import { ConsoleGate } from "@/components/organizer/console-ui";
 import { EventHeader, EventAccessError } from "@/components/organizer/event-header";
 import { CommandBento } from "@/components/organizer/live/command-bento";
 import { cn } from "@/lib/utils";
@@ -172,6 +173,10 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
   // start-round gate must exclude speakers/hosts (they're arrived but off the floor).
   const seatableCount = attendees.filter((a) => a.status === "arrived" && a.tag === "attendee").length;
 
+  // Pre-auth / redirecting: neutral splash, never the console chrome — a
+  // non-organizer must never glimpse the shell before being sent to /home.
+  if (!checked || !user) return <ConsoleGate />;
+
   if (denied) {
     return (
       <ConsoleShell>
@@ -181,7 +186,7 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
     );
   }
 
-  if (!checked || !user || phase.kind === "loading") {
+  if (phase.kind === "loading") {
     return (
       <ConsoleShell>
         <EventHeader eventId={eventId} name={event?.name} status={event?.status} active="live" />

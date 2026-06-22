@@ -13,14 +13,36 @@ export type EventStatus = "upcoming" | "active" | "ended";
 
 /* ----------------------------- Loading ----------------------------- */
 
-/** Centered spinner for the "auth not resolved yet" state, shared across every
- *  console page so the loading treatment is identical everywhere. (Data-loading
- *  states use layout-shaped skeletons in each page.) */
+/** Centered spinner for an IN-SHELL loading state (organizer already confirmed,
+ *  waiting on page data), shared across every console page so the treatment is
+ *  identical. (Richer data-loading states use layout-shaped skeletons.) */
 export function ConsoleLoading({ label = "Loading…" }: { label?: string }) {
   return (
     <div className="flex flex-col items-center gap-3 pt-16 text-sm text-muted-foreground">
       <Loader2 className="h-6 w-6 animate-spin" aria-hidden />
       {label}
+    </div>
+  );
+}
+
+/** Full-screen, CHROME-LESS splash for the pre-auth / redirecting window.
+ *
+ *  Console pages must NOT paint the sidebar + topbar (`ConsoleShell`) until the
+ *  organizer ROLE is confirmed. Otherwise a signed-in attendee who opens a
+ *  console URL briefly SEES the full console shell (sidenav + dashboard skeleton)
+ *  for the ~1s it takes `useOrganizer` to resolve the session and redirect them to
+ *  /home. Rendering this neutral brand splash instead means a non-organizer never
+ *  glimpses organizer chrome, and a real organizer just sees a momentary splash
+ *  that resolves into the console. Standard auth-gate pattern: show nothing
+ *  privileged until you know who the user is. */
+export function ConsoleGate({ label = "Loading…" }: { label?: string }) {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
+      <LogoMark size={44} />
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        {label}
+      </div>
     </div>
   );
 }

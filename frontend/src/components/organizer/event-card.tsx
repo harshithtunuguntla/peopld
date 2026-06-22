@@ -64,7 +64,10 @@ export function EventCard({ event, onChanged, index = 0 }: { event: OrgEvent; on
             to read as a banner (not a thin strip) and to let a real photo breathe. */}
         <div
           className="group/cover relative h-32 overflow-hidden sm:h-36"
-          style={{ background: `linear-gradient(140deg, ${cover.bg} 0%, color-mix(in srgb, ${cover.bg} 70%, #000) 100%)` }}
+          style={{
+            backgroundColor: cover.bg, // solid fallback if color-mix() is unsupported
+            backgroundImage: `linear-gradient(140deg, ${cover.bg} 0%, color-mix(in srgb, ${cover.bg} 70%, #000) 100%)`,
+          }}
         >
           {event.cover_image_url ? (
             // eslint-disable-next-line @next/next/no-img-element

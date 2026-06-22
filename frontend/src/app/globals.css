@@ -145,6 +145,35 @@
     box-shadow: var(--shadow-card);
   }
 
+  /* Liquid-glass chip — a translucent, frosted surface for labels that sit on
+     top of a vivid cover band or photo (date block, status pill, code chip).
+     Replaces the old near-opaque sticker look: real see-through glass with a
+     heavy blur + saturation lift and a bright top rim-light, while staying
+     legible because the blur + gradient keep enough contrast for `foreground`
+     text. Theme-aware so it frosts light in light mode and dark in dark. */
+  .glass-chip {
+    background-image: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.66) 0%,
+      rgba(255, 255, 255, 0.46) 100%
+    );
+    -webkit-backdrop-filter: blur(14px) saturate(180%);
+    backdrop-filter: blur(14px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    box-shadow: 0 4px 14px -6px rgba(15, 14, 20, 0.35),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.7);
+  }
+  .dark .glass-chip {
+    background-image: linear-gradient(
+      135deg,
+      rgba(28, 26, 36, 0.64) 0%,
+      rgba(28, 26, 36, 0.44) 100%
+    );
+    border-color: rgba(255, 255, 255, 0.16);
+    box-shadow: 0 4px 14px -6px rgba(0, 0, 0, 0.55),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  }
+
   /* Token-aware dotted / ruled backgrounds for app surfaces (adapt to theme). */
   .app-dots {
     background-image: radial-gradient(hsl(var(--border)) 1px, transparent 1px);

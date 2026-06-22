@@ -7,7 +7,7 @@ import type { User } from "@supabase/supabase-js";
 import { Loader2, LogOut, CalendarDays, KeyRound, Users, ArrowRight } from "lucide-react";
 
 import { AuthShell, SignInPanel } from "@/components/auth";
-import { EventCard, type EventCardData } from "@/components/home/event-card";
+import { EventCard, FeaturedEventCard, type EventCardData } from "@/components/home/event-card";
 import { JoinByCodeDialog } from "@/components/attendee/join-by-code-dialog";
 import { Wordmark } from "@/components/brand/wordmark";
 import { AuroraBackground } from "@/components/brand/aurora-background";
@@ -170,7 +170,7 @@ export default function HomePage() {
 
         {hasEvents && (
           <div className="mt-10 space-y-8">
-            <Section title="Happening today" events={buckets.now} todayStr={todayStr} />
+            <Section title="Happening today" events={buckets.now} todayStr={todayStr} featured />
             <Section title="Upcoming" events={buckets.upcoming} todayStr={todayStr} />
             <Section title="Past" events={buckets.past} todayStr={todayStr} muted />
           </div>
@@ -200,27 +200,36 @@ function ActionCard({
       type="button"
       onClick={onClick}
       className={cn(
-        "group flex w-full items-center gap-3 rounded-2xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:flex-col sm:items-start sm:gap-4 sm:p-5",
+        "group relative flex w-full items-center gap-3.5 overflow-hidden rounded-2xl border p-4 text-left shadow-sm transition-[transform,box-shadow,border-color,background-color] duration-300 hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:flex-col sm:items-start sm:gap-4 sm:p-5",
         accent
-          ? "border-accent/40 bg-accent/10 hover:bg-accent/15"
-          : "border-border bg-card/60 hover:border-foreground/20 hover:bg-card",
+          ? "border-accent/30 bg-gradient-to-br from-accent/15 to-accent/[0.04] hover:border-accent/50"
+          : "border-border bg-card/70 hover:border-foreground/20 hover:bg-card",
       )}
     >
+      {/* Soft corner glow — picks up the card's tone on hover. */}
       <span
         className={cn(
-          "flex h-11 w-11 shrink-0 items-center justify-center rounded-full",
-          accent ? "bg-accent/20 text-accent" : "bg-muted text-foreground",
+          "pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-60",
+          accent ? "bg-accent/40" : "bg-foreground/10",
+        )}
+        aria-hidden
+      />
+      <span
+        className={cn(
+          "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl shadow-sm transition-transform duration-300 group-hover:scale-105",
+          accent ? "bg-accent text-accent-foreground" : "bg-foreground text-background",
         )}
       >
         {icon}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1 font-display text-base text-foreground">
-          {title}
-          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 sm:hidden" aria-hidden />
-        </span>
+      <span className="relative z-10 min-w-0 flex-1">
+        <span className="font-display text-base text-foreground">{title}</span>
         <span className="mt-0.5 block text-sm text-muted-foreground">{blurb}</span>
       </span>
+      <ArrowRight
+        className="relative z-10 h-4 w-4 shrink-0 self-center text-muted-foreground transition-transform duration-300 group-hover:translate-x-0.5 group-hover:text-foreground sm:absolute sm:right-5 sm:top-5 sm:self-auto"
+        aria-hidden
+      />
     </button>
   );
 }
@@ -230,11 +239,14 @@ function Section({
   events,
   todayStr,
   muted,
+  featured,
 }: {
   title: string;
   events: EventCardData[];
   todayStr: string;
   muted?: boolean;
+  /** Render each event as a full-width hero (used for the live / today section). */
+  featured?: boolean;
 }) {
   if (events.length === 0) return null;
   return (
@@ -245,11 +257,19 @@ function Section({
         </h2>
         <span className="text-xs font-medium text-muted-foreground">{events.length}</span>
       </div>
-      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {events.map((e, i) => (
-          <EventCard key={e.id} event={e} todayStr={todayStr} index={i} dimmed={muted} />
-        ))}
-      </div>
+      {featured ? (
+        <div className="mt-3 space-y-4">
+          {events.map((e, i) => (
+            <FeaturedEventCard key={e.id} event={e} todayStr={todayStr} index={i} />
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {events.map((e, i) => (
+            <EventCard key={e.id} event={e} todayStr={todayStr} index={i} dimmed={muted} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }

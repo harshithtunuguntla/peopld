@@ -34,8 +34,7 @@ export function StatusPill({
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
         uppercase && "uppercase tracking-wide",
-        solid &&
-          "bg-background/90 font-semibold text-foreground shadow-sm ring-1 ring-black/10 backdrop-blur-md dark:ring-white/10",
+        solid && "glass-chip font-semibold text-foreground",
         className,
       )}
       style={solid ? undefined : { color: tone.fg, background: tone.bg }}

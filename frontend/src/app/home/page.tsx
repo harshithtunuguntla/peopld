@@ -80,12 +80,18 @@ export default function HomePage() {
     return { now, upcoming: upcoming.sort(eventDateDesc), past: past.sort(eventDateDesc) };
   }, [events, todayStr]);
   const profileEventId = useMemo(() => {
-    const registered = (events ?? []).filter((e) => e.registered);
-    const [todayEvent] = registered
-      .filter((e) => e.status === "active" || e.date === todayStr)
-      .sort(eventDateDesc);
-    const [latestRegistered] = registered.sort(eventDateDesc);
-    return (todayEvent ?? latestRegistered)?.id ?? null;
+    const registeredEvents = events?.filter((event) => event.registered) ?? [];
+    const liveEvent = registeredEvents.find((event) => event.status === "active" || event.date === todayStr);
+    if (liveEvent) return liveEvent.id;
+
+    const upcomingEvent = registeredEvents
+      .filter((event) => event.status !== "ended" && event.date >= todayStr)
+      .sort(eventDateDesc)[0];
+    if (upcomingEvent) return upcomingEvent.id;
+
+    return registeredEvents
+      .filter((event) => event.status === "ended" || event.date < todayStr)
+      .sort(eventDateDesc)[0]?.id ?? null;
   }, [events, todayStr]);
 
   if (!authChecked) {
@@ -131,7 +137,8 @@ export default function HomePage() {
           <div className="flex items-center gap-2">
             <AccountMenu
               user={user}
-              editProfileHref={profileEventId ? `/event/${profileEventId}/profile` : null}
+              editProfileHref={profileEventId ? `/event/${profileEventId}/profile?from=home` : null}
+              disabledEditLabel="Join an event to edit your profile"
               connectionsHref="/me/connections"
             />
           </div>

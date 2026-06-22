@@ -30,8 +30,16 @@ interface Me {
   show_in_directory: boolean;
 }
 
-export default function ProfileEditPage({ params }: { params: Promise<{ eventId: string }> }) {
+export default function ProfileEditPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ eventId: string }>;
+  searchParams: Promise<{ from?: string }>;
+}) {
   const { eventId } = use(params);
+  const { from } = use(searchParams);
+  const eventLinkDisabled = from === "home";
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -72,9 +80,19 @@ export default function ProfileEditPage({ params }: { params: Promise<{ eventId:
     <LiveShell
       eventId={eventId}
       right={
-        <Link href={`/event/${eventId}/live`} className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
-          <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Event
-        </Link>
+        eventLinkDisabled ? (
+          <span
+            aria-disabled="true"
+            title="Join or enter an event to return to the live event."
+            className="inline-flex cursor-not-allowed items-center gap-1 text-xs text-muted-foreground/50"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Event
+          </span>
+        ) : (
+          <Link href={`/event/${eventId}/live`} className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Event
+          </Link>
+        )
       }
     >
       <header>

@@ -190,12 +190,17 @@ const STATUS_STYLE: Record<EventStatus, { label: string; dot: string; fg: string
   ended: { label: "Completed", ...TONE.info },
 };
 
-export function StatusChip({ status }: { status: EventStatus }) {
+export function StatusChip({ status, solid = false }: { status: EventStatus; solid?: boolean }) {
   const s = STATUS_STYLE[status];
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium"
-      style={{ color: s.fg, background: s.bg }}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
+        // `solid` = opaque, theme-aware surface for placing on a cover image / color
+        // band, where the 14% tint washes out. Keeps the status color via the dot.
+        solid && "bg-background/90 font-semibold text-foreground shadow-sm ring-1 ring-black/10 backdrop-blur-md dark:ring-white/10",
+      )}
+      style={solid ? undefined : { color: s.fg, background: s.bg }}
     >
       <span
         className={cn(

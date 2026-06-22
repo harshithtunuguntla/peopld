@@ -59,13 +59,24 @@ export function EventCard({ event, onChanged, index = 0 }: { event: OrgEvent; on
       transition={{ duration: 0.35, ease: EASE, delay: index * 0.04 }}
     >
       <Card className={cn("flex h-full flex-col overflow-hidden p-0", event.is_archived && "opacity-70")}>
-        {/* Cover band: image when set, else the deterministic color. */}
-        <div className="relative h-24 overflow-hidden" style={{ background: cover.bg }}>
+        {/* Cover band: image when set, else the deterministic color as a soft
+            two-stop gradient (same band treatment as the attendee card). Tall enough
+            to read as a banner (not a thin strip) and to let a real photo breathe. */}
+        <div
+          className="group/cover relative h-32 overflow-hidden sm:h-36"
+          style={{ background: `linear-gradient(140deg, ${cover.bg} 0%, color-mix(in srgb, ${cover.bg} 70%, #000) 100%)` }}
+        >
           {event.cover_image_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={event.cover_image_url} alt="" className="absolute inset-0 h-full w-full object-cover" />
+            <img
+              src={event.cover_image_url}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover/cover:scale-105"
+            />
           ) : (
-            <span className="pointer-events-none absolute -right-6 -top-8 h-24 w-24 rounded-full opacity-20" style={{ background: cover.ink }} aria-hidden />
+            // Flat brand color + one clean corner bubble — same language as the KPI
+            // stat tiles (metric-tile.tsx), so the color treatment is consistent app-wide.
+            <span className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full opacity-15" style={{ background: cover.ink }} aria-hidden />
           )}
           <div className="absolute right-3 top-3 flex items-center gap-1.5">
             {event.is_archived && (
@@ -73,7 +84,7 @@ export function EventCard({ event, onChanged, index = 0 }: { event: OrgEvent; on
                 <Archive className="h-3 w-3" aria-hidden /> Archived
               </span>
             )}
-            <StatusChip status={event.status} />
+            <StatusChip status={event.status} solid />
           </div>
           {event.requires_code && (
             <Lock className="absolute bottom-3 left-4 h-3.5 w-3.5" style={{ color: cover.ink }} aria-label="Has access code" />

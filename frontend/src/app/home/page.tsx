@@ -239,12 +239,15 @@ function Section({
   if (events.length === 0) return null;
   return (
     <section>
-      <h2 className={muted ? "text-xs font-medium uppercase tracking-wider text-muted-foreground" : "text-sm font-semibold text-foreground"}>
-        {title}
-      </h2>
+      <div className="flex items-baseline gap-2">
+        <h2 className={cn("font-semibold tracking-tight", muted ? "text-sm text-muted-foreground" : "text-base text-foreground")}>
+          {title}
+        </h2>
+        <span className="text-xs font-medium text-muted-foreground">{events.length}</span>
+      </div>
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {events.map((e) => (
-          <EventCard key={e.id} event={e} todayStr={todayStr} />
+        {events.map((e, i) => (
+          <EventCard key={e.id} event={e} todayStr={todayStr} index={i} dimmed={muted} />
         ))}
       </div>
     </section>
@@ -252,7 +255,7 @@ function Section({
 }
 
 function Skeleton() {
-  return <div className="h-[112px] skeleton rounded-2xl border border-border" />;
+  return <div className="h-[244px] skeleton rounded-2xl border border-border" />;
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

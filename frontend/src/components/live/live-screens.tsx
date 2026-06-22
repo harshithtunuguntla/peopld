@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { Loader2, PartyPopper, Sparkles, Heart, UserRound, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star, MapPin } from "lucide-react";
+import { Loader2, PartyPopper, Sparkles, Heart, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star, MapPin } from "lucide-react";
 
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Wordmark } from "@/components/brand/wordmark";
 import { BoardingPass } from "@/components/brand/boarding-pass";
 import { Avatar } from "@/components/brand/avatar";
+import { AccountMenu } from "@/components/attendee/account-menu";
 import { IcebreakerCard } from "@/components/brand/icebreaker-card";
 import { buttonVariants } from "@/components/ui/button";
 import { ROUNDS, agendaFor, type Round } from "@/lib/design/rounds";
@@ -225,14 +226,11 @@ export function LiveShell({
             {right}
             {onRefresh && <RefreshButton onRefresh={onRefresh} />}
             {eventId && (
-              <Link
-                href={`/event/${eventId}/profile`}
-                aria-label="Edit your profile"
-                title="Your profile"
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <UserRound className="h-4 w-4" aria-hidden />
-              </Link>
+              <AccountMenu
+                editProfileHref={`/event/${eventId}/profile`}
+                connectionsHref={`/event/${eventId}/connections`}
+                buttonSize="sm"
+              />
             )}
           </div>
         </div>

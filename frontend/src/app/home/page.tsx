@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
-import { Loader2, LogOut, CalendarDays, KeyRound, Users, ArrowRight } from "lucide-react";
+import { Loader2, CalendarDays, KeyRound, Users, ArrowRight } from "lucide-react";
 
 import { AuthShell, SignInPanel } from "@/components/auth";
+import { AccountMenu } from "@/components/attendee/account-menu";
 import { EventCard, FeaturedEventCard, type EventCardData } from "@/components/home/event-card";
 import { JoinByCodeDialog } from "@/components/attendee/join-by-code-dialog";
 import { Wordmark } from "@/components/brand/wordmark";
@@ -78,6 +79,14 @@ export default function HomePage() {
     }
     return { now, upcoming: upcoming.sort(eventDateDesc), past: past.sort(eventDateDesc) };
   }, [events, todayStr]);
+  const profileEventId = useMemo(() => {
+    const registered = (events ?? []).filter((e) => e.registered);
+    const [todayEvent] = registered
+      .filter((e) => e.status === "active" || e.date === todayStr)
+      .sort(eventDateDesc);
+    const [latestRegistered] = registered.sort(eventDateDesc);
+    return (todayEvent ?? latestRegistered)?.id ?? null;
+  }, [events, todayStr]);
 
   if (!authChecked) {
     return (
@@ -120,13 +129,11 @@ export default function HomePage() {
             <Wordmark size={24} />
           </Link>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => supabase.auth.signOut()}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <LogOut className="h-3.5 w-3.5" aria-hidden /> Sign out
-            </button>
+            <AccountMenu
+              user={user}
+              editProfileHref={profileEventId ? `/event/${profileEventId}/profile` : null}
+              connectionsHref="/me/connections"
+            />
           </div>
         </div>
 

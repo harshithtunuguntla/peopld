@@ -19,6 +19,7 @@ import {
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch, ApiError } from "@/lib/api";
+import { AccountMenu } from "@/components/attendee/account-menu";
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Wordmark } from "@/components/brand/wordmark";
 import { Avatar } from "@/components/brand/avatar";
@@ -196,12 +197,19 @@ export default function DirectoryPage({ params }: { params: Promise<{ eventId: s
       <div className="relative z-10 mx-auto w-full max-w-5xl px-5 pb-16 pt-7">
         <div className="flex items-center justify-between">
           <Wordmark size={24} />
-          <Link
-            href={`/event/${eventId}/live`}
-            className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Event
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href={`/event/${eventId}/live`}
+              className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Event
+            </Link>
+            <AccountMenu
+              user={user}
+              editProfileHref={`/event/${eventId}/profile`}
+              connectionsHref={`/event/${eventId}/connections`}
+            />
+          </div>
         </div>
 
         <header className="mt-8">

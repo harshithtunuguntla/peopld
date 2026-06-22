@@ -103,9 +103,12 @@ export function AccountMenu({
                 Edit profile
               </MenuLink>
             ) : (
-              <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground opacity-60">
+              <div className="flex items-start gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground opacity-60">
                 <UserRound className="h-4 w-4" aria-hidden />
-                {disabledEditLabel}
+                <span className="min-w-0">
+                  <span className="block text-foreground">Edit profile</span>
+                  <span className="mt-0.5 block text-xs">{disabledEditLabel}</span>
+                </span>
               </div>
             )}
             <MenuLink href={connectionsHref} icon={<Users className="h-4 w-4" aria-hidden />} onClick={() => setOpen(false)}>

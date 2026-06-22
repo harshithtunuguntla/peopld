@@ -43,3 +43,6 @@ report.html
 
 # Gemini CLI local tool config (personal, not part of the app)
 .gemini/
+
+# Codex/agent local skill bundles (personal, not part of the app)
+.agents/

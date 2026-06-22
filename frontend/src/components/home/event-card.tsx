@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Clock, Lock, MapPin, Check } from "lucide-react";
+import { ArrowRight, CalendarDays, Clock, Lock, MapPin, Check } from "lucide-react";
 import { EVENT_PHASE, REGISTERED_TONE } from "@/lib/design/status";
 import { StatusPill } from "@/components/ui/status-pill";
 
@@ -21,6 +21,15 @@ function formatTime(time: string): string {
   const d = new Date();
   d.setHours(Number(h), Number(m), 0, 0);
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function formatDate(date: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 type Phase = "now" | "upcoming" | "ended";
@@ -73,14 +82,17 @@ export function EventCard({ event, todayStr }: { event: EventCardData; todayStr:
           <h3 className="mt-2 truncate font-display text-lg leading-tight text-foreground">
             {event.name}
           </h3>
-          <p className="mt-1.5 flex items-center gap-2 text-sm text-muted-foreground">
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <CalendarDays className="h-3.5 w-3.5 shrink-0" aria-hidden /> {formatDate(event.date)}
+            </span>
             <span className="inline-flex items-center gap-1">
               <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden /> {formatTime(event.time)}
             </span>
-            <span className="inline-flex min-w-0 items-center gap-1">
+          </p>
+          <p className="mt-1 inline-flex max-w-full items-center gap-1 text-sm text-muted-foreground">
               <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden />
               <span className="truncate">{event.location}</span>
-            </span>
           </p>
         </div>
         {event.registered && (

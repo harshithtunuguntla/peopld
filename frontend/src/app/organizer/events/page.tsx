@@ -7,7 +7,7 @@ import { Plus, CalendarDays, AlertTriangle, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { ConsoleShell } from "@/components/organizer/console-shell";
-import { PageHeader, ConsoleLoading, Segmented } from "@/components/organizer/console-ui";
+import { PageHeader, ConsoleGate, Segmented } from "@/components/organizer/console-ui";
 import { EventCard, CreateEventForm, type OrgEvent } from "@/components/organizer/event-card";
 import { Button } from "@/components/ui/button";
 
@@ -15,13 +15,7 @@ type Filter = "all" | "active" | "upcoming" | "ended";
 
 export default function OrganizerEventsPage() {
   return (
-    <Suspense
-      fallback={
-        <ConsoleShell>
-          <ConsoleLoading />
-        </ConsoleShell>
-      }
-    >
+    <Suspense fallback={<ConsoleGate />}>
       <OrganizerEvents />
     </Suspense>
   );
@@ -59,13 +53,8 @@ function OrganizerEvents() {
     }
   }, [searchParams, router]);
 
-  if (!checked || !user) {
-    return (
-      <ConsoleShell>
-        <ConsoleLoading />
-      </ConsoleShell>
-    );
-  }
+  // Pre-auth / redirecting: neutral splash, never the console chrome (see ConsoleGate).
+  if (!checked || !user) return <ConsoleGate />;
 
   const filtered = (events ?? []).filter((e) => filter === "all" || e.status === filter);
 

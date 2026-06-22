@@ -6,7 +6,7 @@ import { Loader2, Check, Save, KeyRound, CalendarDays, SlidersHorizontal, ListCh
 import { apiFetch, ApiError } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { ConsoleShell } from "@/components/organizer/console-shell";
-import { Card, Toggle } from "@/components/organizer/console-ui";
+import { Card, Toggle, ConsoleGate } from "@/components/organizer/console-ui";
 import { EventHeader, EventAccessError, type EventStatus } from "@/components/organizer/event-header";
 import { AccessCodeControl } from "@/components/organizer/access-code-control";
 import { Button } from "@/components/ui/button";
@@ -216,6 +216,9 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
     }
   }
 
+  // Pre-auth / redirecting: neutral splash, never the console chrome (see ConsoleGate).
+  if (!checked || !user) return <ConsoleGate />;
+
   if (denied) {
     return (
       <ConsoleShell>
@@ -225,10 +228,10 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
     );
   }
 
-  if (!checked || !user || !event) {
+  if (!event) {
     return (
       <ConsoleShell>
-        <EventHeader eventId={eventId} name={event?.name} status={event?.status} active="settings" />
+        <EventHeader eventId={eventId} active="settings" />
         <div className="space-y-4">
           <div className="h-48 skeleton rounded-2xl border border-border" />
           <div className="h-64 skeleton rounded-2xl border border-border" />

@@ -21,20 +21,42 @@ import { supabase } from "@/lib/supabase";
  * For non-organizers we return `user: null`, so the page stays on its skeleton
  * (no event data is fetched) until the redirect lands.
  */
+// Module-level cache of the resolved session, shared by every hook instance for
+// the life of the SPA. Without it, each console page re-runs getUser() on mount
+// with checked=false, so navigating BETWEEN console pages would flash the
+// chrome-less auth splash (the sidebar vanishing and reappearing) every time.
+// With it, only the genuine first load shows the splash; later navigations start
+// already-resolved and render the console directly, while a background getUser()
+// still revalidates the role.
+let cachedUser: User | null = null;
+let cacheResolved = false;
+
 export function useOrganizer() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [checked, setChecked] = useState(false);
+  const [user, setUser] = useState<User | null>(cachedUser);
+  const [checked, setChecked] = useState(cacheResolved);
 
   useEffect(() => {
+    let active = true;
+    // Revalidate on every mount (keeps the role claim fresh), but because state
+    // is seeded from the cache this never re-shows the splash after the first load.
     supabase.auth.getUser().then(({ data }) => {
+      if (!active) return;
+      cachedUser = data.user;
+      cacheResolved = true;
       setUser(data.user);
       setChecked(true);
     });
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_e, session) => setUser(session?.user ?? null));
-    return () => subscription.unsubscribe();
+    } = supabase.auth.onAuthStateChange((_e, session) => {
+      cachedUser = session?.user ?? null;
+      setUser(session?.user ?? null);
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const isOrganizer =

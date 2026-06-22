@@ -10,7 +10,7 @@ import {
 import { apiFetch } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { ConsoleShell } from "@/components/organizer/console-shell";
-import { Card, StatusChip, ConsoleLoading } from "@/components/organizer/console-ui";
+import { Card, StatusChip, ConsoleGate } from "@/components/organizer/console-ui";
 import { BentoTile } from "@/components/organizer/metric-tile";
 import { EventCard, type OrgEvent } from "@/components/organizer/event-card";
 import { Button } from "@/components/ui/button";
@@ -61,13 +61,10 @@ export default function OrganizerDashboardPage() {
     if (user) load();
   }, [user, load]);
 
-  if (!checked || !user) {
-    return (
-      <ConsoleShell>
-        <ConsoleLoading />
-      </ConsoleShell>
-    );
-  }
+  // Pre-auth / redirecting: a neutral splash, NEVER the console chrome — so a
+  // signed-in attendee who opened this URL never glimpses the organizer shell
+  // before useOrganizer redirects them to /home.
+  if (!checked || !user) return <ConsoleGate />;
 
   const firstName = greetingName(user.user_metadata?.name as string | undefined, user.email);
   const liveEvent = events?.find((e) => e.status === "active" && !e.is_archived) ?? null;

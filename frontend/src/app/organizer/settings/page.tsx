@@ -5,7 +5,7 @@ import { Sun, Moon, Monitor, User, Check, Palette } from "lucide-react";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { useTheme, type ThemePref } from "@/lib/theme/theme-provider";
 import { ConsoleShell } from "@/components/organizer/console-shell";
-import { PageHeader, Card, ConsoleLoading } from "@/components/organizer/console-ui";
+import { PageHeader, Card, ConsoleGate } from "@/components/organizer/console-ui";
 import { Avatar } from "@/components/brand/avatar";
 import { cn } from "@/lib/utils";
 
@@ -54,13 +54,8 @@ const SWATCHES = [
 export default function OrganizerSettings() {
   const { user, checked } = useOrganizer();
 
-  if (!checked || !user) {
-    return (
-      <ConsoleShell>
-        <ConsoleLoading />
-      </ConsoleShell>
-    );
-  }
+  // Pre-auth / redirecting: neutral splash, never the console chrome (see ConsoleGate).
+  if (!checked || !user) return <ConsoleGate />;
 
   const name = user.user_metadata?.full_name || user.email?.split("@")[0] || "Organizer";
   const email = user.email || "";

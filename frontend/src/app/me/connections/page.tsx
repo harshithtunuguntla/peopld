@@ -8,6 +8,7 @@ import { Loader2, ChevronLeft, Users, CalendarDays, Heart } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
+import { AccountMenu } from "@/components/attendee/account-menu";
 import { Wordmark } from "@/components/brand/wordmark";
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { PersonCard, type Person, type Connection } from "@/components/connections/person-card";
@@ -111,6 +112,7 @@ export default function MyConnectionsPage() {
   }, [user]);
 
   const cards = useMemo(() => (data ? groupCrossEvent(data.connections) : []), [data]);
+  const profileEventId = data?.connections[0]?.event_id ?? null;
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
@@ -126,12 +128,19 @@ export default function MyConnectionsPage() {
           >
             <Wordmark size={24} />
           </Link>
-          <Link
-            href="/home"
-            className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" aria-hidden /> Hub
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/home"
+              className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" aria-hidden /> Hub
+            </Link>
+            <AccountMenu
+              user={user}
+              editProfileHref={profileEventId ? `/event/${profileEventId}/profile` : null}
+              connectionsHref="/me/connections"
+            />
+          </div>
         </div>
 
         <header className="mt-8">

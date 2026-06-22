@@ -14,7 +14,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
 import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
-import { EventProfileNav } from "@/components/attendee/event-profile-nav";
 import { LinkedInGlyph } from "@/components/brand/glyphs";
 import { cn } from "@/lib/utils";
 
@@ -71,14 +70,13 @@ export default function ProfileEditPage({ params }: { params: Promise<{ eventId:
 
   return (
     <LiveShell
+      eventId={eventId}
       right={
         <Link href={`/event/${eventId}/live`} className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Event
         </Link>
       }
     >
-      <EventProfileNav eventId={eventId} active="profile" />
-
       <header>
         <p className="text-[11px] uppercase tracking-[0.3em] text-accent">Your profile</p>
         <h1 className="mt-2 font-display text-3xl leading-tight tracking-[-0.02em] text-foreground">

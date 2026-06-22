@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { motion, useReducedMotion } from "framer-motion";
-import { CheckCircle2, Loader2 } from "lucide-react";
+import { CalendarX2, CheckCircle2, Loader2 } from "lucide-react";
 
 import {
   AuthShell,
@@ -25,12 +25,15 @@ interface EventSummary {
   location: string;
   organizer_id: string;
   requires_code: boolean;
+  status: "upcoming" | "active" | "ended";
 }
 
 interface AttendeeResponse {
   id: string;
   event_id: string;
 }
+
+type ProfileDefaults = Partial<RegisterValues>;
 
 /** Human "Sat, 14 Jun · The Garage" line for the auth header. */
 function formatEventMeta(event: EventSummary | null): string | undefined {
@@ -50,11 +53,14 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
   const router = useRouter();
 
   const [event, setEvent] = useState<EventSummary | null>(null);
+  const [eventChecked, setEventChecked] = useState(false);
   const [attendeeCount, setAttendeeCount] = useState<number>(0);
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [existingChecked, setExistingChecked] = useState(false);
   const [existingAttendeeId, setExistingAttendeeId] = useState<string | null>(null);
+  const [profileDefaults, setProfileDefaults] = useState<ProfileDefaults | null>(null);
+  const [profileDefaultsChecked, setProfileDefaultsChecked] = useState(false);
   const [verifiedCode, setVerifiedCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -62,9 +68,11 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
   // Event is public — load it up front so the "you're invited" header shows
   // even before sign-in.
   useEffect(() => {
+    setEventChecked(false);
     apiFetch<EventSummary>(`/events/${eventId}`)
       .then(setEvent)
-      .catch(() => setEvent(null));
+      .catch(() => setEvent(null))
+      .finally(() => setEventChecked(true));
     apiFetch<{ attendee_count: number }>(`/events/${eventId}/stats`)
       .then((s) => setAttendeeCount(s.attendee_count))
       .catch(() => setAttendeeCount(0));
@@ -98,6 +106,19 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
       .then((attendee) => setExistingAttendeeId(attendee.id))
       .catch(() => setExistingAttendeeId(null)) // 404 = not registered yet
       .finally(() => setExistingChecked(true));
+  }, [user, eventId]);
+
+  useEffect(() => {
+    if (!user) {
+      setProfileDefaults(null);
+      setProfileDefaultsChecked(false);
+      return;
+    }
+    setProfileDefaultsChecked(false);
+    apiFetch<ProfileDefaults>(`/events/${eventId}/attendees/me/profile-defaults`)
+      .then(setProfileDefaults)
+      .catch(() => setProfileDefaults(null))
+      .finally(() => setProfileDefaultsChecked(true));
   }, [user, eventId]);
 
   // Give returning attendees a beat to read the message before redirecting.
@@ -199,10 +220,44 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
     );
   }
 
+  if (!eventChecked) {
+    return (
+      <AuthShell {...shellProps}>
+        <Centered>Loading invitation…</Centered>
+      </AuthShell>
+    );
+  }
+
+  if (!event) {
+    return (
+      <AuthShell {...shellProps}>
+        <UnavailableEvent
+          title="Event not found"
+          message="This link no longer points to an available event."
+          actionLabel="Back to home"
+          onAction={() => router.push("/home")}
+        />
+      </AuthShell>
+    );
+  }
+
   if (existingAttendeeId) {
     return (
       <AuthShell {...shellProps}>
         <AlreadyIn onGo={() => router.push(`/event/${eventId}/live`)} />
+      </AuthShell>
+    );
+  }
+
+  if (event.status === "ended") {
+    return (
+      <AuthShell {...shellProps}>
+        <UnavailableEvent
+          title="Event has ended"
+          message="Registration is closed because this event is already over."
+          actionLabel="Back to home"
+          onAction={() => router.push("/home")}
+        />
       </AuthShell>
     );
   }
@@ -213,6 +268,14 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
     return (
       <AuthShell {...shellProps}>
         <AccessCodeGate onVerify={handleVerifyCode} />
+      </AuthShell>
+    );
+  }
+
+  if (!profileDefaultsChecked) {
+    return (
+      <AuthShell {...shellProps}>
+        <Centered>Preparing your profile…</Centered>
       </AuthShell>
     );
   }
@@ -229,15 +292,44 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
         </div>
       )}
       <RegisterForm
+        key={eventId}
         onSubmit={handleRegister}
         busy={busy}
         error={error}
+        defaultValues={profileDefaults}
         defaultName={
           (user.user_metadata?.full_name as string | undefined) ??
           (user.user_metadata?.name as string | undefined)
         }
       />
     </AuthShell>
+  );
+}
+
+function UnavailableEvent({
+  title,
+  message,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  message: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-3 py-3 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-card/60 text-muted-foreground">
+        <CalendarX2 className="h-6 w-6" aria-hidden />
+      </div>
+      <div>
+        <h2 className="font-display text-xl text-foreground">{title}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{message}</p>
+      </div>
+      <Button variant="outline" size="lg" onClick={onAction} className="mt-1">
+        {actionLabel}
+      </Button>
+    </div>
   );
 }
 

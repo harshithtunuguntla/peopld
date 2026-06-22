@@ -17,6 +17,7 @@ from app.deps import (
 from app.models.schemas import (
     ArriveRequest,
     AttendeeCreate,
+    AttendeeProfileDefaults,
     AttendeeResponse,
     AttendeeSelfUpdate,
     AttendeeUpdate,
@@ -170,6 +171,46 @@ def check_in_all(
             metadata={"count": len(registered)},
         )
     return BulkCheckInResponse(arrived=len(registered))
+
+
+@router.get("/me/profile-defaults", response_model=AttendeeProfileDefaults)
+def get_my_profile_defaults(
+    event_id: str,
+    user: AuthUser = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """Reusable attendee profile defaults for joining another event.
+
+    Profile fields live on attendee rows today. To avoid making people retype the
+    same details for every event, use the signed-in user's most recent attendee
+    record as the next registration's editable starting point.
+    """
+    fetch_event_or_404(db, event_id)
+    rows = (
+        db.table("attendees")
+        .select(
+            "name, role, company, description, looking_for, linkedin_url, website_url, interests"
+        )
+        .eq("user_id", user.id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        return AttendeeProfileDefaults()
+    latest = rows[0]
+    return AttendeeProfileDefaults(
+        name=latest.get("name"),
+        role=latest.get("role"),
+        company=latest.get("company"),
+        description=latest.get("description"),
+        looking_for=latest.get("looking_for"),
+        linkedin_url=latest.get("linkedin_url"),
+        website_url=latest.get("website_url"),
+        interests=latest.get("interests") or [],
+    )
 
 
 @router.get("/me", response_model=AttendeeResponse)

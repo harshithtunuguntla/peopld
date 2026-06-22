@@ -283,6 +283,71 @@ def test_my_registration_found(client, event):
     assert response.json()["id"] == created.json()["id"]
 
 
+def test_profile_defaults_requires_auth(client, event):
+    response = client.get(f"/events/{event['id']}/attendees/me/profile-defaults")
+    assert response.status_code == 401
+
+
+def test_profile_defaults_empty_for_first_event(client, event):
+    response = client.get(
+        f"/events/{event['id']}/attendees/me/profile-defaults", headers=ATTENDEE_AUTH
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] is None
+    assert body["role"] is None
+    assert body["interests"] == []
+
+
+def test_profile_defaults_uses_latest_attendee_profile(client, db, event):
+    older_event = db.seed(
+        "events",
+        {**{k: v for k, v in event.items() if k != "id"}, "name": "Older Meetup"},
+    )[0]
+    make_attendee(
+        db,
+        older_event["id"],
+        name="Old Name",
+        user_id=ATTENDEE_USER_ID,
+        role="Builder",
+        company="Old Co",
+        description="Old description",
+        looking_for="old asks",
+        linkedin_url="https://linkedin.com/in/old",
+        website_url="https://old.example",
+        interests=["Ops"],
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+    make_attendee(
+        db,
+        event["id"],
+        name="Asha Reddy",
+        user_id=ATTENDEE_USER_ID,
+        role="Founder",
+        company="Peopld",
+        description="Building event intelligence",
+        looking_for="design partners",
+        linkedin_url="https://linkedin.com/in/asha",
+        website_url="https://asha.example",
+        interests=["AI", "Events"],
+        created_at="2026-02-01T00:00:00+00:00",
+    )
+
+    response = client.get(
+        f"/events/{event['id']}/attendees/me/profile-defaults", headers=ATTENDEE_AUTH
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "Asha Reddy"
+    assert body["role"] == "Founder"
+    assert body["company"] == "Peopld"
+    assert body["description"] == "Building event intelligence"
+    assert body["looking_for"] == "design partners"
+    assert body["linkedin_url"] == "https://linkedin.com/in/asha"
+    assert body["website_url"] == "https://asha.example"
+    assert body["interests"] == ["AI", "Events"]
+
+
 def test_patch_attendee_requires_auth(client, db, event):
     attendee = make_attendee(db, event["id"])
 

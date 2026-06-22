@@ -94,7 +94,7 @@ def list_events(
     """
     rows = (
         db.table("events")
-        .select("id,name,date,time,location,status,archived_at")
+        .select("id,name,date,time,location,status,archived_at,cover_image_url")
         .order("date", desc=False)
         .execute()
         .data
@@ -149,6 +149,7 @@ def list_events(
             requires_code=str(r["id"]) in coded_ids,
             attendee_count=counts.get(str(r["id"]), 0),
             registered=str(r["id"]) in my_event_ids,
+            cover_image_url=r.get("cover_image_url"),
         )
         for r in rows
     ]

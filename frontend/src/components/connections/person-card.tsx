@@ -126,7 +126,7 @@ export function PersonCard({
   }
 
   return (
-    <li className={cn("rounded-2xl border p-4", person.mutual ? "border-accent/40 bg-accent/[0.07]" : "border-border bg-card/50")}>
+    <li className={cn("rounded-2xl border p-4 transition-[box-shadow,border-color] duration-200 hover:shadow-md", person.mutual ? "border-accent/40 bg-accent/[0.07]" : "border-border bg-card/50 hover:border-foreground/15")}>
       <div className="flex items-start gap-3">
         <Avatar name={person.name} seed={person.attendee_id} src={person.avatar_url} size={44} />
         <div className="min-w-0 flex-1">

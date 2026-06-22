@@ -166,7 +166,11 @@ export default function MyConnectionsPage() {
             {cards.length === 0 ? (
               <EmptyState />
             ) : (
-              <ul className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              // Masonry (CSS columns) — cards have very different heights (links,
+              // notes, interest chips), so a grid would stretch every card in a row
+              // to the tallest and leave dead space. Columns let each card size to
+              // its own content and pack tightly.
+              <ul className="mt-7 columns-1 gap-x-3 sm:columns-2 [&>li]:mb-3 [&>li]:break-inside-avoid">
                 {cards.map(({ person, eventId }) => (
                   <PersonCard key={`${eventId}-${person.attendee_id}`} person={person} eventId={eventId} />
                 ))}

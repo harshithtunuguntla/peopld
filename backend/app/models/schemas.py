@@ -128,6 +128,7 @@ class EventBrowseItem(BaseModel):
     requires_code: bool = False
     attendee_count: int = 0
     registered: bool = False  # does the signed-in caller already have a registration here?
+    cover_image_url: str | None = None  # event branding (public); attendee card mirrors the organizer's
 
 
 class VerifyCodeRequest(BaseModel):

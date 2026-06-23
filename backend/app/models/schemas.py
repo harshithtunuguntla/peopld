@@ -181,6 +181,20 @@ class AttendeeCreate(BaseModel):
     access_code: Optional[str] = None  # required iff the event has one; verified server-side, not stored on the attendee
 
 
+class AttendeeProfileDefaults(BaseModel):
+    """The caller's latest reusable profile fields, used to prefill the next
+    event registration. Derived from their own prior attendee rows; not a new
+    global profile store."""
+    name: Optional[str] = None
+    role: Optional[str] = None
+    company: Optional[str] = None
+    description: Optional[str] = None
+    looking_for: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    website_url: Optional[str] = None
+    interests: list[str] = []
+
+
 class WalkInCreate(BaseModel):
     """Organizer-added attendee (a walk-in with no app account). No access code,
     no avatar — just enough to seat them."""

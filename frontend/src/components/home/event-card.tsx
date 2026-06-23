@@ -52,11 +52,11 @@ function phaseOf(e: EventCardData, todayStr: string): Phase {
 /** Where the card links to + what the CTA reads — shared by the grid and hero
  * cards so the routing rule lives in exactly one place. */
 function hrefFor(event: EventCardData, phase: Phase): string {
-  if (phase === "ended" && event.registered) return `/event/${event.id}/connections`;
+  if (phase === "ended" && event.registered) return `/event/${event.id}/live`;
   return event.registered ? `/event/${event.id}/live` : `/event/${event.id}/register`;
 }
 function ctaFor(event: EventCardData, phase: Phase): string {
-  if (phase === "ended") return event.registered ? "View recap" : "View";
+  if (phase === "ended") return event.registered ? "View wrap" : "View";
   return event.registered ? "Enter" : "Join";
 }
 

@@ -27,7 +27,9 @@ interface RegisterFormProps {
   busy?: boolean;
   /** Server-side error (e.g. event ended) surfaced above the submit button. */
   error?: string | null;
-  /** Pre-fill the name (e.g. from the Google identity) so people don't retype it. */
+  /** Reusable profile fields from a previous event registration. */
+  defaultValues?: Partial<RegisterValues> | null;
+  /** Fallback name (e.g. from the Google identity) when no profile default exists. */
   defaultName?: string;
 }
 
@@ -44,11 +46,15 @@ const EMPTY: RegisterValues = {
 
 /** Attendee profile form. Owns its field state + client validation; emits clean
  * values to the parent, which maps them to the API and handles the request. */
-export function RegisterForm({ onSubmit, busy, error, defaultName }: RegisterFormProps) {
-  const [values, setValues] = useState<RegisterValues>(() => ({
-    ...EMPTY,
-    name: defaultName?.trim() ?? "",
-  }));
+export function RegisterForm({ onSubmit, busy, error, defaultValues, defaultName }: RegisterFormProps) {
+  const [values, setValues] = useState<RegisterValues>(() => {
+    const defaults = cleanDefaults(defaultValues);
+    return {
+      ...EMPTY,
+      ...defaults,
+      name: defaults.name || defaultName?.trim() || "",
+    };
+  });
   const [errors, setErrors] = useState<Errors>({});
 
   const set = (key: keyof RegisterValues) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -200,4 +206,17 @@ export function RegisterForm({ onSubmit, busy, error, defaultName }: RegisterFor
       </Button>
     </form>
   );
+}
+
+function cleanDefaults(defaults?: Partial<RegisterValues> | null): RegisterValues {
+  return {
+    name: defaults?.name?.trim() ?? "",
+    role: defaults?.role?.trim() ?? "",
+    company: defaults?.company?.trim() ?? "",
+    description: defaults?.description?.trim() ?? "",
+    looking_for: defaults?.looking_for?.trim() ?? "",
+    linkedin_url: defaults?.linkedin_url?.trim() ?? "",
+    website_url: defaults?.website_url?.trim() ?? "",
+    interests: defaults?.interests ?? [],
+  };
 }

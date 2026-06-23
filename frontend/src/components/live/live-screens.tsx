@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { Loader2, PartyPopper, Sparkles, Heart, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star, MapPin } from "lucide-react";
+import { CalendarX2, Loader2, Sparkles, Heart, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star, MapPin } from "lucide-react";
 
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Wordmark } from "@/components/brand/wordmark";
@@ -739,15 +739,15 @@ export function NotSeated({ state, eventId }: { state: LiveState; eventId?: stri
   );
 }
 
-export function EventEnded({ eventId }: { eventId: string }) {
+export function EventEnded() {
   return (
     <StatusPanel
-      icon={<PartyPopper className="h-7 w-7" />}
-      title="That's a wrap"
-      subtitle="Thanks for showing up and saying hi. Here's your night in numbers — and everyone you met."
+      icon={<CalendarX2 className="h-7 w-7" />}
+      title="Event has ended"
+      subtitle="This event is over. You can return home to see your upcoming and past events."
     >
-      <Link href={`/event/${eventId}/recap`} className={cn(buttonVariants({ variant: "accent", size: "lg" }), "glow-ember mt-1")}>
-        See your recap
+      <Link href="/home" className={cn(buttonVariants({ variant: "outline", size: "lg" }), "mt-1")}>
+        Back to home
       </Link>
     </StatusPanel>
   );

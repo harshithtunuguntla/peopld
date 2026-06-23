@@ -71,6 +71,12 @@ function LiveInner({ eventId }: { eventId: string }) {
     if (notRegistered) router.replace(`/event/${eventId}/register`);
   }, [notRegistered, eventId, router]);
 
+  useEffect(() => {
+    if (state?.phase === "ended" && state.attendee_status === "arrived") {
+      router.replace(`/event/${eventId}/recap`);
+    }
+  }, [state?.phase, state?.attendee_status, eventId, router]);
+
   if (notRegistered || (loading && !state)) {
     return (
       <LiveShell>
@@ -129,9 +135,16 @@ function LiveInner({ eventId }: { eventId: string }) {
 
   switch (state.phase) {
     case "ended":
+      if (state.attendee_status === "arrived") {
+        return (
+          <LiveShell eventId={eventId}>
+            <CenteredSpinner label="Opening your recap…" />
+          </LiveShell>
+        );
+      }
       return (
         <LiveShell eventId={eventId}>
-          <EventEnded eventId={eventId} />
+          <EventEnded />
         </LiveShell>
       );
     case "between_rounds":

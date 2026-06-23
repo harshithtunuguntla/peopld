@@ -4,7 +4,7 @@ import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
-import { ArrowLeft, Check, Globe, Eye, EyeOff, Loader2 } from "lucide-react";
+import { ArrowLeft, Check, Globe, Loader2 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
@@ -15,7 +15,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
 import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
 import { LinkedInGlyph } from "@/components/brand/glyphs";
-import { cn } from "@/lib/utils";
 
 interface Me {
   id: string;
@@ -27,7 +26,6 @@ interface Me {
   linkedin_url: string | null;
   website_url: string | null;
   interests: string[];
-  show_in_directory: boolean;
 }
 
 export default function ProfileEditPage({
@@ -81,13 +79,9 @@ export default function ProfileEditPage({
       eventId={eventId}
       right={
         eventLinkDisabled ? (
-          <span
-            aria-disabled="true"
-            title="Join or enter an event to return to the live event."
-            className="inline-flex cursor-not-allowed items-center gap-1 text-xs text-muted-foreground/50"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Event
-          </span>
+          <Link href="/home" className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Back
+          </Link>
         ) : (
           <Link href={`/event/${eventId}/live`} className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Event
@@ -126,7 +120,6 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
     linkedin_url: me.linkedin_url ?? "",
     website_url: me.website_url ?? "",
     interests: me.interests ?? [],
-    show_in_directory: me.show_in_directory ?? true,
   });
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -169,7 +162,6 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
           linkedin_url: form.linkedin_url.trim() || null,
           website_url: form.website_url.trim() || null,
           interests: form.interests,
-          show_in_directory: form.show_in_directory,
         }),
       });
       setSaved(true);
@@ -234,37 +226,6 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
           <Input {...p} type="url" inputMode="url" startIcon={<Globe className="h-4 w-4" aria-hidden />} value={form.website_url} onChange={set("website_url")} placeholder="https://yourproduct.com" />
         )}
       </Field>
-
-      {/* Directory visibility — your one control over the public "who's coming" list. */}
-      <button
-        type="button"
-        onClick={() => {
-          setForm((f) => ({ ...f, show_in_directory: !f.show_in_directory }));
-          setSaved(false);
-        }}
-        aria-pressed={form.show_in_directory}
-        className={cn(
-          "flex items-start gap-3 rounded-2xl border p-4 text-left transition-colors",
-          form.show_in_directory ? "border-accent/40 bg-accent/[0.06]" : "border-border bg-card/40",
-        )}
-      >
-        <span className={cn("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", form.show_in_directory ? "bg-accent/15 text-accent" : "bg-muted text-muted-foreground")}>
-          {form.show_in_directory ? <Eye className="h-4 w-4" aria-hidden /> : <EyeOff className="h-4 w-4" aria-hidden />}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium text-foreground">
-            {form.show_in_directory ? "Visible on the guest list" : "Hidden from the guest list"}
-          </span>
-          <span className="mt-0.5 block text-xs text-muted-foreground">
-            {form.show_in_directory
-              ? "Other attendees can find you on “Who's coming” before the event. Tap to hide."
-              : "You won't appear on the public attendee list. Tap to show yourself."}
-          </span>
-        </span>
-        <span className={cn("relative mt-1 h-6 w-10 shrink-0 rounded-full transition-colors", form.show_in_directory ? "bg-accent" : "bg-muted")}>
-          <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-background shadow transition-all", form.show_in_directory ? "left-[1.125rem]" : "left-0.5")} />
-        </span>
-      </button>
 
       {error && (
         <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">

@@ -35,6 +35,23 @@ export interface LiveIcebreaker {
   question_text: string;
   target_attendee_id: string;
 }
+export interface RoundExtensionPoll {
+  id: string;
+  event_id: string;
+  round_id: string;
+  status: "active" | "extended" | "rejected";
+  eligible_count: number;
+  threshold_percent: number;
+  threshold_count: number;
+  votes_count: number;
+  yes_count: number;
+  no_count: number;
+  vote_counts: Record<string, number>;
+  selected_seconds: number | null;
+  my_vote_seconds: number | null;
+  created_at: string;
+  resolved_at: string | null;
+}
 export interface RosterPerson {
   attendee_id: string;
   name: string;
@@ -64,6 +81,7 @@ export interface LiveState {
   icebreaker: LiveIcebreaker | null;
   recent_seat: LiveSeat | null; // between rounds: the table you just left, so you can still like/note
   recent_round_number: number | null;
+  extension_poll: RoundExtensionPoll | null;
 }
 
 export interface UseLiveState {

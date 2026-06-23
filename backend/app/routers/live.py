@@ -20,7 +20,9 @@ dominated by the slowest call in each batch, not the sum of all calls.
 
 import asyncio
 import logging
+from collections import Counter
 from datetime import datetime, timedelta, timezone
+from math import ceil
 
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
@@ -32,12 +34,15 @@ from app.models.schemas import (
     LiveRound,
     LiveSeat,
     LiveStateResponse,
+    RoundExtensionPollResponse,
     RosterPerson,
     Tablemate,
     WaitingRoster,
 )
 
 ROSTER_PREVIEW_LIMIT = 12
+EXTENSION_POLL_SECONDS = (120, 180, 300)
+EXTENSION_POLL_THRESHOLD_PERCENT = 80
 
 logger = logging.getLogger("app.live")
 
@@ -156,6 +161,58 @@ def _build_roster(rows: list[dict]) -> WaitingRoster:
     return WaitingRoster(count=len(rows), preview=preview)
 
 
+def _latest_extension_poll_response(
+    db: Client,
+    event_id: str,
+    round_id: str,
+    attendee_id: str,
+) -> RoundExtensionPollResponse | None:
+    polls = (
+        db.table("round_extension_polls")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("round_id", round_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not polls:
+        return None
+    poll = polls[0]
+    votes = (
+        db.table("round_extension_votes")
+        .select("*")
+        .eq("poll_id", poll["id"])
+        .execute()
+        .data
+        or []
+    )
+    yes_votes = [int(v["seconds"]) for v in votes if int(v["seconds"]) > 0]
+    counts = Counter(yes_votes)
+    mine = next((v for v in votes if str(v["attendee_id"]) == str(attendee_id)), None)
+    eligible = int(poll["eligible_count"])
+    threshold_percent = int(poll.get("threshold_percent") or EXTENSION_POLL_THRESHOLD_PERCENT)
+    return RoundExtensionPollResponse(
+        id=poll["id"],
+        event_id=poll["event_id"],
+        round_id=poll["round_id"],
+        status=poll["status"],
+        eligible_count=eligible,
+        threshold_percent=threshold_percent,
+        threshold_count=ceil(eligible * threshold_percent / 100),
+        votes_count=len(votes),
+        yes_count=len(yes_votes),
+        no_count=sum(1 for v in votes if int(v["seconds"]) == 0),
+        vote_counts={seconds: counts.get(seconds, 0) for seconds in EXTENSION_POLL_SECONDS},
+        selected_seconds=poll.get("selected_seconds"),
+        my_vote_seconds=int(mine["seconds"]) if mine else None,
+        created_at=poll["created_at"],
+        resolved_at=poll.get("resolved_at"),
+    )
+
+
 @router.get("", response_model=LiveStateResponse)
 async def get_live_state(
     event_id: str,
@@ -215,6 +272,7 @@ async def get_live_state(
     icebreaker_payload: LiveIcebreaker | None = None
     recent_seat_payload: LiveSeat | None = None
     recent_round_number: int | None = None
+    extension_poll_payload: RoundExtensionPollResponse | None = None
     seated = False
     roster: WaitingRoster
 
@@ -233,6 +291,9 @@ async def get_live_state(
             duration_seconds=active["duration_seconds"],
             ends_at=ends_at,
             paused_at=active.get("paused_at"),
+        )
+        extension_poll_payload = await asyncio.to_thread(
+            _latest_extension_poll_response, db, event_id, active["id"], str(attendee["id"])
         )
 
         # --- Batch 2: round is active, all independent ---
@@ -389,4 +450,5 @@ async def get_live_state(
         icebreaker=icebreaker_payload,
         recent_seat=recent_seat_payload,
         recent_round_number=recent_round_number,
+        extension_poll=extension_poll_payload,
     )

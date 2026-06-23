@@ -12,6 +12,7 @@ from tests.conftest import (
     make_assignment,
     make_attendee,
     make_round,
+    make_token,
 )
 
 
@@ -283,6 +284,79 @@ def test_extend_with_no_active_round_is_404(client, event):
         client.post(f"/events/{event['id']}/rounds/extend", headers=AUTH, json={"seconds": 60}).status_code
         == 404
     )
+
+
+def _attendee_auth(user_id: str) -> dict:
+    return {"Authorization": f"Bearer {make_token(user_id, f'{user_id}@test.local')}"}
+
+
+def test_extension_poll_extends_when_eighty_percent_vote_yes(client, db, event):
+    user_ids = [f"33333333-3333-3333-3333-33333333333{i}" for i in range(5)]
+    for i, uid in enumerate(user_ids):
+        make_attendee(db, event["id"], name=f"Voter {i}", status="arrived", user_id=uid)
+    round_row = make_round(db, event["id"], round_number=1, status="active", duration_seconds=300)
+
+    start = client.post(f"/events/{event['id']}/rounds/extension-polls", headers=AUTH)
+    assert start.status_code == 201
+    poll = start.json()
+    assert poll["eligible_count"] == 5
+    assert poll["threshold_count"] == 4
+
+    choices = [120, 120, 300, 300]
+    for uid, seconds in zip(user_ids[:4], choices):
+        vote = client.post(
+            f"/events/{event['id']}/rounds/extension-polls/{poll['id']}/vote",
+            headers=_attendee_auth(uid),
+            json={"seconds": seconds},
+        )
+    assert vote.status_code == 200
+    body = vote.json()
+    assert body["status"] == "extended"
+    assert body["yes_count"] == 4
+    assert body["selected_seconds"] == 300  # tied most-selected option → choose the longer tie
+    assert db.store["rounds"][0]["id"] == round_row["id"]
+    assert db.store["rounds"][0]["duration_seconds"] == 600
+    assert "round.extension_poll_extended" in audit_actions(db)
+
+    again = client.post(f"/events/{event['id']}/rounds/extension-polls", headers=AUTH)
+    assert again.status_code == 409
+
+
+def test_extension_poll_rejects_when_all_vote_without_threshold(client, db, event):
+    user_ids = [f"44444444-4444-4444-4444-44444444444{i}" for i in range(5)]
+    for i, uid in enumerate(user_ids):
+        make_attendee(db, event["id"], name=f"Voter {i}", status="arrived", user_id=uid)
+    make_round(db, event["id"], round_number=1, status="active", duration_seconds=300)
+    poll = client.post(f"/events/{event['id']}/rounds/extension-polls", headers=AUTH).json()
+
+    choices = [120, 120, 120, 0, 0]
+    for uid, seconds in zip(user_ids, choices):
+        vote = client.post(
+            f"/events/{event['id']}/rounds/extension-polls/{poll['id']}/vote",
+            headers=_attendee_auth(uid),
+            json={"seconds": seconds},
+        )
+    assert vote.status_code == 200
+    body = vote.json()
+    assert body["status"] == "rejected"
+    assert body["yes_count"] == 3
+    assert db.store["rounds"][0]["duration_seconds"] == 300
+    assert "round.extension_poll_rejected" in audit_actions(db)
+
+
+def test_extension_poll_requires_checked_in_voter(client, db, event):
+    user_id = "55555555-5555-5555-5555-555555555555"
+    make_attendee(db, event["id"], name="Not checked in", status="registered", user_id=user_id)
+    make_attendee(db, event["id"], name="Arrived", status="arrived")
+    make_round(db, event["id"], round_number=1, status="active")
+    poll = client.post(f"/events/{event['id']}/rounds/extension-polls", headers=AUTH).json()
+
+    vote = client.post(
+        f"/events/{event['id']}/rounds/extension-polls/{poll['id']}/vote",
+        headers=_attendee_auth(user_id),
+        json={"seconds": 120},
+    )
+    assert vote.status_code == 403
 
 
 # --- run sheet (printable event-day backup) ---

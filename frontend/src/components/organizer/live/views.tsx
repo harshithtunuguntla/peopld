@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import {
   Loader2,
   Play,
@@ -27,7 +27,7 @@ import { roundFor, agendaFor } from "@/lib/design/rounds";
 
 import dynamic from "next/dynamic";
 
-import { groupByTable, type Attendee, type RoundDraft, type ActiveRound } from "./types";
+import { groupByTable, type Attendee, type RoundDraft, type ActiveRound, type RoundExtensionPoll } from "./types";
 import { FloorMap, TimerRing } from "./floor-map";
 import { NotSeated, Guests } from "./rails";
 import { ConfirmButton } from "./confirm-button";
@@ -294,54 +294,60 @@ export function DraftView({
   );
 }
 
-// Quick "+ Add time" control: one-tap presets plus a custom minutes field. Shown
-// while a round is running so the host can grant more time without ever pausing.
-function AddTimeControl({ busy, onExtend }: { busy: boolean; onExtend: (seconds: number) => void }) {
-  const [open, setOpen] = useState(false);
-  const [mins, setMins] = useState("");
+function formatMinutes(seconds: number): string {
+  return `${Math.round(seconds / 60)} min`;
+}
 
-  function applyCustom() {
-    const m = parseFloat(mins);
-    if (!Number.isFinite(m) || m <= 0) return;
-    onExtend(Math.round(m * 60));
-    setMins("");
-    setOpen(false);
-  }
-
-  if (!open) {
+function ExtensionPollControl({
+  poll,
+  busy,
+  onStart,
+}: {
+  poll: RoundExtensionPoll | null;
+  busy: boolean;
+  onStart: () => void;
+}) {
+  if (!poll) {
     return (
-      <Button variant="outline" size="lg" onClick={() => setOpen(true)} disabled={busy} className="w-full gap-2">
-        <Clock className="h-4 w-4" aria-hidden /> Add time
+      <Button variant="outline" size="lg" onClick={onStart} disabled={busy} className="w-full gap-2">
+        <Clock className="h-4 w-4" aria-hidden /> Ask room to extend
       </Button>
     );
   }
+
+  const threshold = Math.max(1, poll.threshold_count);
+  const progress = Math.min(100, Math.round((poll.yes_count / threshold) * 100));
+  const title =
+    poll.status === "extended"
+      ? `Round extended by ${formatMinutes(poll.selected_seconds ?? 0)}`
+      : poll.status === "rejected"
+        ? "Poll closed, no extension"
+        : "Extension poll is live";
+
   return (
-    <div className="rounded-2xl border border-border bg-card/50 p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-medium text-foreground">Add time to this round</span>
-        <button type="button" onClick={() => setOpen(false)} className="text-xs text-muted-foreground hover:text-foreground">
-          Cancel
-        </button>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {[1, 2, 5].map((m) => (
-          <Button key={m} variant="outline" size="sm" onClick={() => onExtend(m * 60)} disabled={busy} className="gap-1">
-            <Plus className="h-3.5 w-3.5" aria-hidden /> {m} min
-          </Button>
-        ))}
-        <div className="flex items-center gap-1.5">
-          <input
-            value={mins}
-            onChange={(e) => setMins(e.target.value.replace(/[^0-9.]/g, ""))}
-            onKeyDown={(e) => e.key === "Enter" && applyCustom()}
-            inputMode="decimal"
-            placeholder="custom"
-            aria-label="Custom minutes to add"
-            className="h-9 w-20 rounded-lg border border-input bg-secondary/50 px-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
-          <Button variant="accent" size="sm" onClick={applyCustom} disabled={busy || !mins}>
-            Add
-          </Button>
+    <div className="rounded-2xl border border-border bg-card/50 p-4">
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent">
+          {poll.status === "extended" ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : <Clock className="h-4 w-4" aria-hidden />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-foreground">{title}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {poll.yes_count}/{poll.threshold_count} yes votes · {poll.votes_count}/{poll.eligible_count} checked-in people voted
+          </p>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${progress}%` }} />
+          </div>
+          <div className="mt-3 grid grid-cols-4 gap-2 text-center text-[11px]">
+            {[120, 180, 300].map((seconds) => (
+              <span key={seconds} className="rounded-full border border-border bg-background/40 px-2 py-1 text-muted-foreground">
+                {formatMinutes(seconds)} · {poll.vote_counts[String(seconds)] ?? poll.vote_counts[seconds] ?? 0}
+              </span>
+            ))}
+            <span className="rounded-full border border-border bg-background/40 px-2 py-1 text-muted-foreground">
+              No · {poll.no_count}
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -357,7 +363,7 @@ export function ActiveView({
   busy,
   autoAdvance,
   onBegin,
-  onExtend,
+  onStartExtensionPoll,
   onEnd,
   onCancel,
   onPause,
@@ -368,7 +374,7 @@ export function ActiveView({
   busy: boolean;
   autoAdvance: boolean;
   onBegin: () => void;
-  onExtend: (seconds: number) => void;
+  onStartExtensionPoll: () => void;
   onEnd: () => void;
   onCancel: () => void;
   onPause: () => void;
@@ -508,7 +514,7 @@ export function ActiveView({
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
                 {busy ? "Ending…" : "End round"}
               </Button>
-              <AddTimeControl busy={busy} onExtend={onExtend} />
+              <ExtensionPollControl poll={round.extension_poll} busy={busy} onStart={onStartExtensionPoll} />
             </>
           )}
           <ConfirmButton

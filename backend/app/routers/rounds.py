@@ -2,6 +2,7 @@ import hashlib
 import logging
 from datetime import datetime, timezone
 from math import ceil
+from collections import Counter
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from supabase import Client
@@ -19,11 +20,13 @@ from app.audit import record_audit
 from app.icebreakers import engine as icebreaker_engine
 from app.realtime import broadcast_event_changed
 from app.database import get_supabase
-from app.deps import fetch_event_or_404, get_current_organizer_id, require_event_owner
+from app.deps import AuthUser, fetch_event_or_404, get_current_organizer_id, get_current_user, require_event_owner
 from app.models.schemas import (
     RoundCancelResponse,
     RoundDraftResponse,
     RoundExtendRequest,
+    RoundExtensionPollResponse,
+    RoundExtensionVoteRequest,
     RoundMoveRequest,
     RoundResponse,
     RoundWithAssignmentsResponse,
@@ -36,6 +39,9 @@ from app.models.schemas import (
 logger = logging.getLogger("app.rounds")
 
 router = APIRouter(prefix="/events/{event_id}/rounds", tags=["rounds"])
+
+EXTENSION_POLL_SECONDS = (120, 180, 300)
+EXTENSION_POLL_THRESHOLD_PERCENT = 80
 
 
 def _parse_iso(value: str) -> datetime:
@@ -86,7 +92,200 @@ def _round_with_assignments(db: Client, round_row: dict) -> dict:
     )
     result = dict(round_row)
     result["assignments"] = assignments
+    result["extension_poll"] = _latest_extension_poll_response(db, round_row["event_id"], round_row["id"])
     return result
+
+
+def _eligible_extension_voters(db: Client, event_id: str) -> list[dict]:
+    """Attendees who are currently checked in and can vote on a round extension."""
+    return (
+        db.table("attendees")
+        .select("id")
+        .eq("event_id", event_id)
+        .eq("status", "arrived")
+        .execute()
+        .data
+        or []
+    )
+
+
+def _fetch_my_attendee(db: Client, event_id: str, user_id: str) -> dict:
+    row = (
+        db.table("attendees")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Not registered for this event")
+    return row[0]
+
+
+def _latest_extension_poll(db: Client, event_id: str, round_id: str) -> dict | None:
+    polls = (
+        db.table("round_extension_polls")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("round_id", round_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return polls[0] if polls else None
+
+
+def _active_extension_poll(db: Client, event_id: str, round_id: str) -> dict | None:
+    polls = (
+        db.table("round_extension_polls")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("round_id", round_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return polls[0] if polls else None
+
+
+def _latest_extension_poll_response(
+    db: Client,
+    event_id: str,
+    round_id: str,
+    attendee_id: str | None = None,
+) -> RoundExtensionPollResponse | None:
+    poll = _latest_extension_poll(db, event_id, round_id)
+    return _extension_poll_response(db, poll, attendee_id) if poll else None
+
+
+def _extension_poll_response(
+    db: Client,
+    poll: dict,
+    attendee_id: str | None = None,
+) -> RoundExtensionPollResponse:
+    votes = (
+        db.table("round_extension_votes")
+        .select("*")
+        .eq("poll_id", poll["id"])
+        .execute()
+        .data
+        or []
+    )
+    yes_votes = [int(v["seconds"]) for v in votes if int(v["seconds"]) > 0]
+    counts = Counter(yes_votes)
+    my_vote = None
+    if attendee_id:
+        mine = next((v for v in votes if str(v["attendee_id"]) == str(attendee_id)), None)
+        my_vote = int(mine["seconds"]) if mine else None
+    eligible = int(poll["eligible_count"])
+    return RoundExtensionPollResponse(
+        id=poll["id"],
+        event_id=poll["event_id"],
+        round_id=poll["round_id"],
+        status=poll["status"],
+        eligible_count=eligible,
+        threshold_percent=int(poll.get("threshold_percent") or EXTENSION_POLL_THRESHOLD_PERCENT),
+        threshold_count=ceil(eligible * int(poll.get("threshold_percent") or EXTENSION_POLL_THRESHOLD_PERCENT) / 100),
+        votes_count=len(votes),
+        yes_count=len(yes_votes),
+        no_count=sum(1 for v in votes if int(v["seconds"]) == 0),
+        vote_counts={seconds: counts.get(seconds, 0) for seconds in EXTENSION_POLL_SECONDS},
+        selected_seconds=poll.get("selected_seconds"),
+        my_vote_seconds=my_vote,
+        created_at=poll["created_at"],
+        resolved_at=poll.get("resolved_at"),
+    )
+
+
+def _resolve_extension_poll_if_ready(
+    db: Client,
+    event_id: str,
+    poll: dict,
+    background_tasks: BackgroundTasks,
+    actor_user_id: str,
+) -> dict:
+    """Apply the 80% rule once, using the backend as the timing authority."""
+    if poll["status"] != "active":
+        return poll
+    votes = (
+        db.table("round_extension_votes")
+        .select("*")
+        .eq("poll_id", poll["id"])
+        .execute()
+        .data
+        or []
+    )
+    eligible = max(1, int(poll["eligible_count"]))
+    threshold = ceil(eligible * int(poll.get("threshold_percent") or EXTENSION_POLL_THRESHOLD_PERCENT) / 100)
+    yes_votes = [int(v["seconds"]) for v in votes if int(v["seconds"]) > 0]
+    now = datetime.now(timezone.utc).isoformat()
+
+    if len(yes_votes) >= threshold:
+        counts = Counter(yes_votes)
+        selected_seconds = max(
+            EXTENSION_POLL_SECONDS,
+            key=lambda seconds: (counts.get(seconds, 0), seconds),
+        )
+        winner = (
+            db.table("round_extension_polls")
+            .update({"status": "extended", "selected_seconds": selected_seconds, "resolved_at": now})
+            .eq("id", poll["id"])
+            .eq("status", "active")
+            .execute()
+            .data
+        )
+        if not winner:
+            return _latest_extension_poll(db, event_id, poll["round_id"]) or poll
+        active = _fetch_active_round(db, event_id)
+        new_duration = int(active["duration_seconds"]) + selected_seconds
+        db.table("rounds").update({"duration_seconds": new_duration}).eq("id", active["id"]).execute()
+        background_tasks.add_task(
+            record_audit,
+            db,
+            action="round.extension_poll_extended",
+            entity_type="round_extension_poll",
+            actor_user_id=actor_user_id,
+            event_id=event_id,
+            entity_id=poll["id"],
+            metadata={
+                "round_number": active["round_number"],
+                "eligible_count": eligible,
+                "yes_count": len(yes_votes),
+                "added_seconds": selected_seconds,
+            },
+        )
+        background_tasks.add_task(broadcast_event_changed, event_id, "extension_poll_extended")
+        return winner[0]
+
+    if len(votes) >= eligible:
+        rejected = (
+            db.table("round_extension_polls")
+            .update({"status": "rejected", "resolved_at": now})
+            .eq("id", poll["id"])
+            .eq("status", "active")
+            .execute()
+            .data
+        )
+        if rejected:
+            background_tasks.add_task(
+                record_audit,
+                db,
+                action="round.extension_poll_rejected",
+                entity_type="round_extension_poll",
+                actor_user_id=actor_user_id,
+                event_id=event_id,
+                entity_id=poll["id"],
+                metadata={"eligible_count": eligible, "yes_count": len(yes_votes)},
+            )
+            background_tasks.add_task(broadcast_event_changed, event_id, "extension_poll_rejected")
+            return rejected[0]
+    return poll
 
 
 def _fetch_draft(db: Client, event_id: str) -> dict | None:
@@ -743,6 +942,147 @@ def extend_round(
     return result.data[0]
 
 
+@router.post("/extension-polls", response_model=RoundExtensionPollResponse, status_code=201)
+def start_extension_poll(
+    event_id: str,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Ask checked-in attendees whether the current round should be extended.
+
+    The poll is intentionally fixed to 2/3/5 minutes. If 80% of the checked-in
+    voters at poll creation vote for any extension, the backend automatically
+    extends the round by the most-selected option. Only one successful poll can
+    extend a round.
+    """
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    active = _fetch_active_round(db, event_id)
+    if not active.get("started_at"):
+        raise HTTPException(status_code=409, detail="Start the round before polling for more time")
+
+    existing = _active_extension_poll(db, event_id, active["id"])
+    if existing:
+        response.status_code = 200
+        return _extension_poll_response(db, existing)
+
+    prior = (
+        db.table("round_extension_polls")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("round_id", active["id"])
+        .eq("status", "extended")
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if prior:
+        raise HTTPException(status_code=409, detail="This round has already been extended")
+
+    eligible_count = len(_eligible_extension_voters(db, event_id))
+    if eligible_count == 0:
+        raise HTTPException(status_code=409, detail="No checked-in attendees can vote")
+
+    poll = (
+        db.table("round_extension_polls")
+        .insert(
+            {
+                "event_id": event_id,
+                "round_id": active["id"],
+                "status": "active",
+                "eligible_count": eligible_count,
+                "threshold_percent": EXTENSION_POLL_THRESHOLD_PERCENT,
+                "selected_seconds": None,
+                "resolved_at": None,
+            }
+        )
+        .execute()
+        .data[0]
+    )
+    background_tasks.add_task(
+        record_audit,
+        db,
+        action="round.extension_poll_started",
+        entity_type="round_extension_poll",
+        actor_user_id=organizer_id,
+        event_id=event_id,
+        entity_id=poll["id"],
+        metadata={
+            "round_number": active["round_number"],
+            "eligible_count": eligible_count,
+            "threshold_percent": EXTENSION_POLL_THRESHOLD_PERCENT,
+        },
+    )
+    background_tasks.add_task(broadcast_event_changed, event_id, "extension_poll_started")
+    return _extension_poll_response(db, poll)
+
+
+@router.post("/extension-polls/{poll_id}/vote", response_model=RoundExtensionPollResponse)
+def vote_extension_poll(
+    event_id: str,
+    poll_id: str,
+    body: RoundExtensionVoteRequest,
+    background_tasks: BackgroundTasks,
+    user: AuthUser = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """Vote on the active extension poll. One vote per attendee, editable while open."""
+    attendee = _fetch_my_attendee(db, event_id, user.id)
+    if attendee["status"] != "arrived":
+        raise HTTPException(status_code=403, detail="Only checked-in attendees can vote")
+    active = _fetch_active_round(db, event_id)
+    polls = (
+        db.table("round_extension_polls")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("round_id", active["id"])
+        .eq("id", poll_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not polls:
+        raise HTTPException(status_code=404, detail="Poll not found")
+    poll = polls[0]
+    if poll["status"] != "active":
+        return _extension_poll_response(db, poll, attendee["id"])
+
+    existing = (
+        db.table("round_extension_votes")
+        .select("*")
+        .eq("poll_id", poll_id)
+        .eq("attendee_id", attendee["id"])
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    payload = {
+        "poll_id": poll_id,
+        "event_id": event_id,
+        "round_id": active["id"],
+        "attendee_id": attendee["id"],
+        "seconds": int(body.seconds),
+    }
+    if existing:
+        db.table("round_extension_votes").update(payload).eq("id", existing[0]["id"]).execute()
+    else:
+        db.table("round_extension_votes").insert(payload).execute()
+
+    poll = _resolve_extension_poll_if_ready(
+        db,
+        event_id,
+        poll,
+        background_tasks,
+        actor_user_id=user.id,
+    )
+    return _extension_poll_response(db, poll, attendee["id"])
+
+
 @router.post("/end", response_model=RoundResponse)
 def end_round(
     event_id: str,
@@ -979,6 +1319,7 @@ def get_current_round(event_id: str, db: Client = Depends(get_supabase)):
         .execute()
     )
     round_data["assignments"] = assignments.data or []
+    round_data["extension_poll"] = _latest_extension_poll_response(db, event_id, round_data["id"])
     return round_data
 
 

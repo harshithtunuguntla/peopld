@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { CalendarX2, Loader2, Sparkles, Heart, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star, MapPin } from "lucide-react";
+import { CalendarX2, Loader2, Sparkles, Heart, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star, MapPin, Clock3 } from "lucide-react";
 
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Wordmark } from "@/components/brand/wordmark";
@@ -17,7 +17,7 @@ import { COLORS } from "@/lib/design/colors";
 import { cn } from "@/lib/utils";
 import { apiFetch, ApiError } from "@/lib/api";
 import { CountdownPill, useCountdown } from "./countdown";
-import type { LiveState, Tablemate } from "@/lib/live/use-live-state";
+import type { LiveState, RoundExtensionPoll, Tablemate } from "@/lib/live/use-live-state";
 import { useEventBranding, type Sponsor } from "@/lib/live/use-branding";
 import { SponsorShowcase, EventLogo, WaitingStage } from "./sponsor-showcase";
 
@@ -661,7 +661,15 @@ export function BetweenRounds({ state, eventId }: { state: LiveState; eventId?: 
  * will never get one. For the late arrival, the dead wait becomes useful: a clear
  * "you're next", who's in the room, the directory to browse now, and sponsors.
  */
-export function NotSeated({ state, eventId }: { state: LiveState; eventId?: string }) {
+export function NotSeated({
+  state,
+  eventId,
+  onPollVoted,
+}: {
+  state: LiveState;
+  eventId?: string;
+  onPollVoted?: () => void;
+}) {
   const firstName = (state.attendee_name ?? "").trim().split(/\s+/)[0] || "there";
   const isGuest = state.attendee_tag === "speaker" || state.attendee_tag === "host";
   const branding = useEventBranding(eventId);
@@ -733,6 +741,10 @@ export function NotSeated({ state, eventId }: { state: LiveState; eventId?: stri
         </p>
       </div>
 
+      {eventId && state.extension_poll && (
+        <ExtensionPollCard poll={state.extension_poll} eventId={eventId} onVoted={onPollVoted ?? (() => {})} />
+      )}
+
       <RoomRoster roster={roster} />
       {eventId && <DirectoryLink eventId={eventId} />}
     </div>
@@ -750,6 +762,137 @@ export function EventEnded() {
         Back to home
       </Link>
     </StatusPanel>
+  );
+}
+
+function formatMinutes(seconds: number): string {
+  return `${Math.round(seconds / 60)} min`;
+}
+
+function ExtensionPollCard({
+  poll,
+  eventId,
+  onVoted,
+}: {
+  poll: RoundExtensionPoll;
+  eventId: string;
+  onVoted: () => void;
+}) {
+  const [pending, setPending] = useState<number | null>(null);
+  const threshold = Math.max(1, poll.threshold_count);
+  const progress = Math.min(100, Math.round((poll.yes_count / threshold) * 100));
+  const options = [120, 180, 300];
+
+  async function vote(seconds: number) {
+    if (pending !== null || poll.status !== "active") return;
+    setPending(seconds);
+    try {
+      await apiFetch(`/events/${eventId}/rounds/extension-polls/${poll.id}/vote`, {
+        method: "POST",
+        body: JSON.stringify({ seconds }),
+      });
+      onVoted();
+    } finally {
+      setPending(null);
+    }
+  }
+
+  if (poll.status === "extended") {
+    return (
+      <div className="rounded-2xl border border-success/30 bg-success/10 p-4">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-success/15 text-success">
+            <Check className="h-4 w-4" aria-hidden />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-foreground">
+              Round extended by {formatMinutes(poll.selected_seconds ?? 0)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {poll.yes_count} of {poll.eligible_count} checked-in people voted yes.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (poll.status === "rejected") {
+    return (
+      <div className="rounded-2xl border border-border bg-card/60 p-4">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <Clock3 className="h-4 w-4" aria-hidden />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-foreground">Poll closed, no extension</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              The room needed {poll.threshold_count} yes votes; {poll.yes_count} came in.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-accent/30 bg-accent/[0.06] p-4">
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent">
+          <Clock3 className="h-4 w-4" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-foreground">Need more time?</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Extends automatically at {poll.threshold_count} yes votes ({poll.threshold_percent}% of checked-in people).
+          </p>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${progress}%` }} />
+          </div>
+          <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>{poll.yes_count}/{poll.threshold_count} yes</span>
+            <span>{poll.votes_count}/{poll.eligible_count} voted</span>
+          </div>
+          <div className="mt-3 grid grid-cols-4 gap-2">
+            {options.map((seconds) => {
+              const selected = poll.my_vote_seconds === seconds;
+              return (
+                <button
+                  key={seconds}
+                  type="button"
+                  onClick={() => vote(seconds)}
+                  disabled={pending !== null}
+                  className={cn(
+                    "h-10 rounded-full border px-2 text-xs font-semibold transition-colors disabled:opacity-60",
+                    selected
+                      ? "border-accent bg-accent text-accent-foreground"
+                      : "border-border bg-background/40 text-foreground hover:bg-muted",
+                  )}
+                >
+                  {pending === seconds ? <Loader2 className="mx-auto h-4 w-4 animate-spin" aria-hidden /> : formatMinutes(seconds)}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => vote(0)}
+              disabled={pending !== null}
+              className={cn(
+                "h-10 rounded-full border px-2 text-xs font-semibold transition-colors disabled:opacity-60",
+                poll.my_vote_seconds === 0
+                  ? "border-muted bg-muted text-foreground"
+                  : "border-border bg-background/40 text-foreground hover:bg-muted",
+              )}
+            >
+              {pending === 0 ? <Loader2 className="mx-auto h-4 w-4 animate-spin" aria-hidden /> : "No"}
+            </button>
+          </div>
+          {poll.my_vote_seconds !== null && (
+            <p className="mt-2 text-[11px] text-muted-foreground">Your vote is in. You can change it while the poll is open.</p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -868,11 +1011,13 @@ export function RoundView({
   state,
   eventId,
   onExpire,
+  onPollVoted,
   refreshVersion = 0,
 }: {
   state: LiveState;
   eventId: string;
   onExpire: () => void;
+  onPollVoted: () => void;
   refreshVersion?: number;
 }) {
   const round = state.round!;
@@ -952,6 +1097,10 @@ export function RoundView({
             begins the moment the host starts it. Grab your seat and say hi while you wait.
           </p>
         </div>
+      )}
+
+      {state.extension_poll && (
+        <ExtensionPollCard poll={state.extension_poll} eventId={eventId} onVoted={onPollVoted} />
       )}
 
       {wantedHere.length > 0 && (

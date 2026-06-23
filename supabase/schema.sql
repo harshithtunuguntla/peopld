@@ -182,6 +182,34 @@ CREATE TABLE connection_bookmarks (
   UNIQUE (event_id, owner_attendee_id, target_attendee_id)
 );
 
+-- Current-round extension poll (migration 022): organizer asks checked-in
+-- attendees whether to extend by 2, 3, or 5 minutes. Backend aggregates votes
+-- and applies the 80% threshold exactly once; clients never read raw votes.
+CREATE TABLE round_extension_polls (
+  id                UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id          UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  round_id          UUID NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+  status            TEXT NOT NULL DEFAULT 'active'
+                      CHECK (status IN ('active', 'extended', 'rejected')),
+  eligible_count    INTEGER NOT NULL CHECK (eligible_count > 0),
+  threshold_percent INTEGER NOT NULL DEFAULT 80 CHECK (threshold_percent > 0 AND threshold_percent <= 100),
+  selected_seconds  INTEGER CHECK (selected_seconds IN (120, 180, 300)),
+  resolved_at       TIMESTAMPTZ,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE round_extension_votes (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  poll_id     UUID NOT NULL REFERENCES round_extension_polls(id) ON DELETE CASCADE,
+  event_id    UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  round_id    UUID NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+  attendee_id UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
+  seconds     INTEGER NOT NULL CHECK (seconds IN (0, 120, 180, 300)),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (poll_id, attendee_id)
+);
+
 -- Sponsors (migration 014): shown to attendees between rounds + in the lobby,
 -- rotating around the hourglass. Served by the backend (GET /events/:id/sponsors),
 -- not client reads — so RLS is on with NO policies (service-role only).
@@ -227,6 +255,8 @@ ALTER TABLE connection_likes ENABLE ROW LEVEL SECURITY;  -- no policies: service
 ALTER TABLE meeting_intents  ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE connection_notes ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE connection_bookmarks ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
+ALTER TABLE round_extension_polls ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
+ALTER TABLE round_extension_votes ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ALTER TABLE sponsors         ENABLE ROW LEVEL SECURITY;  -- no policies: served by the backend (service-role)
 ALTER TABLE audit_log        ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 
@@ -281,3 +311,7 @@ CREATE INDEX idx_table_assignments_attendee_id ON table_assignments(attendee_id)
 CREATE INDEX idx_icebreakers_round_recipient ON icebreakers(round_id, recipient_attendee_id);
 CREATE INDEX idx_table_assignments_round_table ON table_assignments(round_id, table_number);
 CREATE INDEX idx_audit_log_event_created ON audit_log(event_id, created_at);
+CREATE UNIQUE INDEX idx_round_extension_polls_one_active ON round_extension_polls(round_id) WHERE status = 'active';
+CREATE UNIQUE INDEX idx_round_extension_polls_one_success ON round_extension_polls(round_id) WHERE status = 'extended';
+CREATE INDEX idx_round_extension_polls_round ON round_extension_polls(round_id, created_at DESC);
+CREATE INDEX idx_round_extension_votes_poll ON round_extension_votes(poll_id);

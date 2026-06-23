@@ -161,10 +161,11 @@ function LiveInner({ eventId }: { eventId: string }) {
               state={state}
               eventId={eventId}
               onExpire={refetch}
+              onPollVoted={refetch}
               refreshVersion={manualRefreshVersion}
             />
           ) : (
-            <NotSeated state={state} eventId={eventId} />
+            <NotSeated state={state} eventId={eventId} onPollVoted={refetch} />
           )}
         </LiveShell>
       );

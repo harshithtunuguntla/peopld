@@ -361,11 +361,39 @@ class RoundResponse(BaseModel):
 class RoundWithAssignmentsResponse(RoundResponse):
     """Used by GET /rounds/current — organizer grid view needs all assignments in one call."""
     assignments: list[TableAssignmentResponse] = []
+    extension_poll: Optional["RoundExtensionPollResponse"] = None
 
 
 class RoundExtendRequest(BaseModel):
     """Add time to the running round (the organizer's "+ Add time" control)."""
     seconds: int = Field(gt=0, le=3600)  # 1s–1h; the UI offers +1/+2/+5 min and a custom field
+
+
+class RoundExtensionVoteRequest(BaseModel):
+    """Attendee vote on the current-round extension poll.
+
+    0 = no extension. Positive options are intentionally fixed to the product
+    rule: 2, 3, or 5 minutes.
+    """
+    seconds: Literal[0, 120, 180, 300]
+
+
+class RoundExtensionPollResponse(BaseModel):
+    id: UUID
+    event_id: UUID
+    round_id: UUID
+    status: Literal["active", "extended", "rejected"]
+    eligible_count: int
+    threshold_percent: int = 80
+    threshold_count: int
+    votes_count: int = 0
+    yes_count: int = 0
+    no_count: int = 0
+    vote_counts: dict[int, int] = Field(default_factory=dict)
+    selected_seconds: Optional[int] = None
+    my_vote_seconds: Optional[int] = None
+    created_at: datetime
+    resolved_at: Optional[datetime] = None
 
 
 class RoundMoveRequest(BaseModel):
@@ -527,6 +555,7 @@ class LiveStateResponse(BaseModel):
     icebreaker: Optional[LiveIcebreaker] = None
     recent_seat: Optional[LiveSeat] = None  # between rounds: the table you JUST left, so you can still ❤️/note the people you met before the next round
     recent_round_number: Optional[int] = None  # which round recent_seat is from
+    extension_poll: Optional[RoundExtensionPollResponse] = None
 
 
 # --- Icebreaker ---

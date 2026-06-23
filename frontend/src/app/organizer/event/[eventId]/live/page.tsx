@@ -309,7 +309,7 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
             busy={busy}
             autoAdvance={event?.auto_advance ?? true}
             onBegin={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/begin`, { method: "POST" }); })}
-            onExtend={(seconds) => act(async () => { await apiFetch(`/events/${eventId}/rounds/extend`, { method: "POST", body: JSON.stringify({ seconds }) }); })}
+            onStartExtensionPoll={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/extension-polls`, { method: "POST" }); })}
             onEnd={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/end`, { method: "POST" }); })}
             onCancel={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/cancel`, { method: "POST" }); })}
             onPause={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/pause`, { method: "POST" }); })}

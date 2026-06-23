@@ -53,6 +53,24 @@ export interface ActiveAssignment {
   table_number: number;
 }
 
+export interface RoundExtensionPoll {
+  id: string;
+  event_id: string;
+  round_id: string;
+  status: "active" | "extended" | "rejected";
+  eligible_count: number;
+  threshold_percent: number;
+  threshold_count: number;
+  votes_count: number;
+  yes_count: number;
+  no_count: number;
+  vote_counts: Record<string, number>;
+  selected_seconds: number | null;
+  my_vote_seconds: number | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
 export interface ActiveRound {
   id: string;
   round_number: number;
@@ -62,6 +80,7 @@ export interface ActiveRound {
   paused_at: string | null;
   total_paused_seconds: number;
   assignments: ActiveAssignment[];
+  extension_poll: RoundExtensionPoll | null;
 }
 
 export interface LiveStats {

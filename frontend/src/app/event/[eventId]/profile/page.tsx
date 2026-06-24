@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
 import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
 import { LinkedInGlyph } from "@/components/brand/glyphs";
+import { normalizeUrl } from "@/lib/url";
 
 interface Me {
   id: string;
@@ -130,22 +131,21 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
     setSaved(false);
   };
 
-  function isUrl(v: string) {
-    return /^https?:\/\/.+/i.test(v.trim());
-  }
-
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim() || !form.role.trim()) {
       setError("Name and role can't be empty.");
       return;
     }
-    if (form.linkedin_url.trim() && !isUrl(form.linkedin_url)) {
-      setError("Include the full LinkedIn link (starting with https://).");
+    // Accept a bare domain or an http/https link — normalise to a canonical URL.
+    const linkedin = normalizeUrl(form.linkedin_url);
+    const website = normalizeUrl(form.website_url);
+    if (form.linkedin_url.trim() && !linkedin) {
+      setError("That LinkedIn link doesn't look right. Try linkedin.com/in/you");
       return;
     }
-    if (form.website_url.trim() && !isUrl(form.website_url)) {
-      setError("Include the full website link (starting with https://).");
+    if (form.website_url.trim() && !website) {
+      setError("That website link doesn't look right. Try yourproduct.com");
       return;
     }
     setBusy(true);
@@ -159,8 +159,8 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
           company: form.company.trim() || null,
           description: form.description.trim() || null,
           looking_for: form.looking_for.trim() || null,
-          linkedin_url: form.linkedin_url.trim() || null,
-          website_url: form.website_url.trim() || null,
+          linkedin_url: linkedin,
+          website_url: website,
           interests: form.interests,
         }),
       });

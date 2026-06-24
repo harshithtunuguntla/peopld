@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
 import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
 import { LinkedInGlyph } from "@/components/brand/glyphs";
+import { isAcceptableUrl, normalizeUrl } from "@/lib/url";
 
 export interface RegisterValues {
   name: string;
@@ -62,19 +63,16 @@ export function RegisterForm({ onSubmit, busy, error, defaultValues, defaultName
     if (errors[key]) setErrors((prev) => ({ ...prev, [key]: undefined }));
   };
 
-  function isUrl(v: string) {
-    return /^https?:\/\/.+/i.test(v.trim());
-  }
-
   function validate(v: RegisterValues): Errors {
     const next: Errors = {};
     if (!v.name.trim()) next.name = "Tell us your name so tablemates know who you are.";
     if (!v.role.trim()) next.role = "A quick role helps people break the ice.";
-    if (v.linkedin_url.trim() && !isUrl(v.linkedin_url)) {
-      next.linkedin_url = "Include the full link (starting with https://).";
+    // A bare domain ("linkedin.com/in/you") or an http/https link is fine.
+    if (!isAcceptableUrl(v.linkedin_url)) {
+      next.linkedin_url = "That doesn't look like a link. Try linkedin.com/in/you";
     }
-    if (v.website_url.trim() && !isUrl(v.website_url)) {
-      next.website_url = "Include the full link (starting with https://).";
+    if (!isAcceptableUrl(v.website_url)) {
+      next.website_url = "That doesn't look like a link. Try yourproduct.com";
     }
     return next;
   }
@@ -95,8 +93,8 @@ export function RegisterForm({ onSubmit, busy, error, defaultValues, defaultName
       company: values.company.trim(),
       description: values.description.trim(),
       looking_for: values.looking_for.trim(),
-      linkedin_url: values.linkedin_url.trim(),
-      website_url: values.website_url.trim(),
+      linkedin_url: normalizeUrl(values.linkedin_url) ?? "",
+      website_url: normalizeUrl(values.website_url) ?? "",
       interests: values.interests,
     });
   }

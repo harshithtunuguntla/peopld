@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Heart, Globe, Linkedin, StickyNote, Loader2, Check, CalendarDays, Bookmark, UserCheck, Users } from "lucide-react";
+import { Heart, Globe, Linkedin, StickyNote, Loader2, Check, CalendarDays, Bookmark, UserCheck, Users, Sparkles } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
 import { Avatar } from "@/components/brand/avatar";
@@ -145,12 +145,21 @@ export function PersonCard({
   }
 
   return (
-    <li className={cn("rounded-2xl border p-4 transition-[box-shadow,border-color] duration-200 hover:shadow-md", person.mutual ? "border-accent/40 bg-accent/[0.07]" : "border-border bg-card/50 hover:border-foreground/15")}>
+    <li
+      className={cn(
+        "relative overflow-hidden rounded-2xl border p-4 transition-[box-shadow,border-color,transform] duration-200 hover:-translate-y-0.5 hover:shadow-md",
+        person.mutual
+          ? "border-accent/45 bg-gradient-to-br from-accent/[0.10] via-card/40 to-card/40 ring-1 ring-inset ring-accent/15"
+          : "border-border bg-card/50 hover:border-foreground/15",
+      )}
+    >
       <div className="flex items-start gap-3">
-        <Avatar name={person.name} seed={person.attendee_id} src={person.avatar_url} size={44} />
+        <span className={cn("shrink-0 rounded-full", person.mutual && "ring-2 ring-accent/40")}>
+          <Avatar name={person.name} seed={person.attendee_id} src={person.avatar_url} size={48} />
+        </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <p className="truncate font-medium text-foreground">{person.name}</p>
+            <p className="truncate font-semibold text-foreground">{person.name}</p>
             {person.mutual ? (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent">
                 <Heart className="h-2.5 w-2.5 fill-current" aria-hidden /> Match
@@ -165,24 +174,22 @@ export function PersonCard({
             )}
           </div>
           <p className="truncate text-sm text-muted-foreground">{roleLine}</p>
-          {person.met ? (
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Met in {rounds.length > 1 ? "rounds" : "round"} {rounds.join(", ")}
-            </p>
-          ) : person.wanted ? (
-            <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-accent">
-              <UserCheck className="h-3 w-3" aria-hidden /> You wanted to meet
-            </p>
-          ) : (
-            <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
-              <Users className="h-3 w-3" aria-hidden /> In the room together
-            </p>
-          )}
-          {person.eventLabel && (
-            <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
-              <CalendarDays className="h-3 w-3" aria-hidden /> {person.eventLabel}
-            </p>
-          )}
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {person.met ? (
+              <MetaChip icon={<Sparkles className="h-3 w-3" aria-hidden />}>
+                Met in {rounds.length > 1 ? "rounds" : "round"} {rounds.join(", ")}
+              </MetaChip>
+            ) : person.wanted ? (
+              <MetaChip icon={<UserCheck className="h-3 w-3" aria-hidden />} accent>
+                You wanted to meet
+              </MetaChip>
+            ) : (
+              <MetaChip icon={<Users className="h-3 w-3" aria-hidden />}>In the room together</MetaChip>
+            )}
+            {person.eventLabel && (
+              <MetaChip icon={<CalendarDays className="h-3 w-3" aria-hidden />}>{person.eventLabel}</MetaChip>
+            )}
+          </div>
         </div>
         <button
           type="button"
@@ -247,6 +254,21 @@ export function PersonCard({
 
       <NoteEditor eventId={eventId} targetId={person.attendee_id} initial={person.note} />
     </li>
+  );
+}
+
+/** A small pill for the card's meta row (how you met, which event). */
+function MetaChip({ icon, children, accent }: { icon: React.ReactNode; children: React.ReactNode; accent?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] leading-none",
+        accent ? "border-accent/30 bg-accent/10 text-accent" : "border-border/70 bg-secondary/40 text-muted-foreground",
+      )}
+    >
+      {icon}
+      {children}
+    </span>
   );
 }
 

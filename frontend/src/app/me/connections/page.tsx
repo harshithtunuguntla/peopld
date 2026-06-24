@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
-import { Loader2, ChevronLeft, Users, CalendarDays, Heart, Search, Bookmark } from "lucide-react";
+import { Loader2, ChevronLeft, Users, CalendarDays, Heart, Search, Bookmark, UserCheck } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
@@ -12,7 +12,10 @@ import { AccountMenu } from "@/components/attendee/account-menu";
 import { Wordmark } from "@/components/brand/wordmark";
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { PersonCard, type Person, type Connection } from "@/components/connections/person-card";
+import { SelectMenu } from "@/components/ui/select-menu";
 import { cn } from "@/lib/utils";
+
+type RelFilter = "all" | "met" | "matches" | "liked" | "saved";
 
 interface MyConnection extends Connection {
   event_id: string;
@@ -134,11 +137,11 @@ export default function MyConnectionsPage() {
   const profileEventId = data?.connections[0]?.event_id ?? null;
 
   // Filters: search by name/role/company, narrow to one event, and a relationship
-  // tab (everyone / people you actually met / saved). These were the gaps reported
+  // tab (everyone / met / matches / liked / saved). These were the gaps reported
   // after the pilot, when the rolodex was a long undifferentiated list.
   const [query, setQuery] = useState("");
   const [eventFilter, setEventFilter] = useState<string>("all");
-  const [relFilter, setRelFilter] = useState<"all" | "met" | "saved">("all");
+  const [relFilter, setRelFilter] = useState<RelFilter>("all");
 
   // The events represented in the rolodex, newest first — drives the event filter.
   const eventOptions = useMemo(() => {
@@ -149,11 +152,26 @@ export default function MyConnectionsPage() {
     return [...seen.values()].sort((a, b) => b.date.localeCompare(a.date));
   }, [cards]);
 
+  // Per-relationship counts drive which filter chips show (a chip with 0 results
+  // is a dead end, so we only render the ones that match someone).
+  const relCounts = useMemo(
+    () => ({
+      all: cards.length,
+      met: cards.filter((c) => c.person.met).length,
+      matches: cards.filter((c) => c.person.mutual).length,
+      liked: cards.filter((c) => c.person.liked).length,
+      saved: cards.filter((c) => c.person.saved).length,
+    }),
+    [cards],
+  );
+
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return cards.filter((c) => {
       if (eventFilter !== "all" && c.eventId !== eventFilter) return false;
       if (relFilter === "met" && !c.person.met) return false;
+      if (relFilter === "matches" && !c.person.mutual) return false;
+      if (relFilter === "liked" && !c.person.liked) return false;
       if (relFilter === "saved" && !c.person.saved) return false;
       if (!needle) return true;
       const hay = `${c.person.name} ${c.person.role} ${c.person.company ?? ""}`.toLowerCase();
@@ -235,22 +253,18 @@ export default function MyConnectionsPage() {
                       className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
                     />
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <RelTabs filter={relFilter} onChange={setRelFilter} savedCount={cards.filter((c) => c.person.saved).length} />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <RelTabs filter={relFilter} onChange={setRelFilter} counts={relCounts} />
                     {eventOptions.length > 1 && (
-                      <select
+                      <SelectMenu
                         value={eventFilter}
-                        onChange={(e) => setEventFilter(e.target.value)}
-                        aria-label="Filter by event"
-                        className="h-9 rounded-full border border-border bg-card px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <option value="all">All events</option>
-                        {eventOptions.map((ev) => (
-                          <option key={ev.id} value={ev.id}>
-                            {ev.name}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={setEventFilter}
+                        ariaLabel="Filter by event"
+                        options={[
+                          { value: "all", label: "All events" },
+                          ...eventOptions.map((ev) => ({ value: ev.id, label: ev.name })),
+                        ]}
+                      />
                     )}
                   </div>
                 </div>
@@ -277,40 +291,56 @@ export default function MyConnectionsPage() {
   );
 }
 
-/** Everyone / Met / Saved segmented filter for the cross-event rolodex. */
+/** Everyone / Met / Matches / Liked / Saved chip filter for the cross-event
+ *  rolodex. A chip only shows when it would match someone (no dead filters). */
 function RelTabs({
   filter,
   onChange,
-  savedCount,
+  counts,
 }: {
-  filter: "all" | "met" | "saved";
-  onChange: (f: "all" | "met" | "saved") => void;
-  savedCount: number;
+  filter: RelFilter;
+  onChange: (f: RelFilter) => void;
+  counts: Record<RelFilter, number>;
 }) {
-  const tab = (key: "all" | "met" | "saved", label: React.ReactNode) => (
-    <button
-      type="button"
-      onClick={() => onChange(key)}
-      aria-pressed={filter === key}
-      className={cn(
-        "inline-flex h-9 items-center justify-center gap-1.5 rounded-full px-4 text-sm font-medium transition-colors",
-        filter === key ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
-  );
+  const items: { key: RelFilter; label: string; icon: React.ReactNode }[] = [
+    { key: "all", label: "Everyone", icon: <Users className="h-3.5 w-3.5" aria-hidden /> },
+    { key: "met", label: "Met", icon: <UserCheck className="h-3.5 w-3.5" aria-hidden /> },
+    { key: "matches", label: "Matches", icon: <Heart className="h-3.5 w-3.5 fill-current" aria-hidden /> },
+    { key: "liked", label: "Liked", icon: <Heart className="h-3.5 w-3.5" aria-hidden /> },
+    { key: "saved", label: "Saved", icon: <Bookmark className="h-3.5 w-3.5" aria-hidden /> },
+  ];
   return (
-    <div className="inline-flex items-center rounded-full border border-border bg-secondary p-1">
-      {tab("all", "Everyone")}
-      {tab("met", "Met")}
-      {tab(
-        "saved",
-        <>
-          <Bookmark className={cn("h-3.5 w-3.5", filter === "saved" && "fill-current")} aria-hidden />
-          Saved{savedCount > 0 ? ` · ${savedCount}` : ""}
-        </>,
-      )}
+    <div className="flex flex-wrap items-center gap-2">
+      {items
+        .filter((it) => it.key === "all" || counts[it.key] > 0)
+        .map((it) => {
+          const active = filter === it.key;
+          return (
+            <button
+              key={it.key}
+              type="button"
+              onClick={() => onChange(it.key)}
+              aria-pressed={active}
+              className={cn(
+                "inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium transition-colors",
+                active
+                  ? "border-accent bg-accent text-accent-foreground"
+                  : "border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground",
+              )}
+            >
+              {it.icon}
+              {it.label}
+              <span
+                className={cn(
+                  "rounded-full px-1.5 text-[11px] tabular-nums",
+                  active ? "bg-accent-foreground/20 text-accent-foreground" : "bg-muted text-muted-foreground",
+                )}
+              >
+                {counts[it.key]}
+              </span>
+            </button>
+          );
+        })}
     </div>
   );
 }

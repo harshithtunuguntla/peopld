@@ -59,6 +59,10 @@ function ctaFor(event: EventCardData, phase: Phase): string {
   if (phase === "ended") return event.registered ? "View wrap" : "View";
   return event.registered ? "Enter" : "Join";
 }
+/** "going" reads wrong once an event is over — past events say "attended". */
+function attendLabel(phase: Phase): string {
+  return phase === "ended" ? "attended" : "going";
+}
 
 /** Band background: a solid fallback color + a soft two-stop gradient of the
  * event's own hue (calmer than a flat fill, same identity as the organizer card).
@@ -179,7 +183,7 @@ export function EventCard({
           <div className="mt-4 flex items-center justify-between">
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Users className="h-3.5 w-3.5" aria-hidden />
-              <span className="font-semibold text-foreground">{event.attendee_count}</span> going
+              <span className="font-semibold text-foreground">{event.attendee_count}</span> {attendLabel(phase)}
             </span>
             <span className="inline-flex items-center gap-1 text-sm font-semibold text-accent transition-transform group-hover:translate-x-0.5">
               {cta} <ArrowRight className="h-4 w-4" aria-hidden />
@@ -292,7 +296,7 @@ export function FeaturedEventCard({
             <div className="flex items-center justify-between gap-3">
               <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
                 <Users className="h-4 w-4" aria-hidden />
-                <span className="font-semibold text-foreground">{event.attendee_count}</span> going
+                <span className="font-semibold text-foreground">{event.attendee_count}</span> {attendLabel(phase)}
               </span>
               <span className="inline-flex h-11 items-center gap-2 rounded-full bg-accent px-6 text-sm font-semibold text-accent-foreground shadow-sm transition-transform duration-200 group-hover:-translate-y-0.5">
                 {cta}

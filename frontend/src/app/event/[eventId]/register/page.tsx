@@ -191,7 +191,9 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
   const shellProps = {
     eventName: event?.name,
     eventMeta,
-    attendeeCount,
+    // "N already inside" is social proof for joining — it's misleading next to an
+    // "event has ended / registration closed" panel, so hide it once the event is over.
+    attendeeCount: event?.status === "ended" ? undefined : attendeeCount,
   };
 
   // --- Render: one shell, swap the inner panel by state ---

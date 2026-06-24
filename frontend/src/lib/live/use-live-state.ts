@@ -75,18 +75,42 @@ export interface UseLiveState {
   refetch: () => void;
 }
 
-// Adaptive polling driven by realtime CONNECTION HEALTH, not a fixed clock.
-// When the realtime doorbell is alive it does the work, so we only poll on a
-// lazy backstop heartbeat (fewer calls than the old blind 20s poll). When the
-// socket is down — blocked, dropped, backgrounded — *this client* polls fast
-// until it recovers, and refetches immediately on reconnect (realtime is
-// best-effort and never replays missed events). So we spend API calls only on
-// the phones that are actually struggling, and converge in ~5s instead of 20s.
-const HEARTBEAT_MS = 45_000; // realtime healthy → backstop only
-const RECOVERY_MS = 5_000; // realtime down → fast catch-up (this client only)
+// Polling is a thin per-phase BACKSTOP, not the main delivery mechanism. The
+// primary fix for the live-pilot "a publish didn't reach some phones" is on the
+// backend: every change is broadcast several times on a spaced schedule
+// (app/realtime.py), so a single dropped message almost always self-corrects via
+// a repeat — no polling needed. Polling here only covers the residual case where
+// even the repeats miss a phone, and it's targeted so we don't tax phones that
+// can't be stale:
+//   - socket DOWN                         → fast catch-up (this client only)
+//   - WAITING for a change (lobby / between rounds / late-arrival / published-but-
+//     not-started) → tighter backstop: these are the ONLY phones a dropped
+//     publish/begin can strand.
+//   - mid a RUNNING round                 → light: the snapshot already has the
+//     table + icebreaker, and the countdown ticks LOCALLY off an absolute end
+//     time, so there's almost nothing to re-pull (this just backstops a missed
+//     pause/resume/extend; a missed end self-heals when the local timer hits 0).
+//   - event ENDED                         → lazy.
+const RECOVERY_MS = 5_000; // realtime socket down → fast catch-up
+const WAITING_MS = 12_000; // socket up, waiting for the next change
+const RUNNING_MS = 30_000; // socket up, mid running round (countdown is local)
+const ENDED_MS = 45_000; // event over → lazy
 // On publish, table_assignments fires one INSERT per attendee (40 people → 40
 // pings). Coalesce that burst into ONE /live fetch instead of dozens.
 const DEBOUNCE_MS = 250;
+
+/** The backstop poll cadence for the current connection health + event phase.
+ *  See the constants above for the reasoning behind each tier. */
+function pollIntervalFor(state: LiveState | null, realtimeUp: boolean): number {
+  if (!realtimeUp) return RECOVERY_MS; // socket down → fast catch-up regardless of phase
+  if (!state) return WAITING_MS; // loading into the live page → treat as waiting
+  if (state.phase === "ended" || state.event_status === "ended") return ENDED_MS;
+  // Mid a RUNNING round (seated AND the clock has started): everything's local.
+  if (state.phase === "in_round" && state.seated && state.round?.started_at) return RUNNING_MS;
+  // Lobby / between rounds / late-arrival not-yet-seated / published-but-not-started
+  // — the phones a dropped publish/begin would strand. Keep a tighter backstop.
+  return WAITING_MS;
+}
 
 const cacheKey = (eventId: string) => `live:${eventId}`;
 
@@ -223,13 +247,14 @@ export function useLiveState(eventId: string): UseLiveState {
     };
   }, [eventId, refetch, ping]);
 
-  // Adaptive fallback poll: lazy when the doorbell is healthy, fast while it's
-  // down. Re-arms whenever health flips. This is the ONLY place the poll cadence
-  // is decided, so call volume always matches the actual connection state.
+  // Backstop poll — a thin safety net behind the backend's repeated broadcasts.
+  // Cadence is per phase + connection health (see pollIntervalFor); re-arms
+  // whenever the tier changes.
+  const pollMs = pollIntervalFor(state, realtimeUp);
   useEffect(() => {
-    const id = setInterval(refetch, realtimeUp ? HEARTBEAT_MS : RECOVERY_MS);
+    const id = setInterval(refetch, pollMs);
     return () => clearInterval(id);
-  }, [realtimeUp, refetch]);
+  }, [pollMs, refetch]);
 
   return { state, loading, error, notRegistered, refetch };
 }

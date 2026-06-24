@@ -14,6 +14,8 @@ import {
   Users,
   AlertTriangle,
   CheckCircle2,
+  Check,
+  Megaphone,
   MapPin,
   Clock,
   Plus,
@@ -42,6 +44,46 @@ const EventRecapSummary = dynamic(() => import("./recap").then((m) => m.EventRec
   loading: () => <div className="h-40 skeleton rounded-2xl border border-border" />,
 });
 
+/**
+ * "Re-sync room" — the manual backup that re-pushes the current round + seating to
+ * every phone. It lives right next to Publish / Start / Pause (not in the page
+ * header) because it belongs to the same "drive the round" job: if anyone says
+ * their screen is stuck, the host reaches for it here.
+ *
+ * Honest framing in the helper text: this is a doorbell re-ring, not the real
+ * safety net. The real guarantee is that every phone re-fetches itself every few
+ * seconds while the event is live (use-live-state.ts), so a stuck screen recovers
+ * on its own within seconds even if this button — or all of realtime — fails.
+ */
+function ResyncButton({
+  onResync,
+  resynced,
+  busy,
+}: {
+  onResync: () => void;
+  resynced: boolean;
+  busy?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-card/50 p-3.5">
+      <Button
+        variant={resynced ? "outline" : "accent"}
+        size="lg"
+        onClick={onResync}
+        disabled={busy}
+        className="w-full gap-2"
+      >
+        {resynced ? <Check className="h-4 w-4 text-emerald-500" aria-hidden /> : <Megaphone className="h-4 w-4" aria-hidden />}
+        {resynced ? "Synced — phones pulled fresh" : "Re-sync room"}
+      </Button>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Re-pushes the current round &amp; seating to every phone. Use it if someone says their screen is stuck —
+        phones also refresh themselves automatically every few seconds.
+      </p>
+    </div>
+  );
+}
+
 // --- Phase: idle (no round running, no draft) — also the BETWEEN-ROUNDS state ---
 export function IdleView({
   arrivedCount,
@@ -51,6 +93,8 @@ export function IdleView({
   busy,
   onStart,
   onEndEvent,
+  onResync,
+  resynced,
 }: {
   arrivedCount: number;
   roundsCompleted: number;
@@ -59,6 +103,8 @@ export function IdleView({
   busy: boolean;
   onStart: () => void;
   onEndEvent: () => void;
+  onResync: () => void;
+  resynced: boolean;
 }) {
   const tooFew = arrivedCount < 3;
   // Between rounds, name what just finished and what's next so the host isn't
@@ -141,6 +187,10 @@ export function IdleView({
         )}
       </div>
 
+      {/* Between rounds people are waiting on the "round complete" screen — keep the
+          re-sync within reach in case anyone's phone is stuck on the old round. */}
+      {between && <div className="mt-4"><ResyncButton onResync={onResync} resynced={resynced} busy={busy} /></div>}
+
       {/* Mid-event, ending is always available as a quiet danger-zone action.
           Once all planned rounds are done it's promoted into the hero above, so
           we drop the duplicate here. */}
@@ -172,6 +222,8 @@ export function DraftView({
   onRegenerate,
   onMove,
   onAddTable,
+  onResync,
+  resynced,
 }: {
   draft: RoundDraft;
   byId: Map<string, Attendee>;
@@ -180,6 +232,8 @@ export function DraftView({
   onRegenerate: () => void;
   onMove: (attendeeId: string, tableNumber: number) => void;
   onAddTable: () => void;
+  onResync: () => void;
+  resynced: boolean;
 }) {
   const tables = groupByTable(draft.assignments, byId);
   const theme = roundFor(draft.round_number - 1);
@@ -275,6 +329,7 @@ export function DraftView({
           <Button variant="outline" size="lg" onClick={onRegenerate} disabled={busy} className="w-full gap-2">
             <RefreshCw className="h-4 w-4" aria-hidden /> Reshuffle seating
           </Button>
+          <ResyncButton onResync={onResync} resynced={resynced} busy={busy} />
         </div>
       </div>
 
@@ -362,6 +417,8 @@ export function ActiveView({
   onCancel,
   onPause,
   onResume,
+  onResync,
+  resynced,
 }: {
   round: ActiveRound;
   byId: Map<string, Attendee>;
@@ -373,6 +430,8 @@ export function ActiveView({
   onCancel: () => void;
   onPause: () => void;
   onResume: () => void;
+  onResync: () => void;
+  resynced: boolean;
 }) {
   const tables = groupByTable(round.assignments, byId);
   const theme = roundFor(round.round_number - 1);
@@ -502,6 +561,9 @@ export function ActiveView({
         <Guests byId={byId} />
 
         <div className="flex flex-col gap-3">
+          {/* The backup that matters most the instant after Start: if any phone
+              didn't pick up the new round, re-push to the whole room from here. */}
+          <ResyncButton onResync={onResync} resynced={resynced} busy={busy} />
           {started && (
             <>
               <Button variant="accent" size="lg" onClick={onEnd} disabled={busy} className="w-full">

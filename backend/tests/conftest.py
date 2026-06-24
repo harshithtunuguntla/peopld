@@ -62,6 +62,11 @@ def realtime_post(monkeypatch):
         return SimpleNamespace(status_code=200)
 
     monkeypatch.setattr("app.realtime.httpx.post", fake_post)
+    # Default OFF for the spaced repeats so each event fires exactly one (immediate)
+    # send in tests — deterministic, and no daemon thread can outlive a test and
+    # leak its delayed send into the next one. The dedicated repeat test re-enables
+    # them with tiny offsets.
+    monkeypatch.setattr("app.realtime.REPEAT_OFFSETS_SECONDS", ())
     return calls
 
 

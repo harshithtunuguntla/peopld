@@ -59,6 +59,22 @@ def test_live_not_started(client, db, event):
     assert body["server_time"] is not None  # clock-skew anchor always present
 
 
+def test_roster_counts_only_checked_in_not_registered(client, db, event):
+    """"N in the room" must be people who CHECKED IN (arrived), not everyone who
+    registered — the post-pilot fix. Registered-but-not-arrived people aren't here
+    yet and must not inflate the count."""
+    _me(db, event["id"], status="arrived")
+    make_attendee(db, event["id"], name="Here", status="arrived")
+    # Two registered no-shows that must NOT be counted as "in the room".
+    make_attendee(db, event["id"], name="NoShow1", status="registered")
+    make_attendee(db, event["id"], name="NoShow2", status="registered")
+
+    body = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH).json()
+    assert body["roster"]["count"] == 2  # me + Here, not the 2 registered no-shows
+    names = {p["name"] for p in body["roster"]["preview"]}
+    assert "NoShow1" not in names and "NoShow2" not in names
+
+
 def test_live_in_round_seated_with_tablemates(client, db, event):
     me = _me(db, event["id"])
     mate1 = make_attendee(db, event["id"], name="Bobby", status="arrived")

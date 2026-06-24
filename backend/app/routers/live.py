@@ -148,12 +148,16 @@ def _build_recent_seat(db: Client, event_id: str, attendee: dict, round_id: str)
 
 
 def _build_roster(rows: list[dict]) -> WaitingRoster:
-    """WaitingRoster from a list of attendee rows (already filtered to non-left)."""
+    """WaitingRoster from attendee rows — "who's in the room" = people who have
+    actually CHECKED IN (status 'arrived'), not everyone registered. A registered
+    attendee who hasn't entered the room code isn't physically here, so they must
+    not inflate the count (the count is the headline "N in the room")."""
+    arrived = [r for r in rows if r.get("status") == "arrived"]
     preview = [
         RosterPerson(attendee_id=r["id"], name=r["name"], avatar_url=r.get("avatar_url"))
-        for r in rows[:ROSTER_PREVIEW_LIMIT]
+        for r in arrived[:ROSTER_PREVIEW_LIMIT]
     ]
-    return WaitingRoster(count=len(rows), preview=preview)
+    return WaitingRoster(count=len(arrived), preview=preview)
 
 
 @router.get("", response_model=LiveStateResponse)

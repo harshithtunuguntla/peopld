@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Heart, Globe, Linkedin, StickyNote, Loader2, Check, CalendarDays, Bookmark } from "lucide-react";
+import { Heart, Globe, Linkedin, StickyNote, Loader2, Check, CalendarDays, Bookmark, UserCheck, Users } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
 import { Avatar } from "@/components/brand/avatar";
@@ -22,6 +22,9 @@ export interface Connection {
   note: string | null;
   round_number: number;
   table_number: number;
+  met?: boolean;       // we actually shared a table (default true for older payloads)
+  wanted?: boolean;    // I picked them pre-event ("want to meet")
+  wants_me?: boolean;  // they picked me
   liked: boolean;
   mutual: boolean;
   saved: boolean;
@@ -41,6 +44,9 @@ export interface Person {
   shared_interests: string[];
   note: string | null;
   rounds: number[];
+  met: boolean;
+  wanted: boolean;
+  wants_me: boolean;
   liked: boolean;
   mutual: boolean;
   saved: boolean;
@@ -52,9 +58,15 @@ export interface Person {
 export function groupByPerson(rows: Connection[]): Person[] {
   const map = new Map<string, Person>();
   for (const c of rows) {
+    const met = c.met ?? true;
     const p = map.get(c.attendee_id);
     if (p) {
-      if (!p.rounds.includes(c.round_number)) p.rounds.push(c.round_number);
+      // Only real shared rounds count toward the "met in round" list (a pick /
+      // co-attendee row carries round 0 and must not show up as "round 0").
+      if (met && !p.rounds.includes(c.round_number)) p.rounds.push(c.round_number);
+      p.met = p.met || met;
+      p.wanted = p.wanted || Boolean(c.wanted);
+      p.wants_me = p.wants_me || Boolean(c.wants_me);
       p.liked = p.liked || c.liked;
       p.mutual = p.mutual || c.mutual;
       p.saved = p.saved || c.saved;
@@ -71,15 +83,22 @@ export function groupByPerson(rows: Connection[]): Person[] {
         interests: c.interests ?? [],
         shared_interests: c.shared_interests ?? [],
         note: c.note,
-        rounds: [c.round_number],
+        rounds: met ? [c.round_number] : [],
+        met,
+        wanted: Boolean(c.wanted),
+        wants_me: Boolean(c.wants_me),
         liked: c.liked,
         mutual: c.mutual,
         saved: c.saved,
       });
     }
   }
+  // Matches first, then people you met, then everyone else; alpha within each tier.
   return [...map.values()].sort(
-    (a, b) => Number(b.mutual) - Number(a.mutual) || a.name.localeCompare(b.name),
+    (a, b) =>
+      Number(b.mutual) - Number(a.mutual) ||
+      Number(b.met) - Number(a.met) ||
+      a.name.localeCompare(b.name),
   );
 }
 
@@ -130,7 +149,7 @@ export function PersonCard({
       <div className="flex items-start gap-3">
         <Avatar name={person.name} seed={person.attendee_id} src={person.avatar_url} size={44} />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <p className="truncate font-medium text-foreground">{person.name}</p>
             {person.mutual ? (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent">
@@ -139,15 +158,29 @@ export function PersonCard({
             ) : person.liked ? (
               <Heart className="h-3.5 w-3.5 shrink-0 fill-accent text-accent" aria-label="You liked them" />
             ) : null}
+            {person.wanted && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent">
+                <UserCheck className="h-2.5 w-2.5" aria-hidden /> {person.wants_me && !person.mutual ? "Both keen" : "You picked"}
+              </span>
+            )}
           </div>
           <p className="truncate text-sm text-muted-foreground">{roleLine}</p>
-          {person.eventLabel ? (
-            <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
-              <CalendarDays className="h-3 w-3" aria-hidden /> {person.eventLabel}
-            </p>
-          ) : (
+          {person.met ? (
             <p className="mt-0.5 text-xs text-muted-foreground">
               Met in {rounds.length > 1 ? "rounds" : "round"} {rounds.join(", ")}
+            </p>
+          ) : person.wanted ? (
+            <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-accent">
+              <UserCheck className="h-3 w-3" aria-hidden /> You wanted to meet
+            </p>
+          ) : (
+            <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
+              <Users className="h-3 w-3" aria-hidden /> In the room together
+            </p>
+          )}
+          {person.eventLabel && (
+            <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
+              <CalendarDays className="h-3 w-3" aria-hidden /> {person.eventLabel}
             </p>
           )}
         </div>

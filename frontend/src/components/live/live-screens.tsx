@@ -197,12 +197,16 @@ export function LiveShell({
   children,
   right,
   eventId,
+  eventName,
   onRefresh,
   className,
 }: {
   children: ReactNode;
   right?: ReactNode;
   eventId?: string;
+  /** The event's name — shown as a small eyebrow under the top bar so an attendee
+   *  always knows which event they're in, on every live phase (waiting → rounds). */
+  eventName?: string;
   /** When set, shows a manual "refresh" button — a safety net for when the
    *  realtime doorbell doesn't fire, so the attendee can re-pull their state
    *  without reloading the whole page. */
@@ -234,6 +238,12 @@ export function LiveShell({
             )}
           </div>
         </div>
+        {eventName && (
+          <p className="mt-2.5 flex items-center gap-1.5 truncate text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
+            <MapPin className="h-3 w-3 shrink-0 text-accent" aria-hidden />
+            <span className="truncate">{eventName}</span>
+          </p>
+        )}
         <div className="mt-8">{children}</div>
       </div>
     </div>

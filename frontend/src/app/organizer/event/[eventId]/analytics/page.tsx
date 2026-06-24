@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { ConsoleShell } from "@/components/organizer/console-shell";
-import { ConsoleGate } from "@/components/organizer/console-ui";
+import { ConsoleGate, RefreshButton } from "@/components/organizer/console-ui";
 import { EventHeader, EventAccessError } from "@/components/organizer/event-header";
 import { type EventInfo } from "@/components/organizer/live/types";
 
@@ -30,6 +30,10 @@ export default function OrganizerAnalyticsPage({ params }: { params: Promise<{ e
   const [event, setEvent] = useState<EventInfo | null>(null);
   const [denied, setDenied] = useState<null | "forbidden" | "missing">(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumping this re-fetches the event AND remounts the (self-fetching) recap, so
+  // the whole analytics view pulls fresh numbers on demand.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -39,8 +43,16 @@ export default function OrganizerAnalyticsPage({ params }: { params: Promise<{ e
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) setDenied("forbidden");
         else if (e instanceof ApiError && e.status === 404) setDenied("missing");
         else setError(e instanceof Error ? e.message : "Couldn't load analytics");
-      });
-  }, [user, eventId]);
+      })
+      .finally(() => setRefreshing(false));
+  }, [user, eventId, refreshKey]);
+
+  function refresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    setError(null);
+    setRefreshKey((k) => k + 1);
+  }
 
   // Pre-auth / redirecting: neutral splash, never the console chrome (see ConsoleGate).
   if (!checked || !user) return <ConsoleGate />;
@@ -56,7 +68,13 @@ export default function OrganizerAnalyticsPage({ params }: { params: Promise<{ e
 
   return (
     <ConsoleShell>
-      <EventHeader eventId={eventId} name={event?.name} status={event?.status} active="analytics" />
+      <EventHeader
+        eventId={eventId}
+        name={event?.name}
+        status={event?.status}
+        active="analytics"
+        actions={<RefreshButton onClick={refresh} busy={refreshing} />}
+      />
 
       {error && (
         <p role="alert" className="mb-5 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
@@ -69,7 +87,7 @@ export default function OrganizerAnalyticsPage({ params }: { params: Promise<{ e
       {!event ? (
         <div className="h-40 skeleton rounded-2xl border border-border" />
       ) : (
-        <EventRecap eventId={eventId} live={event.status !== "ended"} />
+        <EventRecap key={refreshKey} eventId={eventId} live={event.status !== "ended"} />
       )}
     </ConsoleShell>
   );

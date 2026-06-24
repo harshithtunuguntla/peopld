@@ -127,7 +127,7 @@ function LiveInner({ eventId }: { eventId: string }) {
     state.phase !== "ended"
   ) {
     return (
-      <LiveShell eventId={eventId}>
+      <LiveShell eventId={eventId} eventName={state.event_name}>
         <RoomCodeCheckIn state={state} eventId={eventId} onArrived={refetch} />
       </LiveShell>
     );
@@ -137,25 +137,25 @@ function LiveInner({ eventId }: { eventId: string }) {
     case "ended":
       if (state.attendee_status === "arrived") {
         return (
-          <LiveShell eventId={eventId}>
+          <LiveShell eventId={eventId} eventName={state.event_name}>
             <CenteredSpinner label="Opening your recap…" />
           </LiveShell>
         );
       }
       return (
-        <LiveShell eventId={eventId}>
+        <LiveShell eventId={eventId} eventName={state.event_name}>
           <EventEnded />
         </LiveShell>
       );
     case "between_rounds":
       return (
-        <LiveShell eventId={eventId} onRefresh={refetch}>
+        <LiveShell eventId={eventId} eventName={state.event_name} onRefresh={refetch}>
           <BetweenRounds state={state} eventId={eventId} />
         </LiveShell>
       );
     case "in_round":
       return (
-        <LiveShell eventId={eventId} onRefresh={refreshLiveState}>
+        <LiveShell eventId={eventId} eventName={state.event_name} onRefresh={refreshLiveState}>
           {state.seated ? (
             <RoundView
               state={state}
@@ -171,7 +171,7 @@ function LiveInner({ eventId }: { eventId: string }) {
     case "not_started":
     default:
       return (
-        <LiveShell eventId={eventId} onRefresh={refetch}>
+        <LiveShell eventId={eventId} eventName={state.event_name} onRefresh={refetch}>
           <WaitingRoom state={state} eventId={eventId} />
         </LiveShell>
       );

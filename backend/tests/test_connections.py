@@ -109,6 +109,29 @@ def test_connections_rolodex(client, db, event):
     assert entries[1]["round_number"] == 2
 
 
+def test_connections_surfaces_unmet_pick(client, db, event):
+    """A "want to meet" pick must be visible in that event's rolodex even if a
+    round never seated you together (post-pilot fix) — flagged wanted + not met,
+    and it does NOT inflate the "people met" count."""
+    me = make_attendee(db, event["id"], name="Me", user_id=ATTENDEE_USER_ID)
+    pick = make_attendee(db, event["id"], name="Pick")
+    db.table("meeting_intents").insert(
+        {"event_id": event["id"], "liker_attendee_id": me["id"], "liked_attendee_id": pick["id"]}
+    ).execute()
+
+    body = client.get(
+        f"/events/{event['id']}/attendees/{me['id']}/connections",
+        headers=ATTENDEE_AUTH,
+    ).json()
+
+    assert body["total_people_met"] == 0  # never sat together
+    entries = body["connections"]
+    assert len(entries) == 1
+    assert entries[0]["name"] == "Pick"
+    assert entries[0]["wanted"] is True
+    assert entries[0]["met"] is False
+
+
 def test_connections_repeat_pairing_counts_once(client, db, event):
     # Met the same person in two rounds → 2 entries, but 1 unique person
     me = make_attendee(db, event["id"], name="Me", user_id=ATTENDEE_USER_ID)

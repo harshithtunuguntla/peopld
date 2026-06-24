@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { RefreshCw, AlertTriangle, FileText, Megaphone, Check } from "lucide-react";
+import { RefreshCw, AlertTriangle, FileText } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
@@ -211,21 +211,6 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
         active="live"
         actions={
           <div className="flex items-center gap-2">
-            {event?.status !== "ended" && (
-              <button
-                type="button"
-                onClick={resyncRoom}
-                title="Force every attendee's screen to pull the latest — use if some don't see the new round"
-                className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-sm text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {resynced ? (
-                  <Check className="h-4 w-4 text-emerald-500" aria-hidden />
-                ) : (
-                  <Megaphone className="h-4 w-4" aria-hidden />
-                )}
-                <span className="hidden sm:inline">{resynced ? "Synced" : "Re-sync room"}</span>
-              </button>
-            )}
             <Link
               href={`/organizer/event/${eventId}/run-sheet`}
               target="_blank"
@@ -275,6 +260,8 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
             busy={busy}
             onStart={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/start`, { method: "POST" }); })}
             onEndEvent={() => act(async () => { await apiFetch(`/events/${eventId}/end`, { method: "POST" }); })}
+            onResync={resyncRoom}
+            resynced={resynced}
           />
         )}
         {phase.kind === "draft" && (
@@ -300,6 +287,8 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
               });
               await apiFetch(`/events/${eventId}/rounds/regenerate`, { method: "POST" });
             })}
+            onResync={resyncRoom}
+            resynced={resynced}
           />
         )}
         {phase.kind === "active" && (
@@ -314,6 +303,8 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
             onCancel={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/cancel`, { method: "POST" }); })}
             onPause={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/pause`, { method: "POST" }); })}
             onResume={() => act(async () => { await apiFetch(`/events/${eventId}/rounds/resume`, { method: "POST" }); })}
+            onResync={resyncRoom}
+            resynced={resynced}
           />
         )}
       </div>

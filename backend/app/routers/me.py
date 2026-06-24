@@ -39,7 +39,9 @@ def my_connections(
         event = events_by_id.get(str(attendee["event_id"]))
         if not event:
             continue
-        result = build_connection_entries(db, event, attendee)
+        # Cross-event rolodex includes the whole room you were in, not just the
+        # people a round happened to seat you with.
+        result = build_connection_entries(db, event, attendee, include_co_attendees=True)
         if not result.connections:
             continue
         events_with_people.add(str(event["id"]))
@@ -58,7 +60,9 @@ def my_connections(
     entries.reverse()
 
     return MyConnectionsResponse(
-        total_people_met=len({str(e.attendee_id) for e in entries}),
+        # "met" counts only people you actually shared a table with — co-attendees
+        # and picks you never sat with are surfaced but don't inflate this number.
+        total_people_met=len({str(e.attendee_id) for e in entries if e.met}),
         events_count=len(events_with_people),
         # Unique mutual people per event (dedupe by event + person), so meeting the
         # same match in two rounds counts once, while the same person matched at

@@ -7,7 +7,7 @@ import { Loader2, Plus, UserCheck, UserMinus, Undo2, QrCode, Download, Search, U
 import { apiFetch, ApiError } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { ConsoleShell } from "@/components/organizer/console-shell";
-import { Card, ConsoleGate } from "@/components/organizer/console-ui";
+import { Card, ConsoleGate, RefreshButton } from "@/components/organizer/console-ui";
 import { EventHeader, EventAccessError, type EventStatus } from "@/components/organizer/event-header";
 import { Avatar } from "@/components/brand/avatar";
 import { InviteDialog } from "@/components/organizer/invite-dialog";
@@ -83,9 +83,10 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("name");
   const [checkingIn, setCheckingIn] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(() => {
-    apiFetch<Attendee[]>(`/events/${eventId}/attendees`)
+    return apiFetch<Attendee[]>(`/events/${eventId}/attendees`)
       .then((rows) => setPeople([...rows].sort((a, b) => a.name.localeCompare(b.name))))
       .catch((e) => {
         if (e instanceof ApiError && (e.status === 403 || e.status === 401)) setDenied("forbidden");
@@ -93,6 +94,14 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
         else setError(e instanceof Error ? e.message : "Couldn't load attendees");
       });
   }, [eventId]);
+
+  async function refresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    setError(null);
+    await load();
+    setRefreshing(false);
+  }
 
   useEffect(() => {
     if (!user) return;
@@ -183,9 +192,12 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
         status={eventStatus}
         active="people"
         actions={
-          <Button variant="accent" onClick={() => setAdding((v) => !v)} className="gap-1.5">
-            <Plus className="h-4 w-4" /> Walk-in
-          </Button>
+          <>
+            <RefreshButton onClick={refresh} busy={refreshing} />
+            <Button variant="accent" onClick={() => setAdding((v) => !v)} className="gap-1.5">
+              <Plus className="h-4 w-4" /> Walk-in
+            </Button>
+          </>
         }
       />
 

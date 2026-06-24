@@ -555,8 +555,11 @@ class ConnectionEntry(BaseModel):
     interests: list[str] = []
     shared_interests: list[str] = []  # tags the caller and this person both picked
     note: Optional[str] = None        # the caller's private note about this person
-    round_number: int
-    table_number: int
+    round_number: int = 0  # 0 = never shared a table (a pick / co-attendee, not "met")
+    table_number: int = 0
+    met: bool = True      # we actually shared a table (the classic rolodex meaning)
+    wanted: bool = False  # I picked them pre-event ("want to meet") — may or may not be met yet
+    wants_me: bool = False  # they picked me
     liked: bool = False   # I liked them
     mutual: bool = False  # ...and they liked me back → a match
     saved: bool = False   # I explicitly bookmarked them (my saved-contacts shortlist)

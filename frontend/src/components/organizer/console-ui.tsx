@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowDownRight, ArrowUpRight, Loader2 } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Loader2, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { COLORS } from "@/lib/design/colors";
 import { TONE } from "@/lib/design/status";
@@ -67,6 +67,37 @@ export function LogoMark({ size = 36 }: { size?: number }) {
         style={{ background: COLORS.lime }}
       />
     </div>
+  );
+}
+
+/* ----------------------------- Refresh button ----------------------------- */
+
+/** The one manual-refresh control, shared by every console screen (Command
+ *  Center, People, Analytics) so the affordance is identical everywhere. Spins
+ *  while `busy`, and is disabled so an impatient double-tap can't fire a burst. */
+export function RefreshButton({
+  onClick,
+  busy = false,
+  className,
+}: {
+  onClick: () => void;
+  busy?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      aria-label="Refresh"
+      title="Refresh"
+      className={cn(
+        "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50",
+        className,
+      )}
+    >
+      <RefreshCw className={cn("h-4 w-4", busy && "animate-spin")} aria-hidden />
+    </button>
   );
 }
 

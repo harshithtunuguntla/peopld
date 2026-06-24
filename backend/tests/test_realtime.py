@@ -88,3 +88,37 @@ def test_resync_owner_fires_doorbell(client, event, realtime_post):
     assert resp.status_code == 200
     assert resp.json() == {"queued": True}
     assert "manual" in _kinds(realtime_post)
+
+
+# --- spaced repeats: one dropped broadcast must not strand a phone ---
+
+def test_broadcast_repeats_on_a_spaced_schedule(monkeypatch, realtime_post):
+    """Every change is delivered more than once (immediate + spaced repeats), so a
+    single transient drop doesn't leave a phone behind. Uses tiny offsets to keep
+    the test fast; asserts all three sends land and stay signal-only."""
+    import time
+
+    from app import realtime
+
+    # Re-enable repeats with sub-second offsets (conftest disables them by default).
+    monkeypatch.setattr(realtime, "REPEAT_OFFSETS_SECONDS", (0.05, 0.1))
+
+    realtime.broadcast_event_changed("evt-123", "publish")
+    time.sleep(0.3)  # let the daemon thread fire both repeats
+
+    kinds = _kinds(realtime_post)
+    assert kinds == ["publish", "publish", "publish"]  # immediate + 2 repeats
+    for c in realtime_post:
+        msg = c["json"]["messages"][0]
+        assert msg["topic"] == "live:evt-123"
+        assert msg["event"] == "resync"
+        assert set(msg["payload"].keys()) == {"kind"}  # still no PII
+
+
+def test_broadcast_immediate_send_is_synchronous(realtime_post):
+    """The first send happens inline (not only on the thread), so delivery starts
+    the instant the organizer acts — repeats are added insurance on top."""
+    from app import realtime
+
+    realtime._send_broadcast("evt-xyz", "begin")
+    assert _kinds(realtime_post) == ["begin"]

@@ -141,6 +141,28 @@ def test_me_connections_aggregates_across_events(client, db, event):
     assert "AI" in by_name["Maya"]["shared_interests"]
 
 
+def test_me_connections_includes_co_attendees_not_just_met(client, db, event):
+    """Post-pilot fix: "My connections" reflects the whole CHECKED-IN room you were
+    in, not only the handful a round seated you with — but met vs. just-attended is
+    distinguished, and registered no-shows are excluded."""
+    me = make_attendee(db, event["id"], name="Me", status="arrived", user_id=ATTENDEE_USER_ID)
+    met = make_attendee(db, event["id"], name="Met", status="arrived")
+    make_attendee(db, event["id"], name="CoAttendee", status="arrived")
+    make_attendee(db, event["id"], name="NoShow", status="registered")
+    r = make_round(db, event["id"], round_number=1, status="completed")
+    make_assignment(db, event["id"], r["id"], me["id"], 1)
+    make_assignment(db, event["id"], r["id"], met["id"], 1)
+
+    body = client.get("/me/connections", headers=ATTENDEE_AUTH).json()
+    by_name = {c["name"]: c for c in body["connections"]}
+
+    assert "Met" in by_name and "CoAttendee" in by_name  # whole room surfaced
+    assert "NoShow" not in by_name                        # didn't actually attend
+    assert by_name["Met"]["met"] is True
+    assert by_name["CoAttendee"]["met"] is False
+    assert body["total_people_met"] == 1                  # headline counts only met
+
+
 def test_me_connections_excludes_other_users(client, db, event):
     _met_in(db, event["id"], "Maya")
     res = client.get("/me/connections", headers=OTHER_ATTENDEE_AUTH)

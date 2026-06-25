@@ -35,9 +35,29 @@ export function SelectMenu({
   menuClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
+  // Which edge the menu anchors to. We pick whichever keeps it inside the
+  // viewport: the trigger can end up near either edge (it wraps onto its own
+  // line on mobile), and a fixed `right-0` would push the menu off-screen to
+  // the left when the trigger sits at the left edge (the pilot bug).
+  const [alignEnd, setAlignEnd] = useState(true);
   const ref = useRef<HTMLDivElement>(null);
   const listId = useId();
   const current = options.find((o) => o.value === value) ?? options[0];
+
+  const MENU_WIDTH = 224; // keep in sync with the w-56 cap below
+
+  function toggle() {
+    setOpen((wasOpen) => {
+      if (!wasOpen && ref.current) {
+        // Prefer aligning the menu's left edge to the trigger (opens rightward).
+        // If that would overflow the right edge, anchor to the right instead.
+        const rect = ref.current.getBoundingClientRect();
+        const overflowsRight = rect.left + MENU_WIDTH > window.innerWidth - 8;
+        setAlignEnd(overflowsRight);
+      }
+      return !wasOpen;
+    });
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -59,7 +79,7 @@ export function SelectMenu({
     <div ref={ref} className={cn("relative", className)}>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
@@ -75,7 +95,8 @@ export function SelectMenu({
           id={listId}
           role="listbox"
           className={cn(
-            "absolute right-0 z-30 mt-2 max-h-72 w-56 overflow-auto rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl",
+            "absolute z-30 mt-2 max-h-72 w-[min(14rem,calc(100vw-1.5rem))] overflow-auto rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl",
+            alignEnd ? "right-0" : "left-0",
             menuClassName,
           )}
         >

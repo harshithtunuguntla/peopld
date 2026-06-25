@@ -110,19 +110,21 @@ def add_walkin(
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
-    """Organizer adds a walk-in attendee (no app account). Event owner only.
+    """Organizer adds an attendee with no app account. Event owner only.
 
-    Used from the people directory for someone who shows up without registering.
-    Marked `arrived` immediately (they're at the door) and has no `user_id`, so
-    they're seated like everyone else but have no live phone screen of their own.
+    Two uses, one endpoint (the body's `status` decides which):
+      - day-of walk-in at the door → `arrived` (the default), seated like everyone
+        else but with no live phone screen of their own;
+      - pre-event guest/speaker → `registered`, on the list but not yet in the room.
+    `tag` (attendee/speaker/host) can be set up front so a speaker is marked
+    correctly from the start. Always has no `user_id`.
     """
     event = fetch_event_or_404(db, event_id)
     require_event_owner(event, organizer_id)
 
-    row = body.model_dump(mode="json")
+    row = body.model_dump(mode="json")  # carries name/role/… plus tag + status
     row["event_id"] = event_id
     row["user_id"] = None
-    row["status"] = "arrived"
     created = db.table("attendees").insert(row).execute().data[0]
     record_audit(
         db,
@@ -131,6 +133,7 @@ def add_walkin(
         actor_user_id=organizer_id,
         event_id=event_id,
         entity_id=created["id"],
+        metadata={"tag": created.get("tag"), "status": created.get("status")},
     )
     return created
 

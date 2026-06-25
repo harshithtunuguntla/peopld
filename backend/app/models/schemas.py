@@ -196,8 +196,11 @@ class AttendeeProfileDefaults(BaseModel):
 
 
 class WalkInCreate(BaseModel):
-    """Organizer-added attendee (a walk-in with no app account). No access code,
-    no avatar — just enough to seat them."""
+    """Organizer-added attendee (no app account). Covers two cases with one shape:
+    a day-of walk-in at the door (status 'arrived') and pre-staging a guest or
+    speaker on the list before the event (status 'registered'). `tag` lets the
+    organizer mark a speaker/host up front. No access code, no avatar — just
+    enough to seat or list them."""
     name: str
     role: str
     company: Optional[str] = None
@@ -206,6 +209,8 @@ class WalkInCreate(BaseModel):
     linkedin_url: Optional[str] = None
     website_url: Optional[str] = None
     interests: list[str] = []
+    tag: Literal["attendee", "speaker", "host"] = "attendee"
+    status: Literal["registered", "arrived"] = "arrived"  # default preserves the day-of walk-in behavior
 
 
 class AttendeeUpdate(BaseModel):

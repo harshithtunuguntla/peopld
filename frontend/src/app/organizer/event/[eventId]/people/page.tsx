@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Loader2, Plus, UserCheck, UserMinus, Undo2, QrCode, Download, Search, UsersRound, ArrowDownUp, Star, Pencil, X } from "lucide-react";
+import { Loader2, Plus, UserCheck, UserMinus, Undo2, QrCode, Download, Search, UsersRound, ArrowDownUp, Star, Pencil, X, Globe } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
@@ -14,6 +14,10 @@ import { InviteDialog } from "@/components/organizer/invite-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
+import { Textarea } from "@/components/ui/textarea";
+import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
+import { LinkedInGlyph } from "@/components/brand/glyphs";
+import { isAcceptableUrl, normalizeUrl } from "@/lib/url";
 import { inkOn } from "@/lib/design/rounds";
 import { ATTENDEE_STATUS_HEX, ATTENDEE_TONE } from "@/lib/design/status";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -195,7 +199,7 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
           <>
             <RefreshButton onClick={refresh} busy={refreshing} />
             <Button variant="accent" onClick={() => setAdding((v) => !v)} className="gap-1.5">
-              <Plus className="h-4 w-4" /> Walk-in
+              <Plus className="h-4 w-4" /> Add person
             </Button>
           </>
         }
@@ -286,7 +290,7 @@ export default function PeopleDirectory({ params }: { params: Promise<{ eventId:
       )}
 
       {adding && (
-        <WalkInForm
+        <AddPersonForm
           eventId={eventId}
           onAdded={() => {
             setAdding(false);
@@ -591,32 +595,76 @@ function EditAttendeeDialog({
   );
 }
 
-function WalkInForm({ eventId, onAdded, onCancel }: { eventId: string; onAdded: () => void; onCancel: () => void }) {
+const ADD_TAGS: { value: Tag; label: string; hint: string }[] = [
+  { value: "attendee", label: "Attendee", hint: "Seated each round" },
+  { value: "speaker", label: "Speaker", hint: "Listed, never seated" },
+  { value: "host", label: "Host", hint: "Listed, never seated" },
+];
+
+function AddPersonForm({ eventId, onAdded, onCancel }: { eventId: string; onAdded: () => void; onCancel: () => void }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
+  // Same optional profile fields as the attendee registration form, so a guest
+  // or speaker the organizer adds shows up just as richly in the directory.
+  const [company, setCompany] = useState("");
+  const [description, setDescription] = useState("");
+  const [lookingFor, setLookingFor] = useState("");
+  const [interests, setInterests] = useState<string[]>([]);
+  const [linkedin, setLinkedin] = useState("");
+  const [website, setWebsite] = useState("");
+  const [tag, setTag] = useState<Tag>("attendee");
+  // No default on purpose — the organizer always picks whether this person is
+  // already in the room (day-of walk-in) or just on the guest list (pre-event).
+  const [status, setStatus] = useState<"registered" | "arrived" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [linkErr, setLinkErr] = useState<string | null>(null);
+  const [siteErr, setSiteErr] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!status) {
+      setError("Choose whether they're here now or on the guest list.");
+      return;
+    }
+    // A bare domain or http/https is fine; only reject clearly-bad links.
+    const badLink = !isAcceptableUrl(linkedin);
+    const badSite = !isAcceptableUrl(website);
+    setLinkErr(badLink ? "That doesn't look like a link. Try linkedin.com/in/you" : null);
+    setSiteErr(badSite ? "That doesn't look like a link. Try yourproduct.com" : null);
+    if (badLink || badSite) return;
+
     setBusy(true);
     setError(null);
     try {
       await apiFetch(`/events/${eventId}/attendees/walkin`, {
         method: "POST",
-        body: JSON.stringify({ name: name.trim(), role: role.trim() }),
+        body: JSON.stringify({
+          name: name.trim(),
+          role: role.trim(),
+          company: company.trim() || undefined,
+          description: description.trim() || undefined,
+          looking_for: lookingFor.trim() || undefined,
+          interests,
+          linkedin_url: normalizeUrl(linkedin) ?? undefined,
+          website_url: normalizeUrl(website) ?? undefined,
+          tag,
+          status,
+        }),
       });
       onAdded();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't add walk-in");
+      setError(err instanceof Error ? err.message : "Couldn't add this person");
       setBusy(false);
     }
   }
 
   return (
     <form onSubmit={submit} className="mt-5 rounded-2xl border border-border bg-card/50 p-5">
-      <h2 className="font-display text-lg text-foreground">Add a walk-in</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Someone at the door without an account — they&apos;ll be seated like everyone else.</p>
+      <h2 className="font-display text-lg text-foreground">Add a person</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Add a guest or speaker yourself — no account needed. Everything but name and role is optional, and shows on their directory card just like a self-registration.
+      </p>
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Name" name="wi-name" required>
           {(p) => <Input {...p} required value={name} onChange={(e) => setName(e.target.value)} placeholder="Maya Sharma" />}
@@ -624,16 +672,125 @@ function WalkInForm({ eventId, onAdded, onCancel }: { eventId: string; onAdded: 
         <Field label="Role" name="wi-role" required>
           {(p) => <Input {...p} required value={role} onChange={(e) => setRole(e.target.value)} placeholder="Founder at Acme" />}
         </Field>
+        <Field label="Company" name="wi-company" hint="Where they work / build.">
+          {(p) => <Input {...p} value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Acme Labs" />}
+        </Field>
+        <Field label="Looking for" name="wi-looking" hint="Who they'd love to meet.">
+          {(p) => <Input {...p} value={lookingFor} onChange={(e) => setLookingFor(e.target.value)} placeholder="investors, designers…" />}
+        </Field>
+        <Field label="What are they working on?" name="wi-description" className="sm:col-span-2" hint="A line about what they're building.">
+          {(p) => <Textarea {...p} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Building an AI copilot for warehouse ops." />}
+        </Field>
+        <Field label="Interests" name="wi-interests" className="sm:col-span-2" hint="Shared ones light up at the table.">
+          {(p) => (
+            <TagInput
+              id={p.id}
+              aria-describedby={p["aria-describedby"]}
+              value={interests}
+              onChange={setInterests}
+              suggestions={INTEREST_SUGGESTIONS}
+              placeholder="AI, climate, hiring…"
+            />
+          )}
+        </Field>
+        <Field label="LinkedIn" name="wi-linkedin" error={linkErr ?? undefined}>
+          {(p) => (
+            <Input
+              {...p}
+              type="url"
+              inputMode="url"
+              startIcon={<LinkedInGlyph />}
+              value={linkedin}
+              onChange={(e) => {
+                setLinkedin(e.target.value);
+                if (linkErr) setLinkErr(null);
+              }}
+              placeholder="linkedin.com/in/you"
+            />
+          )}
+        </Field>
+        <Field label="Website" name="wi-website" error={siteErr ?? undefined} hint="Their site or product link.">
+          {(p) => (
+            <Input
+              {...p}
+              type="url"
+              inputMode="url"
+              startIcon={<Globe className="h-4 w-4" aria-hidden />}
+              value={website}
+              onChange={(e) => {
+                setWebsite(e.target.value);
+                if (siteErr) setSiteErr(null);
+              }}
+              placeholder="yourproduct.com"
+            />
+          )}
+        </Field>
       </div>
+
+      {/* Tag — mark a speaker/host up front. Speakers and hosts are never seated. */}
+      <fieldset className="mt-4">
+        <legend className="mb-1.5 text-sm font-medium text-foreground">Role on the day</legend>
+        <div className="grid grid-cols-3 gap-2">
+          {ADD_TAGS.map((t) => {
+            const active = tag === t.value;
+            return (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => setTag(t.value)}
+                aria-pressed={active}
+                className={cn(
+                  "rounded-xl border px-3 py-2 text-left transition-colors",
+                  active ? "border-accent bg-accent/10" : "border-border hover:border-foreground/20",
+                )}
+              >
+                <span className={cn("block text-sm font-medium", active ? "text-accent" : "text-foreground")}>{t.label}</span>
+                <span className="mt-0.5 block text-[11px] text-muted-foreground">{t.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      {/* Status — required, no preselection. Decides registered vs arrived. */}
+      <fieldset className="mt-4">
+        <legend className="mb-1.5 text-sm font-medium text-foreground">
+          Are they here now? <span className="text-destructive">*</span>
+        </legend>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {([
+            { value: "arrived", label: "They're here now", hint: "Checked in — in the room" },
+            { value: "registered", label: "Add to guest list", hint: "Coming, not here yet" },
+          ] as const).map((s) => {
+            const active = status === s.value;
+            return (
+              <button
+                key={s.value}
+                type="button"
+                onClick={() => setStatus(s.value)}
+                aria-pressed={active}
+                className={cn(
+                  "rounded-xl border px-3.5 py-2.5 text-left transition-colors",
+                  active ? "border-accent bg-accent/10" : "border-border hover:border-foreground/20",
+                )}
+              >
+                <span className={cn("block text-sm font-medium", active ? "text-accent" : "text-foreground")}>{s.label}</span>
+                <span className="mt-0.5 block text-[11px] text-muted-foreground">{s.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+
       {error && (
         <p role="alert" className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
           {error}
         </p>
       )}
       <div className="mt-5 flex gap-2">
-        <Button type="submit" variant="accent" disabled={busy} className="flex-1">
+        <Button type="submit" variant="accent" disabled={busy || !status} className="flex-1">
           {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-          {busy ? "Adding…" : "Add walk-in"}
+          {busy ? "Adding…" : "Add person"}
         </Button>
         <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
           Cancel

@@ -45,6 +45,20 @@ def test_organizer_adds_walkin(client, event):
     assert body["user_id"] is None
 
 
+def test_organizer_adds_pre_event_speaker(client, event):
+    """Pre-staging a guest/speaker: registered (not in the room yet) + tagged."""
+    response = client.post(
+        f"/events/{event['id']}/attendees/walkin",
+        json={"name": "Keynote Kim", "role": "Speaker", "tag": "speaker", "status": "registered"},
+        headers=AUTH,
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "registered"
+    assert body["tag"] == "speaker"
+    assert body["user_id"] is None
+
+
 def test_walkin_requires_organizer(client, event):
     assert (
         client.post(

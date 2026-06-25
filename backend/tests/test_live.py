@@ -379,6 +379,84 @@ def test_live_after_cancel_returns_to_between_rounds(client, db, event):
     assert body["seat"] is None
 
 
+# --- resilience: one malformed row must never 500 the whole room's snapshot ---
+# Regression for the live-event failure where /live returned 500 for EVERY attendee
+# in a round: the snapshot is built in a shared path, so a single bad row (null
+# name/role, malformed icebreaker) used to take the entire room dark. It must now
+# degrade gracefully — coerce/skip the bad row and still return 200.
+
+
+def test_live_survives_null_name_in_roster(client, db, event):
+    """An arrived attendee with a NULL name must not 500 the room — the roster
+    coerces it to a placeholder so every other phone still gets its snapshot."""
+    _me(db, event["id"], status="arrived")
+    make_attendee(db, event["id"], name=None, status="arrived")  # corrupt row
+
+    r = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["roster"]["count"] == 2  # both arrived still counted
+    # The bad row is coerced, not dropped from the count, and never crashes.
+    assert all(p["name"] for p in body["roster"]["preview"])
+
+
+def test_live_survives_null_role_tablemate(client, db, event):
+    """A tablemate row with a NULL role must not 500 the seat for everyone at the
+    table — it's coerced so the seated attendee still gets their table."""
+    me = _me(db, event["id"])
+    bad = make_attendee(db, event["id"], name="Bobby", role=None, status="arrived")  # corrupt
+    rnd = make_round(db, event["id"], round_number=4, status="active")
+    make_assignment(db, event["id"], rnd["id"], me["id"], table_number=1)
+    make_assignment(db, event["id"], rnd["id"], bad["id"], table_number=1)
+
+    r = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["seated"] is True
+    assert body["seat"]["table_number"] == 1
+    mate = body["seat"]["tablemates"][0]
+    assert mate["name"] == "Bobby"
+    assert mate["role"] == ""  # coerced from null, schema stays happy
+
+
+def test_live_survives_malformed_icebreaker(client, db, event):
+    """A malformed icebreaker (null target) degrades to no-icebreaker, never a 500
+    — the table matters far more than the question."""
+    me = _me(db, event["id"])
+    mate = make_attendee(db, event["id"], name="Bobby", status="arrived")
+    rnd = make_round(db, event["id"], round_number=4, status="active")
+    make_assignment(db, event["id"], rnd["id"], me["id"], table_number=1)
+    make_assignment(db, event["id"], rnd["id"], mate["id"], table_number=1)
+    db.seed("icebreakers", {
+        "round_id": rnd["id"],
+        "table_number": 1,
+        "recipient_attendee_id": me["id"],
+        "target_attendee_id": None,  # corrupt — must not crash the seat
+        "question_text": "Ask Bobby about scaling.",
+    })
+
+    r = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["seat"]["table_number"] == 1
+    assert body["icebreaker"] is None  # degraded, room still works
+
+
+def test_live_survives_null_duration_round(client, db, event):
+    """A round row with a NULL/garbage duration must not 500 the in-round snapshot
+    — duration coerces to 0 and the phone still learns a round is live."""
+    me = _me(db, event["id"])
+    rnd = make_round(db, event["id"], round_number=4, status="active", duration_seconds=None)
+    make_assignment(db, event["id"], rnd["id"], me["id"], table_number=1)
+
+    r = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["phase"] == "in_round"
+    assert body["round"]["round_number"] == 4
+    assert body["round"]["duration_seconds"] == 0
+
+
 def test_live_resolves_attendee_from_jwt_not_url(client, db, event):
     """No attendee id in the URL: the signed-in user only ever sees their own
     state, even when other attendees exist on the same event (no IDOR surface)."""

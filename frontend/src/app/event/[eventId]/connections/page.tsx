@@ -4,13 +4,15 @@ import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
-import { ArrowLeft, Loader2, Heart, Sparkles, Users, Bookmark } from "lucide-react";
+import { ArrowLeft, Loader2, Heart, Sparkles, Users, Bookmark, UserCheck } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
 import { LiveShell } from "@/components/live/live-screens";
 import { PersonCard, groupByPerson, type Connection } from "@/components/connections/person-card";
 import { cn } from "@/lib/utils";
+
+type RelFilter = "all" | "met" | "matches" | "liked" | "saved";
 
 interface ConnectionsResp {
   total_people_met: number;
@@ -68,7 +70,7 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
   useEffect(() => {
     setSavedIds(new Set(people.filter((p) => p.saved).map((p) => p.attendee_id)));
   }, [people]);
-  const [filter, setFilter] = useState<"all" | "saved">("all");
+  const [filter, setFilter] = useState<RelFilter>("all");
   const handleSavedChange = useCallback((id: string, saved: boolean) => {
     setSavedIds((prev) => {
       const next = new Set(prev);
@@ -77,7 +79,28 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
       return next;
     });
   }, []);
-  const visible = filter === "saved" ? people.filter((p) => savedIds.has(p.attendee_id)) : people;
+
+  // Per-relationship counts; saved tracks the live optimistic set, the rest read
+  // off the grouped people. A chip only shows when it would match someone.
+  const relCounts = useMemo(
+    () => ({
+      all: people.length,
+      met: people.filter((p) => p.met).length,
+      matches: people.filter((p) => p.mutual).length,
+      liked: people.filter((p) => p.liked).length,
+      saved: savedIds.size,
+    }),
+    [people, savedIds],
+  );
+  const visible = useMemo(() => {
+    return people.filter((p) => {
+      if (filter === "met") return p.met;
+      if (filter === "matches") return p.mutual;
+      if (filter === "liked") return p.liked;
+      if (filter === "saved") return savedIds.has(p.attendee_id);
+      return true;
+    });
+  }, [people, filter, savedIds]);
 
   if (!authChecked || !user) {
     return (
@@ -132,7 +155,9 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
             <EmptyState />
           ) : (
             <>
-              <FilterTabs filter={filter} onChange={setFilter} savedCount={savedIds.size} />
+              <div className="mt-7">
+                <RelTabs filter={filter} onChange={setFilter} counts={relCounts} />
+              </div>
               {visible.length === 0 ? (
                 <SavedEmptyState />
               ) : (
@@ -150,39 +175,56 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
   );
 }
 
-/** "Everyone / Saved" segmented filter for the rolodex. */
-function FilterTabs({
+/** Everyone / Met / Matches / Liked / Saved chip filter for the rolodex. A chip
+ *  only shows when it would match someone (no dead filters). */
+function RelTabs({
   filter,
   onChange,
-  savedCount,
+  counts,
 }: {
-  filter: "all" | "saved";
-  onChange: (f: "all" | "saved") => void;
-  savedCount: number;
+  filter: RelFilter;
+  onChange: (f: RelFilter) => void;
+  counts: Record<RelFilter, number>;
 }) {
-  const tab = (key: "all" | "saved", label: React.ReactNode) => (
-    <button
-      type="button"
-      onClick={() => onChange(key)}
-      aria-pressed={filter === key}
-      className={cn(
-        "inline-flex h-9 items-center justify-center gap-1.5 rounded-full px-4 text-sm font-medium transition-colors",
-        filter === key ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
-  );
+  const items: { key: RelFilter; label: string; icon: React.ReactNode }[] = [
+    { key: "all", label: "Everyone", icon: <Users className="h-3.5 w-3.5" aria-hidden /> },
+    { key: "met", label: "Met", icon: <UserCheck className="h-3.5 w-3.5" aria-hidden /> },
+    { key: "matches", label: "Matches", icon: <Heart className="h-3.5 w-3.5 fill-current" aria-hidden /> },
+    { key: "liked", label: "Liked", icon: <Heart className="h-3.5 w-3.5" aria-hidden /> },
+    { key: "saved", label: "Saved", icon: <Bookmark className="h-3.5 w-3.5" aria-hidden /> },
+  ];
   return (
-    <div className="mt-7 inline-flex items-center rounded-full border border-border bg-secondary p-1">
-      {tab("all", "Everyone")}
-      {tab(
-        "saved",
-        <>
-          <Bookmark className={cn("h-3.5 w-3.5", filter === "saved" && "fill-current")} aria-hidden />
-          Saved{savedCount > 0 ? ` · ${savedCount}` : ""}
-        </>,
-      )}
+    <div className="flex flex-wrap items-center gap-2">
+      {items
+        .filter((it) => it.key === "all" || counts[it.key] > 0)
+        .map((it) => {
+          const active = filter === it.key;
+          return (
+            <button
+              key={it.key}
+              type="button"
+              onClick={() => onChange(it.key)}
+              aria-pressed={active}
+              className={cn(
+                "inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium transition-colors",
+                active
+                  ? "border-accent bg-accent text-accent-foreground"
+                  : "border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground",
+              )}
+            >
+              {it.icon}
+              {it.label}
+              <span
+                className={cn(
+                  "rounded-full px-1.5 text-[11px] tabular-nums",
+                  active ? "bg-accent-foreground/20 text-accent-foreground" : "bg-muted text-muted-foreground",
+                )}
+              >
+                {counts[it.key]}
+              </span>
+            </button>
+          );
+        })}
     </div>
   );
 }

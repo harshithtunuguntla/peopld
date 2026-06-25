@@ -15,6 +15,7 @@ import {
 } from "@/components/auth";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
+import { hasProfileDefaults, loadProfileDraft, saveProfileDraft } from "@/lib/profile-draft";
 import { supabase } from "@/lib/supabase";
 
 interface EventSummary {
@@ -116,8 +117,10 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
     }
     setProfileDefaultsChecked(false);
     apiFetch<ProfileDefaults>(`/events/${eventId}/attendees/me/profile-defaults`)
-      .then(setProfileDefaults)
-      .catch(() => setProfileDefaults(null))
+      .then((defaults) => {
+        setProfileDefaults(hasProfileDefaults(defaults) ? defaults : loadProfileDraft(user.id));
+      })
+      .catch(() => setProfileDefaults(loadProfileDraft(user.id)))
       .finally(() => setProfileDefaultsChecked(true));
   }, [user, eventId]);
 
@@ -152,9 +155,15 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
   );
 
   async function handleRegister(values: RegisterValues) {
+    if (!user) {
+      setError("Please sign in to join this event.");
+      return;
+    }
+    const signedInUser = user;
     setError(null);
     setBusy(true);
     try {
+      saveProfileDraft(signedInUser.id, values);
       const attendee = await apiFetch<AttendeeResponse>(`/events/${eventId}/attendees`, {
         method: "POST",
         body: JSON.stringify({
@@ -168,8 +177,8 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
           interests: values.interests,
           // Capture the OAuth (Google) profile photo so name cards show a face.
           avatar_url:
-            (user?.user_metadata?.avatar_url as string | undefined) ??
-            (user?.user_metadata?.picture as string | undefined) ??
+            (signedInUser.user_metadata?.avatar_url as string | undefined) ??
+            (signedInUser.user_metadata?.picture as string | undefined) ??
             null,
           access_code: verifiedCode || null,
         }),

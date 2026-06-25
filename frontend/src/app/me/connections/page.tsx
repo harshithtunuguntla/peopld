@@ -202,7 +202,7 @@ export default function MyConnectionsPage() {
             </Link>
             <AccountMenu
               user={user}
-              editProfileHref={profileEventId ? `/event/${profileEventId}/profile` : null}
+              editProfileHref={profileEventId ? `/event/${profileEventId}/profile` : "/me/profile"}
               connectionsHref="/me/connections"
             />
           </div>

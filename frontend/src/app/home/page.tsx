@@ -137,8 +137,7 @@ export default function HomePage() {
           <div className="flex items-center gap-2">
             <AccountMenu
               user={user}
-              editProfileHref={profileEventId ? `/event/${profileEventId}/profile?from=home` : null}
-              disabledEditLabel="Join an event to edit your profile"
+              editProfileHref={profileEventId ? `/event/${profileEventId}/profile?from=home` : "/me/profile"}
               connectionsHref="/me/connections"
             />
           </div>

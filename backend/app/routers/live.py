@@ -20,6 +20,7 @@ dominated by the slowest call in each batch, not the sum of all calls.
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -44,8 +45,36 @@ logger = logging.getLogger("app.live")
 router = APIRouter(prefix="/events/{event_id}/live", tags=["live"])
 
 
+_FRACTION_RE = re.compile(r"\.(\d+)")
+_OFFSET_RE = re.compile(r"([+-])(\d{2})(?::?(\d{2}))?$")
+
+
 def _parse_iso(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    """Parse an ISO-8601 timestamp from Postgres/Supabase — robustly, on Python 3.10.
+
+    THE LIVE-EVENT BUG: 3.10's datetime.fromisoformat is strict — it rejects a 'Z'
+    suffix, an offset without minutes ('+00'), and fractional seconds that aren't
+    EXACTLY 3 or 6 digits. Postgres trims trailing zeros on fractional seconds, so a
+    real started_at comes back like '2026-06-25T09:30:00.1+00:00' (one digit) or with
+    a '+00' offset — both of which made this raise ValueError. That 500'd GET /live
+    the instant a round's timer was started (started_at set), for every attendee,
+    while the organizer endpoints — which never parse a timestamp — returned 200.
+    (Test fixtures used clean '...+00:00' strings with no fraction, so it never
+    surfaced in tests.) We normalise the offset to ±HH:MM and pad the fraction to 6
+    digits before parsing, with a fraction-stripped fallback."""
+    s = value.strip().replace("Z", "+00:00").replace("z", "+00:00")
+    # Normalise a trailing offset to ±HH:MM ('+00' / '+0000' / '+00:00' all → +00:00).
+    m = _OFFSET_RE.search(s)
+    if m:
+        sign, hh, mm = m.group(1), m.group(2), m.group(3) or "00"
+        s = s[: m.start()] + f"{sign}{hh}:{mm}"
+    # Pad/truncate fractional seconds to exactly 6 digits (3.10 accepts only 3 or 6).
+    s = _FRACTION_RE.sub(lambda fm: "." + (fm.group(1) + "000000")[:6], s, count=1)
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        # Last resort: drop the fraction entirely but keep the (normalised) offset.
+        return datetime.fromisoformat(_FRACTION_RE.sub("", s, count=1))
 
 
 def _make_tablemate(

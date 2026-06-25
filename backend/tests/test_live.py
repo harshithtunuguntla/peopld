@@ -457,6 +457,56 @@ def test_live_survives_null_duration_round(client, db, event):
     assert body["round"]["duration_seconds"] == 0
 
 
+# --- the timer-start 500: robust timestamp parsing (Python 3.10 fromisoformat) ---
+# Postgres trims trailing zeros on fractional seconds and can emit a '+00' offset,
+# both of which 3.10's strict datetime.fromisoformat rejects — which 500'd /live the
+# instant a round's started_at was set. _parse_iso must handle every real format.
+
+
+def test_parse_iso_handles_postgres_timestamp_formats():
+    from datetime import datetime, timezone
+
+    from app.routers.live import _parse_iso
+
+    want = datetime(2026, 7, 1, 18, 0, 0, tzinfo=timezone.utc)
+    # All of these are shapes Postgres/Supabase actually returns for a timestamptz.
+    for raw in (
+        "2026-07-01T18:00:00+00:00",      # clean (the only one tests used before)
+        "2026-07-01T18:00:00Z",            # Z suffix
+        "2026-07-01T18:00:00+00",          # offset without minutes (3.10 rejects)
+        "2026-07-01T18:00:00.000000+00:00",
+    ):
+        got = _parse_iso(raw)
+        assert got == want, raw
+        assert got.tzinfo is not None, raw
+
+    # Trailing-zero-trimmed fractions (the common live case) must parse, not raise.
+    assert _parse_iso("2026-07-01T18:00:00.1+00:00").microsecond == 100000
+    assert _parse_iso("2026-07-01T18:00:00.5+00").microsecond == 500000
+    assert _parse_iso("2026-07-01T18:00:00.123456+00:00").microsecond == 123456
+
+
+def test_live_timer_start_with_realistic_timestamp_does_not_500(client, db, event):
+    """Regression for the live-event failure: starting the timer set started_at to a
+    real timestamp (trimmed fraction + offset) and GET /live 500'd for everyone the
+    moment the round became running. It must return 200 with a correct ends_at."""
+    _me(db, event["id"])
+    # started_at exactly as Postgres hands it back: one fractional digit, '+00:00'.
+    # round_payload (and its ends_at) is built whether or not I'm seated, so this is
+    # the minimal repro — no assignment needed.
+    make_round(
+        db, event["id"], round_number=1, status="active",
+        started_at="2026-07-01T18:00:00.1+00:00",
+    )
+
+    r = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH)
+    assert r.status_code == 200
+    rnd = r.json()["round"]
+    assert rnd["started_at"] is not None
+    # ends_at = started_at + duration(300) = 18:05:00 — the countdown the phone needs.
+    assert rnd["ends_at"].startswith("2026-07-01T18:05:00")
+
+
 def test_live_resolves_attendee_from_jwt_not_url(client, db, event):
     """No attendee id in the URL: the signed-in user only ever sees their own
     state, even when other attendees exist on the same event (no IDOR surface)."""

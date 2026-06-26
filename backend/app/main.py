@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.logging_config import setup_logging
-from app.routers import events, attendees, rounds, icebreakers, connections, live, likes, notes, me, directory, intents, bookmarks, sponsors
+from app.routers import events, attendees, rounds, icebreakers, connections, live, likes, notes, me, directory, intents, bookmarks, sponsors, demo_requests, feedback
 
 setup_logging(settings.log_format)
 request_logger = logging.getLogger("app.requests")
@@ -21,7 +21,7 @@ app = FastAPI(
 # In development: allow localhost variants (localhost + 127.0.0.1 on any port)
 # In production: allow only frontend_url (e.g. Vercel domain)
 ALLOW_ORIGINS = (
-    ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173"]
+    ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://localhost:5173"]
     if settings.frontend_url in ["http://localhost:3000", "http://127.0.0.1:3000"]
     else [settings.frontend_url]
 )
@@ -79,6 +79,8 @@ app.include_router(directory.router)
 app.include_router(intents.router)
 app.include_router(bookmarks.router)
 app.include_router(sponsors.router)
+app.include_router(demo_requests.router)
+app.include_router(feedback.router)
 
 
 @app.get("/health")

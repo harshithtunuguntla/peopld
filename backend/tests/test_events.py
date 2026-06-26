@@ -57,6 +57,24 @@ def test_get_event_not_found(client):
     assert response.status_code == 404
 
 
+def test_create_event_rejects_implausible_year(client):
+    """A date-picker typo can collapse "2026" to "0206" — still a syntactically
+    valid ISO date, so it must be caught explicitly rather than silently stored
+    (it previously was, and broke the registration/home-feed "is this event in
+    the past" comparisons)."""
+    response = client.post(
+        "/events", json={**EVENT_PAYLOAD, "date": "0206-06-27"}, headers=AUTH
+    )
+    assert response.status_code == 422
+
+
+def test_update_event_rejects_implausible_year(client, event):
+    response = client.patch(
+        f"/events/{event['id']}", json={"date": "0206-06-27"}, headers=AUTH
+    )
+    assert response.status_code == 422
+
+
 def test_list_my_events_only_returns_own(client):
     client.post("/events", json=EVENT_PAYLOAD, headers=AUTH)
     client.post("/events", json={**EVENT_PAYLOAD, "name": "Second"}, headers=AUTH)

@@ -149,7 +149,7 @@ function TablemateRow({
         <Avatar name={mate.name} seed={mate.attendee_id} src={mate.avatar_url} size={40} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <p className="truncate font-medium text-foreground">{mate.name}</p>
+            <p className="min-w-0 flex-1 truncate font-medium text-foreground">{mate.name}</p>
             {mate.wanted && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
                 <UserCheck className="h-2.5 w-2.5" aria-hidden /> You wanted to meet
@@ -540,19 +540,20 @@ export function RoomCodeCheckIn({
 }) {
   const firstName = (state.attendee_name ?? "").trim().split(/\s+/)[0] || "there";
   const returning = state.attendee_status === "left"; // stepped out / marked gone → re-checking in
-  const roster = state.roster ?? { count: 0, preview: [] };
+  const registeredCount = state.roster?.registered_count ?? 0;
+  const branding = useEventBranding(eventId);
+  const sponsors = branding?.sponsors ?? [];
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // A couple of first names to make the highlight feel concrete, not just a count.
-  const previewNames = roster.preview.slice(0, 2).map((p) => p.name.trim().split(/\s+/)[0]);
+  // Pre-event, almost no one has physically checked in yet — "N in the room"
+  // would read as ~0 right up until doors open. Who's *signed up* is the honest,
+  // non-zero headline; "See who's coming" below is where they actually browse.
   const whosHereLine =
-    roster.count === 0
-      ? "Be the first to check in — others will show up here as they arrive."
-      : previewNames.length > 0
-        ? `${previewNames.join(" and ")}${roster.count > previewNames.length ? ` +${roster.count - previewNames.length} more` : ""} ${roster.count === 1 ? "is" : "are"} already here.`
-        : `${roster.count} ${roster.count === 1 ? "person is" : "people are"} already here.`;
+    registeredCount <= 1
+      ? "You're in — do checkout the people who're coming to the event below!"
+      : `${registeredCount} people have signed up for this event.`;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -590,21 +591,18 @@ export function RoomCodeCheckIn({
       </div>
 
       {/* HIGHLIGHT: who's here/coming — the thing worth looking at right after
-          you've already typed an access code, not another code prompt. */}
+          you've already typed an access code, not another code prompt. No
+          hourglass here (nothing's "waiting" pre-event) — just the logo and,
+          if the organizer has any, the rotating sponsor showcase. */}
       <div className="flex flex-col items-center pt-2 text-center">
-        <div className="relative">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-card/60 text-accent">
-            <Users className="h-7 w-7" aria-hidden />
-          </div>
-          <span className="absolute inset-0 -z-10 rounded-2xl bg-accent/20 blur-xl" aria-hidden />
-        </div>
-        <h1 className="mt-4 font-display text-2xl text-foreground">
+        <EventLogo branding={branding} className="mb-4" />
+        {sponsors.length > 0 && <SponsorShowcase sponsors={sponsors} className="mb-2" />}
+        <h1 className="mt-3 font-display text-2xl text-foreground">
           {returning ? "Ready to rejoin?" : "Look who's coming"}
         </h1>
         <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">{whosHereLine}</p>
       </div>
 
-      <RoomRoster roster={roster} />
       <DirectoryLink eventId={eventId} />
 
       {/* SECONDARY: the actual check-in mechanic — present, functional, but calm.

@@ -225,7 +225,7 @@ def _build_roster(rows: list[dict]) -> WaitingRoster:
         preview.append(
             RosterPerson(attendee_id=rid, name=r.get("name") or "Guest", avatar_url=r.get("avatar_url"))
         )
-    return WaitingRoster(count=len(arrived), preview=preview)
+    return WaitingRoster(count=len(arrived), registered_count=len(rows), preview=preview)
 
 
 @router.get("", response_model=LiveStateResponse)

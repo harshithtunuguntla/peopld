@@ -273,7 +273,7 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
               {(p) => <Input {...p} required value={name} onChange={(e) => setName(e.target.value)} />}
             </Field>
             <Field label="Date" name="s-date" required>
-              {(p) => <Input {...p} type="date" required max="9999-12-31" value={date} onChange={(e) => setDate(e.target.value)} />}
+              {(p) => <Input {...p} type="date" required min="2000-01-01" max="2100-12-31" value={date} onChange={(e) => setDate(e.target.value)} />}
             </Field>
             <Field label="Start time" name="s-time" required>
               {(p) => <Input {...p} type="time" required value={time} onChange={(e) => setTime(e.target.value)} />}

@@ -15,6 +15,15 @@ ROUND_TOPIC_MAX_LEN = 80
 ROUND_TOPICS_MAX = 24
 
 
+def validate_event_year(value: Optional[date]) -> Optional[date]:
+    """Reject a syntactically-valid but nonsensical year (e.g. a date picker
+    typo collapsing "2026" to "0206" — still a legal ISO date, so Pydantic's
+    plain `date` type accepts it silently). A real event isn't centuries away."""
+    if value is not None and not (2000 <= value.year <= 2100):
+        raise ValueError(f"'{value.isoformat()}' doesn't look like a real event date — check the year.")
+    return value
+
+
 def normalize_round_topics(value: Optional[List[str]]) -> Optional[List[str]]:
     """Trim each theme, cap length/count, and drop trailing blanks.
 
@@ -55,6 +64,11 @@ class EventCreate(BaseModel):
     def _clean_topics(cls, v: List[str]) -> List[str]:
         return normalize_round_topics(v) or []
 
+    @field_validator("date")
+    @classmethod
+    def _sane_year(cls, v: date) -> date:
+        return validate_event_year(v)
+
 
 class EventUpdate(BaseModel):
     """Organizer-editable config — capacity is never hardcoded (design doc §3)."""
@@ -82,6 +96,11 @@ class EventUpdate(BaseModel):
     @classmethod
     def _clean_topics(cls, v: Optional[List[str]]) -> Optional[List[str]]:
         return normalize_round_topics(v)
+
+    @field_validator("date")
+    @classmethod
+    def _sane_year(cls, v: Optional[date]) -> Optional[date]:
+        return validate_event_year(v)
 
 
 class EventResponse(BaseModel):
@@ -548,10 +567,14 @@ class RosterPerson(BaseModel):
 
 
 class WaitingRoster(BaseModel):
-    """Who's already here, for the waiting-room social proof. `count` is everyone
-    in the room; `preview` is a capped sample of faces to render (the UI shows
-    a `+N` for the remainder)."""
+    """Who's around, for the waiting-room social proof. `count` is everyone who
+    has actually checked in (status 'arrived') — `preview` is a capped sample of
+    *their* faces. `registered_count` is everyone signed up for the event
+    (registered + arrived, excluding no-shows who left) — the honest headline
+    before doors open, since `count` is ~0 the whole pre-event window and stays
+    that way until people start physically checking in."""
     count: int
+    registered_count: int
     preview: list[RosterPerson] = []
 
 

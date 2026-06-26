@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
 
 /**
- * Day-of-event invite: a big scannable QR that just opens the join page, plus the
- * access code shown large so the organizer can read it aloud. The QR deliberately
- * does NOT carry the code — joining always requires typing the code handed out in
- * the room (PRODUCT.md: access-code is the only door in), so a shared screenshot
- * can't let anyone in. Rendered locally (no network image) for flaky venue wifi.
+ * Day-of-event invite: a scannable QR + copyable link that carry the access code
+ * (`/join?code=...`), so scanning or tapping drops a guest straight onto the
+ * register page — no typing needed. The code is still shown large for reading
+ * aloud as a fallback (e.g. a guest without the link). Sharing is on the
+ * organizer: forward the link/QR only to people meant to get in, and regenerate
+ * the code anytime to invalidate anything already shared. Rendered locally (no
+ * network image) for flaky venue wifi.
  */
 export function InviteDialog({
   eventId,
@@ -40,8 +42,10 @@ export function InviteDialog({
       }
       if (cancelled) return;
       setCode(joinCode);
-      // The QR opens the join page only — never the code itself.
-      const u = `${window.location.origin}/join`;
+      // The QR/link carries the code so scanning or tapping joins directly.
+      const u = joinCode
+        ? `${window.location.origin}/join?code=${encodeURIComponent(joinCode)}`
+        : `${window.location.origin}/join`;
       setUrl(u);
       QRCode.toDataURL(u, { width: 512, margin: 1, color: { dark: "#0A0A12", light: "#FFFFFF" } })
         .then((d) => !cancelled && setDataUrl(d))
@@ -107,7 +111,7 @@ export function InviteDialog({
         </div>
 
         <p className="mt-4 text-sm text-muted-foreground">
-          Scan to open the join page, then type the code above. The QR never carries the code.
+          Scan or tap the link to join directly — the code above is just for reading aloud.
         </p>
         <div className="mt-2 flex items-center gap-2">
           <code className="min-w-0 flex-1 truncate rounded-xl border border-border bg-background/50 px-3 py-2.5 text-left text-xs text-foreground">

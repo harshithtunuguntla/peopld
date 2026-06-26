@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
 import { eventColor } from "@/lib/design/event-cover";
-import { cn } from "@/lib/utils";
+import { cn, todayDateStr } from "@/lib/utils";
 
 export interface OrgEvent {
   id: string;
@@ -215,7 +215,9 @@ export function CreateEventForm({ onCreated, onCancel }: { onCreated: () => void
           </Field>
         </div>
         <Field label="Date" name="ev-date" required>
-          {(p) => <Input {...p} type="date" required max="9999-12-31" value={form.date} onChange={set("date")} />}
+          {(p) => (
+            <Input {...p} type="date" required min={todayDateStr()} max="2100-12-31" value={form.date} onChange={set("date")} />
+          )}
         </Field>
         <Field label="Start time" name="ev-time" required>
           {(p) => <Input {...p} type="time" required value={form.time} onChange={set("time")} />}

@@ -73,6 +73,9 @@ def test_roster_counts_only_checked_in_not_registered(client, db, event):
     assert body["roster"]["count"] == 2  # me + Here, not the 2 registered no-shows
     names = {p["name"] for p in body["roster"]["preview"]}
     assert "NoShow1" not in names and "NoShow2" not in names
+    # But the pre-event headline ("N signed up") DOES include them — they're
+    # registered, just not physically checked in yet.
+    assert body["roster"]["registered_count"] == 4
 
 
 def test_live_in_round_seated_with_tablemates(client, db, event):

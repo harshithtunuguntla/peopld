@@ -44,6 +44,7 @@ export interface RosterPerson {
 }
 export interface WaitingRoster {
   count: number;
+  registered_count: number;
   preview: RosterPerson[];
 }
 export interface LiveState {

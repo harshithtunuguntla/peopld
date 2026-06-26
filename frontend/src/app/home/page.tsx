@@ -14,12 +14,7 @@ import { Wordmark } from "@/components/brand/wordmark";
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { apiFetch } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
-import { cn } from "@/lib/utils";
-
-/** Local YYYY-MM-DD (matches how events store their date). */
-function localDateStr(d = new Date()): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+import { cn, todayDateStr } from "@/lib/utils";
 
 /** A friendly first name from the auth identity, if we have one. */
 function firstNameOf(user: User | null): string | null {
@@ -93,7 +88,7 @@ export default function HomePage() {
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load events"));
   }, [authChecked, user, profileChecked, profileComplete]);
 
-  const todayStr = useMemo(() => localDateStr(), []);
+  const todayStr = useMemo(() => todayDateStr(), []);
   const buckets = useMemo(() => {
     const now: EventCardData[] = [];
     const upcoming: EventCardData[] = [];

@@ -9,11 +9,11 @@ type LogoProps = {
   className?: string;
 };
 
-/** The Peopld mark — a round serif "p" tile with a coral status dot. */
+/** The Peopld mark — a round serif "p" tile. A single, consistent letterform
+ *  (no status dot) used everywhere the mark appears. */
 export function Logo({ size = 36, dark = false, className }: LogoProps) {
   const tile = dark ? COLORS.cream : COLORS.ink;
   const glyph = dark ? COLORS.ink : COLORS.paper;
-  const ringColor = dark ? COLORS.ink950 : COLORS.paper;
   return (
     <div
       className={cn("relative flex shrink-0 items-center justify-center rounded-full", className)}
@@ -23,10 +23,6 @@ export function Logo({ size = 36, dark = false, className }: LogoProps) {
       <span className="font-display italic leading-none" style={{ color: glyph, fontSize: size * 0.56 }}>
         p
       </span>
-      <span
-        className="absolute -bottom-0.5 -right-0.5 rounded-full border-2"
-        style={{ background: COLORS.coral, borderColor: ringColor, width: size * 0.28, height: size * 0.28 }}
-      />
     </div>
   );
 }

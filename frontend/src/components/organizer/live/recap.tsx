@@ -170,7 +170,7 @@ export function EventRecap({ eventId, live = false }: { eventId: string; live?: 
             <Card className="p-5 sm:p-6">
               <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.24em] text-accent">
                 <Trophy className="h-3.5 w-3.5" aria-hidden /> / top connectors
-                <InfoHint text="The guests who met the most distinct people across the night." />
+                <InfoHint text="The guests who met the most distinct people across the event." />
               </div>
               {stats.top_connectors.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">No connections recorded yet.</p>
@@ -201,7 +201,7 @@ export function EventRecap({ eventId, live = false }: { eventId: string; live?: 
               <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ explore the room</span>
               <InfoHint text="Every dot is a person; lines connect people we seated together. Thicker/amber lines met more than once; purple lines became mutual matches; node size = people met; colors are the natural groups that formed. Tap anyone to see their relationships." />
             </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">A night of strangers, turned into a network. Tap any person to explore who they met, how often, and how strong each tie became.</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">A room of strangers, turned into a network. Tap any person to explore who they met, how often, and how strong each tie became.</p>
             <DeferredGraph nodes={stats.graph_nodes} edges={stats.graph_edges} />
           </Card>
         </>
@@ -229,7 +229,7 @@ function RecapHero({ phase, stats }: { phase: RecapPhase; stats: Analytics | nul
     );
   const sub =
     phase === "ended"
-      ? "Rounds are closed and everyone's connections are unlocked. Here's the night by the numbers."
+      ? "Rounds are closed and everyone's connections are unlocked. Here's the event by the numbers."
       : phase === "live"
         ? "These numbers grow as each round completes — the full picture lands once you wrap up."
         : "Numbers appear here the moment your first round completes.";

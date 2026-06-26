@@ -378,7 +378,7 @@ export default function EventSettings({ params }: { params: Promise<{ eventId: s
             Leave a row blank to use its default name ({defaultRoundName(0)}, {defaultRoundName(1)}…).
             {targetRounds.trim()
               ? ""
-              : " You haven't set a planned-round count, so themes cycle if the night runs longer."}
+              : " You haven't set a planned-round count, so names cycle if the event runs longer."}
           </p>
         </Section>
 

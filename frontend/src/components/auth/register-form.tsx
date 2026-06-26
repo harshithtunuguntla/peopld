@@ -171,7 +171,7 @@ export function RegisterForm({ onSubmit, busy, error, defaultValues, defaultName
             startIcon={<LinkedInGlyph />}
             value={values.linkedin_url}
             onChange={set("linkedin_url")}
-            placeholder="https://linkedin.com/in/you"
+            placeholder="linkedin.com/in/you"
           />
         )}
       </Field>
@@ -186,7 +186,7 @@ export function RegisterForm({ onSubmit, busy, error, defaultValues, defaultName
             startIcon={<Globe className="h-4 w-4" aria-hidden />}
             value={values.website_url}
             onChange={set("website_url")}
-            placeholder="https://yourproduct.com"
+            placeholder="yourproduct.com"
           />
         )}
       </Field>

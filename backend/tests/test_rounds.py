@@ -326,6 +326,86 @@ def test_run_sheet_empty_when_too_few(client, db, event):
     assert body["rounds"] == []
 
 
+def test_run_sheet_freezes_already_played_rounds(client, db, event):
+    """A round that actually happened is read verbatim from real
+    table_assignments, not regenerated — and is flagged `actual`."""
+    db.table("events").update({"seats_per_table": 3, "num_tables": 2}).eq("id", event["id"]).execute()
+    people = make_arrived(db, event["id"], 6)
+    rnd = make_round(db, event["id"], round_number=1, status="completed")
+    for i, p in enumerate(people):
+        make_assignment(db, event["id"], rnd["id"], p["id"], table_number=1 if i < 3 else 2)
+
+    body = client.get(f"/events/{event['id']}/rounds/run-sheet", headers=AUTH).json()
+    round1 = next(r for r in body["rounds"] if r["round_number"] == 1)
+    assert round1["actual"] is True
+    table1 = next(t for t in round1["tables"] if t["table_number"] == 1)
+    table2 = next(t for t in round1["tables"] if t["table_number"] == 2)
+    assert sorted(table1["people"]) == sorted(p["name"] for p in people[:3])
+    assert sorted(table2["people"]) == sorted(p["name"] for p in people[3:])
+
+
+def test_run_sheet_adding_a_person_never_changes_a_played_round(client, db, event):
+    """The exact regression report: adding someone mid-event must reshape only
+    the FUTURE plan — round 1, already played, comes back byte-for-byte the
+    same, not a wholesale re-plan from round 1 that drags the new person in."""
+    db.table("events").update(
+        {"seats_per_table": 3, "num_tables": 2, "target_rounds": 3}
+    ).eq("id", event["id"]).execute()
+    people = make_arrived(db, event["id"], 6)
+    rnd = make_round(db, event["id"], round_number=1, status="completed")
+    for i, p in enumerate(people):
+        make_assignment(db, event["id"], rnd["id"], p["id"], table_number=1 if i < 3 else 2)
+
+    before = client.get(f"/events/{event['id']}/rounds/run-sheet", headers=AUTH).json()
+    round1_before = next(r for r in before["rounds"] if r["round_number"] == 1)
+
+    make_arrived(db, event["id"], 1, prefix="NewPerson")  # joins mid-event
+
+    after = client.get(f"/events/{event['id']}/rounds/run-sheet", headers=AUTH).json()
+    round1_after = next(r for r in after["rounds"] if r["round_number"] == 1)
+
+    assert round1_after == round1_before  # untouched by the new arrival
+    assert after["total_people"] == 7  # the future projection does grow
+
+
+def test_run_sheet_projects_future_rounds_with_real_history(client, db, event):
+    """Round 2+ are projections, marked `actual=False`, and honor round 1's
+    real pairings — the planner doesn't just repeat the same table-1 trio."""
+    db.table("events").update(
+        {"seats_per_table": 3, "num_tables": 2, "target_rounds": 2}
+    ).eq("id", event["id"]).execute()
+    people = make_arrived(db, event["id"], 6)
+    rnd = make_round(db, event["id"], round_number=1, status="completed")
+    for i, p in enumerate(people):
+        make_assignment(db, event["id"], rnd["id"], p["id"], table_number=1 if i < 3 else 2)
+
+    body = client.get(f"/events/{event['id']}/rounds/run-sheet", headers=AUTH).json()
+    assert [r["round_number"] for r in body["rounds"]] == [1, 2]
+    round1, round2 = body["rounds"]
+    assert round1["actual"] is True
+    assert round2["actual"] is False
+
+    table1_round1 = next(t for t in round1["tables"] if t["table_number"] == 1)["people"]
+    for t in round2["tables"]:
+        assert sorted(t["people"]) != sorted(table1_round1)
+
+
+def test_run_sheet_keeps_played_history_when_room_empties_out(client, db, event):
+    """Already-played rounds must survive even when too few people remain to
+    project a future round — the real record is never wiped for that reason."""
+    db.table("events").update({"seats_per_table": 3, "num_tables": 2}).eq("id", event["id"]).execute()
+    people = make_arrived(db, event["id"], 6)
+    rnd = make_round(db, event["id"], round_number=1, status="completed")
+    for i, p in enumerate(people):
+        make_assignment(db, event["id"], rnd["id"], p["id"], table_number=1 if i < 3 else 2)
+    for p in people[2:]:
+        db.table("attendees").update({"status": "left"}).eq("id", p["id"]).execute()
+
+    body = client.get(f"/events/{event['id']}/rounds/run-sheet", headers=AUTH).json()
+    assert len(body["rounds"]) == 1
+    assert body["rounds"][0]["actual"] is True
+
+
 # --- organizer table-size bounds reach the planner ---
 
 

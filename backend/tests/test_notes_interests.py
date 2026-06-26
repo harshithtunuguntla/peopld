@@ -52,6 +52,27 @@ def test_self_edit_empty_body_is_noop(client, db, event):
     )
     assert res.status_code == 200
     assert res.json()["role"] == "Founder"
+    assert db.store.get("user_profiles", []) == []  # no change → no sync needed
+
+
+def test_self_edit_syncs_the_global_profile(client, db, event):
+    """Fixing a typo on this event's profile is a fix to THE profile — it must
+    flow back into the one global profile, not fork into an event-only copy."""
+    make_attendee(db, event["id"], name="Me", role="Founder", user_id=ATTENDEE_USER_ID)
+    res = client.patch(
+        f"/events/{event['id']}/attendees/me",
+        json={"role": "Founder & CEO", "website_url": "https://me.dev"},
+        headers=ATTENDEE_AUTH,
+    )
+    assert res.status_code == 200
+
+    profiles = db.store.get("user_profiles", [])
+    assert len(profiles) == 1
+    assert profiles[0]["role"] == "Founder & CEO"
+    assert profiles[0]["website_url"] == "https://me.dev"
+
+    got = client.get("/me/profile", headers=ATTENDEE_AUTH).json()
+    assert got["role"] == "Founder & CEO"
 
 
 # --- Private connection notes ---

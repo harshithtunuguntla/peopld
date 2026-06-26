@@ -900,72 +900,108 @@ def get_run_sheet(
     organizer_id: str = Depends(get_current_organizer_id),
     db: Client = Depends(get_supabase),
 ):
-    """Pre-generate the WHOLE event's seating as a printable backup (REQ: event-day
-    resilience). Plans every round at once from a clean slate so the organizer has a
-    paper fallback if the app dies mid-event.
+    """The event-day seating backup (REQ: event-day resilience) — but anchored to
+    reality, not regenerated from scratch on every request.
 
-    Built over the people already arrived; before doors (fewer than 3 arrived) it
-    falls back to the registered crowd so the sheet is useful as pre-event insurance.
-    Caveat the UI states: it assumes these are the people who show up.
+    Already-PLAYED rounds (active or completed) are read verbatim from the real
+    `table_assignments` and marked `actual=True`: frozen, exactly as seated,
+    forever. Only the rounds that haven't happened yet are PROJECTED — planned
+    with `plan_rounds` seeded by the REAL pairing history from those played
+    rounds — so adding or removing a person reshapes the future plan without
+    ever rewriting the past, and without re-seating people who already met.
+
+    Before the first round is published, there's no history yet, so this is
+    exactly the old behaviour: one clean-slate projection for the whole event
+    (today's pre-event insurance copy). Built over the people already arrived;
+    before doors (fewer than 3 arrived) it falls back to the registered crowd.
     """
     event = fetch_event_or_404(db, event_id)
     require_event_owner(event, organizer_id)
 
+    num_tables, seats = event["num_tables"], event["seats_per_table"]
+    min_size, max_size = _table_bounds(event)
+    topics = event.get("round_topics") or []
+    all_attendees = (
+        db.table("attendees").select("*").eq("event_id", event_id).execute().data or []
+    )
+    names = {str(a["id"]): a["name"] for a in all_attendees}
+
+    def _theme_for(round_number: int) -> str | None:
+        idx = round_number - 1
+        return topics[idx] if idx < len(topics) and topics[idx] else None
+
+    def _seating_to_tables(seating: dict[str, int]) -> list[RunSheetTable]:
+        by_table: dict[int, list[str]] = {}
+        for aid, table_number in seating.items():
+            by_table.setdefault(table_number, []).append(names.get(str(aid), "—"))
+        return [RunSheetTable(table_number=t, people=sorted(p)) for t, p in sorted(by_table.items())]
+
+    # 1) Already-played rounds — the real record, never regenerated.
+    played_rounds = sorted(
+        (db.table("rounds").select("*").eq("event_id", event_id).execute().data or []),
+        key=lambda r: r["round_number"],
+    )
+    all_assignments = (
+        db.table("table_assignments").select("*").eq("event_id", event_id).execute().data or []
+    )
+    assignments_by_round: dict[str, dict[str, int]] = {}
+    for a in all_assignments:
+        assignments_by_round.setdefault(str(a["round_id"]), {})[str(a["attendee_id"])] = a["table_number"]
+
+    rounds_out: list[RunSheetRound] = [
+        RunSheetRound(
+            round_number=r["round_number"],
+            theme=_theme_for(r["round_number"]),
+            tables=_seating_to_tables(assignments_by_round.get(str(r["id"]), {})),
+            actual=True,
+        )
+        for r in played_rounds
+    ]
+
+    # 2) The remaining rounds — projected, seeded with the real history above.
     pool = _arrived_pool(db, event_id)
     basis = "arrived"
     if len(pool) < 3:
-        rows = (
-            db.table("attendees")
-            .select("*")
-            .eq("event_id", event_id)
-            .neq("status", "left")
-            .execute()
-            .data
-            or []
-        )
-        pool = [a for a in rows if (a.get("tag") or "attendee") not in NON_SEATED_TAGS]
+        pool = [
+            a for a in all_attendees
+            if a["status"] != "left" and (a.get("tag") or "attendee") not in NON_SEATED_TAGS
+        ]
         basis = "registered"
-
-    num_tables, seats = event["num_tables"], event["seats_per_table"]
-    names = {str(a["id"]): a["name"] for a in pool}
     ids = sorted(str(a["id"]) for a in pool)
 
-    base = RunSheet(
+    if len(ids) >= 3:
+        intents = _meeting_intents(db, event_id, set(ids))
+        next_number = _next_round_number(db, event_id)
+        horizon = _resolve_horizon(event, len(ids), next_number)
+        pair_counts = _pair_counts(db, event_id)  # real history — empty pre-event
+        try:
+            result = plan_rounds(ids, pair_counts, num_tables, seats, horizon,
+                                 intents=intents, min_size=min_size, max_size=max_size)
+        except RotationError as exc:
+            if not rounds_out:
+                # Nothing played yet AND no valid plan exists — genuinely an error.
+                raise HTTPException(status_code=422, detail=str(exc))
+            result = None  # already have real rounds to show; skip the projection
+        if result is not None:
+            for offset, seating in enumerate(result.rounds):
+                round_number = next_number + offset
+                rounds_out.append(
+                    RunSheetRound(
+                        round_number=round_number,
+                        theme=_theme_for(round_number),
+                        tables=_seating_to_tables(seating),
+                        actual=False,
+                    )
+                )
+
+    return RunSheet(
         event_name=event["name"],
         basis=basis,
         num_tables=num_tables,
         seats_per_table=seats,
         total_people=len(ids),
-        rounds=[],
+        rounds=rounds_out,
     )
-    if len(ids) < 3:
-        return base  # not enough people to seat yet — empty sheet, no error
-
-    intents = _meeting_intents(db, event_id, set(ids))
-    horizon = _resolve_horizon(event, len(ids), 1)  # full plan from round 1
-    min_size, max_size = _table_bounds(event)
-    try:
-        # Clean slate (no pairing history) — this is the canonical plan for the night.
-        result = plan_rounds(ids, {}, num_tables, seats, horizon, intents=intents,
-                             min_size=min_size, max_size=max_size)
-    except RotationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-
-    topics = event.get("round_topics") or []
-    rounds_out: list[RunSheetRound] = []
-    for idx, seating in enumerate(result.rounds):
-        by_table: dict[int, list[str]] = {}
-        for aid, table_number in seating.items():
-            by_table.setdefault(table_number, []).append(names.get(aid, "—"))
-        tables = [
-            RunSheetTable(table_number=t, people=sorted(people))
-            for t, people in sorted(by_table.items())
-        ]
-        theme = topics[idx] if idx < len(topics) and topics[idx] else None
-        rounds_out.append(RunSheetRound(round_number=idx + 1, theme=theme, tables=tables))
-
-    base.rounds = rounds_out
-    return base
 
 
 @router.get("/current", response_model=RoundWithAssignmentsResponse)

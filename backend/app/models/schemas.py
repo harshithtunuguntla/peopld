@@ -1,3 +1,5 @@
+import re
+
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Literal, List
 from datetime import date, time, datetime
@@ -182,9 +184,11 @@ class AttendeeCreate(BaseModel):
 
 
 class AttendeeProfileDefaults(BaseModel):
-    """The caller's latest reusable profile fields, used to prefill the next
-    event registration. Derived from their own prior attendee rows; not a new
-    global profile store."""
+    """The caller's reusable profile fields, used to prefill the next event
+    registration. Sourced from their global profile (`user_profiles`) when one
+    exists; for a user who registered before that table existed, derived from
+    their most recent attendee row instead, so nobody is forced to retype data
+    we already have."""
     name: Optional[str] = None
     role: Optional[str] = None
     company: Optional[str] = None
@@ -193,6 +197,45 @@ class AttendeeProfileDefaults(BaseModel):
     linkedin_url: Optional[str] = None
     website_url: Optional[str] = None
     interests: list[str] = []
+
+
+# --- Global user profile (one per signed-in user, not per event) ---
+
+class MyProfileUpdate(BaseModel):
+    """Body for PUT /me/profile. Name + role mirror AttendeeCreate's
+    requirements — a profile isn't "complete" without them."""
+    name: str = Field(min_length=1, max_length=120)
+    role: str = Field(min_length=1, max_length=120)
+    company: Optional[str] = None
+    description: Optional[str] = None
+    looking_for: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    website_url: Optional[str] = None
+    interests: list[str] = []
+    avatar_url: Optional[str] = None
+
+    @field_validator("name", "role")
+    @classmethod
+    def _strip_required(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("This field is required")
+        return v
+
+
+class MyProfileResponse(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    company: Optional[str] = None
+    description: Optional[str] = None
+    looking_for: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    website_url: Optional[str] = None
+    interests: list[str] = []
+    avatar_url: Optional[str] = None
+    # True once name + role exist (saved global profile, or derived from a prior
+    # attendee row) — the signal the frontend uses to skip the mandatory setup gate.
+    complete: bool = False
 
 
 class WalkInCreate(BaseModel):
@@ -389,13 +432,22 @@ class RunSheetRound(BaseModel):
     round_number: int
     theme: Optional[str] = None  # organizer agenda name for this round, if set
     tables: list[RunSheetTable]
+    # True = read verbatim from real table_assignments — this round was actually
+    # played and is frozen, exactly as seated. False = projected from the real
+    # history for a round that hasn't happened yet; it adapts if the roster
+    # changes, but never rewrites an `actual` round above it.
+    actual: bool = False
 
 
 class RunSheet(BaseModel):
-    """A pre-generated, printable seating plan for the whole event — the event-day
-    backup. If the app falls over, the organizer hands these tables out (or reads
-    them aloud) and the night continues. `basis` says whether it was built over the
-    people already arrived or the full registered list (pre-doors insurance)."""
+    """A seating plan for the whole event — the event-day backup. If the app
+    falls over, the organizer hands these tables out (or reads them aloud) and
+    the event continues. Already-played rounds (`actual=True`) are the real
+    record and never change; rounds that haven't happened yet are a projection
+    seeded with that real history, so adding/removing people reshapes the future
+    without ever touching the past. `basis` says whether the projection was
+    built over the people already arrived or the full registered list
+    (pre-doors insurance, before anyone's checked in)."""
     event_name: str
     basis: Literal["arrived", "registered"]
     num_tables: int
@@ -451,10 +503,11 @@ class RoundDraftResponse(BaseModel):
 
 class Tablemate(BaseModel):
     """A person at your table this round. Name + role + avatar + conversation
-    seeds (interests / looking_for) — but NO contact details (LinkedIn/website),
-    which belong to the post-event rolodex, never the live path. `liked` is
-    whether *I* (the caller) have liked this person; `shared_interests` are tags
-    we both picked, to break the ice."""
+    seeds (interests / looking_for), plus their public professional links
+    (LinkedIn/website) so you can look someone up while you're sitting with them
+    — not a phone number or email, just the links they already chose to share for
+    networking. `liked` is whether *I* (the caller) have liked this person;
+    `shared_interests` are tags we both picked, to break the ice."""
     attendee_id: UUID
     name: str
     role: str
@@ -463,6 +516,8 @@ class Tablemate(BaseModel):
     interests: list[str] = []
     shared_interests: list[str] = []
     avatar_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    website_url: Optional[str] = None
     liked: bool = False
     wanted: bool = False  # the caller picked (pre-event) to meet this tablemate → nudge
     note: Optional[str] = None  # the caller's OWN private note about this person, so it pre-fills at the table
@@ -620,6 +675,31 @@ class BookmarkResponse(BaseModel):
     saved: bool
 
 
+# --- Post-event feedback / testimonials (recap screen, never forced) ---
+
+class FeedbackCreate(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    comment: Optional[str] = Field(default=None, max_length=1000)
+
+    @field_validator("comment")
+    @classmethod
+    def _blank_to_none(cls, v: Optional[str]) -> Optional[str]:
+        v = (v or "").strip()
+        return v or None
+
+
+class FeedbackResponse(BaseModel):
+    submitted: bool = True
+    rating: int
+    comment: Optional[str] = None
+
+
+class MyFeedbackResponse(BaseModel):
+    submitted: bool
+    rating: Optional[int] = None
+    comment: Optional[str] = None
+
+
 # --- Sponsors & event branding (shown between rounds + in the lobby) ---
 
 class SponsorInput(BaseModel):
@@ -730,3 +810,44 @@ class LiveStats(BaseModel):
     matches_count: int    # mutual likes so far (per pair)
     active_round_number: Optional[int] = None
     rounds_completed: int = 0  # finished rounds → drives the between-rounds "Round X of N" status
+
+
+# --- Book-a-demo (public marketing lead capture) ---
+
+# A pragmatic email check — we don't pull in the email-validator dependency just
+# for one public form. Must look like local@domain.tld; the real follow-up is by hand.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class DemoRequestCreate(BaseModel):
+    """A "book a demo" lead from the marketing site. Public, unauthenticated."""
+
+    name: str = Field(min_length=1, max_length=120)
+    email: str = Field(min_length=3, max_length=200)
+    company: Optional[str] = Field(default=None, max_length=160)
+    message: Optional[str] = Field(default=None, max_length=1000)
+
+    @field_validator("name", "email")
+    @classmethod
+    def _strip_required(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("This field is required")
+        return v
+
+    @field_validator("company", "message")
+    @classmethod
+    def _strip_optional(cls, v: Optional[str]) -> Optional[str]:
+        v = (v or "").strip()
+        return v or None
+
+    @field_validator("email")
+    @classmethod
+    def _valid_email(cls, v: str) -> str:
+        if not _EMAIL_RE.match(v):
+            raise ValueError("Enter a valid email address")
+        return v
+
+
+class DemoRequestResponse(BaseModel):
+    ok: bool = True

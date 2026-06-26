@@ -32,16 +32,21 @@ export const roundFor = (index: number): Round => ROUNDS[index % ROUNDS.length];
 /**
  * A round resolved for a specific event: same canonical color identity, but the
  * NAME comes from the organizer-authored agenda (`event.round_topics`) when set,
- * falling back to the canonical placeholder name. `index` is 0-based.
+ * falling back to a plain "Round N". `index` is 0-based.
+ *
+ * Rounds are random reshuffles, not themed segments, so the default label is the
+ * honest "Round N" — organizers can still name a round in Settings when they
+ * genuinely want a theme (that authored name wins here).
  */
 export const agendaFor = (index: number, topics?: string[] | null): Round => {
   const base = roundFor(index);
   const authored = topics?.[index]?.trim();
-  return authored ? { ...base, name: authored } : base;
+  return { ...base, name: authored || defaultRoundName(index) };
 };
 
-/** The default agenda names (canonical), used as placeholders in the editor. */
-export const defaultRoundName = (index: number): string => roundFor(index).name;
+/** The default round label — a plain, honest "Round N" (1-based). Used as the
+ *  agenda fallback and as the placeholder in the round-naming editor. */
+export const defaultRoundName = (index: number): string => `Round ${index + 1}`;
 
 /** Light fills that need near-black text instead of white. */
 const LIGHT_FILLS = new Set<string>([

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
 import { motion } from "framer-motion";
-import { Loader2, Users, Sparkles, Heart, HandHeart, ArrowRight, PartyPopper, UserCheck, Linkedin, Globe } from "lucide-react";
+import { Loader2, Users, Sparkles, Heart, HandHeart, ArrowRight, PartyPopper, UserCheck, Linkedin, Globe, Star, Check } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
@@ -35,7 +35,7 @@ interface IntentMatch {
   website_url: string | null;
 }
 
-/** Post-event celebration: your night in numbers, then into the rolodex. */
+/** Post-event celebration: your event in numbers, then into the rolodex. */
 export default function RecapPage({ params }: { params: Promise<{ eventId: string }> }) {
   const { eventId } = use(params);
   const router = useRouter();
@@ -45,6 +45,10 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
   const [matches, setMatches] = useState<IntentMatch[]>([]);
   const [eventName, setEventName] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  // "show" only once we know they haven't already submitted — never flashes the
+  // card before that's confirmed, and a fetch failure just keeps it hidden
+  // (the ask is optional; it's never worth erroring the page over).
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -73,6 +77,9 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
         // never block the recap on it.
         apiFetch<{ matches: IntentMatch[] }>(`/events/${eventId}/intents/matches`)
           .then((m) => !cancelled && setMatches(m.matches))
+          .catch(() => {});
+        apiFetch<{ submitted: boolean }>(`/events/${eventId}/feedback/me`)
+          .then((f) => !cancelled && setFeedbackVisible(!f.submitted))
           .catch(() => {});
       } catch (e) {
         if (cancelled) return;
@@ -113,7 +120,7 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
         </div>
         <p className="mt-4 text-[11px] uppercase tracking-[0.3em] text-accent">That&apos;s a wrap</p>
         <h1 className="mt-2 text-balance font-display text-[clamp(28px,8vw,40px)] leading-[1.05] tracking-[-0.02em] text-foreground">
-          Your night at {eventName || "the event"}
+          Your time at {eventName || "the event"}
         </h1>
         <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-muted-foreground sm:text-base">
           A quick wrap of who you met, who matched, and where to continue the conversations.
@@ -145,7 +152,7 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
 
       {data && (
         <>
-          {/* The night in numbers */}
+          {/* The event in numbers */}
           <div className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <RecapStat icon={Users} value={data.total_people_met} label={data.total_people_met === 1 ? "person met" : "people met"} bg={COLORS.coral} delay={0.05} />
             <RecapStat icon={Sparkles} value={data.rounds_count} label={data.rounds_count === 1 ? "round" : "rounds"} bg={COLORS.ice} delay={0.1} />
@@ -226,9 +233,109 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
               Your contacts stay here for good — names and how to reach them.
             </p>
           </motion.div>
+
+          {feedbackVisible && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.32, duration: 0.4 }}
+              className="mx-auto mt-7 max-w-xl"
+            >
+              <FeedbackCard eventId={eventId} onDone={() => setFeedbackVisible(false)} />
+            </motion.div>
+          )}
         </>
       )}
     </LiveShell>
+  );
+}
+
+/** A calm, dismissible testimonial ask — last thing on the recap page, after
+ * the main CTA. Never blocks anything; "Skip" just hides it for this visit,
+ * and it never shows again once submitted (checked server-side via /feedback/me
+ * so that holds across devices, not just this browser). */
+function FeedbackCard({ eventId, onDone }: { eventId: string; onDone: () => void }) {
+  const [rating, setRating] = useState(0);
+  const [hovered, setHovered] = useState(0);
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function submit() {
+    if (!rating || busy) return;
+    setBusy(true);
+    try {
+      await apiFetch(`/events/${eventId}/feedback`, {
+        method: "POST",
+        body: JSON.stringify({ rating, comment: comment.trim() || null }),
+      });
+      setDone(true);
+      setTimeout(onDone, 1400);
+    } catch {
+      setBusy(false);
+    }
+  }
+
+  if (done) {
+    return (
+      <div className="flex items-center justify-center gap-2 rounded-2xl border border-success/30 bg-success/10 px-5 py-4 text-sm text-success">
+        <Check className="h-4 w-4" aria-hidden /> Thanks for the feedback!
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-border bg-card/50 p-5">
+      <p className="font-display text-base text-foreground">How was it?</p>
+      <p className="mt-0.5 text-sm text-muted-foreground">30 seconds — tell us how you felt about tonight.</p>
+
+      <div className="mt-3 flex items-center gap-1">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => setRating(n)}
+            onMouseEnter={() => setHovered(n)}
+            onMouseLeave={() => setHovered(0)}
+            aria-label={`${n} star${n === 1 ? "" : "s"}`}
+            className="p-0.5 text-muted-foreground transition-colors hover:text-accent"
+          >
+            <Star
+              className={cn("h-7 w-7", (hovered || rating) >= n && "fill-accent text-accent")}
+              aria-hidden
+            />
+          </button>
+        ))}
+      </div>
+
+      <textarea
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        rows={2}
+        maxLength={1000}
+        placeholder="Anything you'd want to tell us? (optional)"
+        className="mt-3 w-full resize-none rounded-xl border border-input bg-secondary/50 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      />
+
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onDone}
+          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Skip
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!rating || busy}
+          className={cn(buttonVariants({ variant: "accent", size: "default" }), "gap-1.5 disabled:opacity-50")}
+        >
+          {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+          Submit
+        </button>
+      </div>
+    </div>
   );
 }
 

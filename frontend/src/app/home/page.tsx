@@ -41,6 +41,8 @@ export default function HomePage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [profileChecked, setProfileChecked] = useState(false);
+  const [profileComplete, setProfileComplete] = useState(false);
   const [events, setEvents] = useState<EventCardData[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -57,15 +59,39 @@ export default function HomePage() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // The feed loads for everyone, but `registered` only resolves once signed in,
-  // so (re)fetch whenever the user changes.
+  // First stop after sign-in: a one-time profile is mandatory before the hub
+  // (events / join code / connections) shows at all. A signed-in user with no
+  // saved profile gets routed to set one up; saving there sends them right
+  // back here. A network failure fails OPEN (don't trap someone out of the
+  // app over a flaky request) rather than blocking forever.
   useEffect(() => {
     if (!authChecked || !user) return;
+    setProfileChecked(false);
+    apiFetch<{ complete: boolean }>("/me/profile")
+      .then(({ complete }) => {
+        if (!complete) {
+          router.replace("/me/profile?next=%2Fhome");
+          return;
+        }
+        setProfileComplete(true);
+        setProfileChecked(true);
+      })
+      .catch(() => {
+        setProfileComplete(true);
+        setProfileChecked(true);
+      });
+  }, [authChecked, user, router]);
+
+  // The feed loads for everyone, but `registered` only resolves once signed in,
+  // so (re)fetch whenever the user changes. Held until the profile gate clears
+  // so a soon-to-redirect visitor doesn't fire an events fetch for nothing.
+  useEffect(() => {
+    if (!authChecked || !user || !profileChecked || !profileComplete) return;
     setError(null);
     apiFetch<EventCardData[]>("/events")
       .then(setEvents)
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load events"));
-  }, [authChecked, user]);
+  }, [authChecked, user, profileChecked, profileComplete]);
 
   const todayStr = useMemo(() => localDateStr(), []);
   const buckets = useMemo(() => {
@@ -108,6 +134,16 @@ export default function HomePage() {
       <AuthShell>
         <SignInPanel nextPath="/home" />
       </AuthShell>
+    );
+  }
+
+  // Profile gate in flight (or about to redirect to setup) — don't flash the
+  // hub underneath it.
+  if (!profileChecked) {
+    return (
+      <Centered>
+        <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> Loading…
+      </Centered>
     );
   }
 

@@ -34,7 +34,7 @@ export function RelationshipInsights({ nodes, edges }: { nodes: GraphNode[]; edg
         <Card className="p-5 sm:p-6">
           <SectionHead
             title="strongest relationships"
-            info="The bonds the night built. Strength is how many times a pair shared a table — Met once, Building (2×), or Strong (3+×); a heart marks a mutual match. The best candidates to reconnect at the next event."
+            info="The bonds the event built. Strength is how many times a pair shared a table — Met once, Building (2×), or Strong (3+×); a heart marks a mutual match. The best candidates to reconnect at the next event."
           />
           {ins.strongest.length === 0 ? (
             <p className="mt-4 text-sm text-muted-foreground">No relationships recorded yet.</p>

@@ -141,11 +141,11 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
     const linkedin = normalizeUrl(form.linkedin_url);
     const website = normalizeUrl(form.website_url);
     if (form.linkedin_url.trim() && !linkedin) {
-      setError("That LinkedIn link doesn't look right. Try linkedin.com/in/you");
+      setError("That doesn't look like a link. Try linkedin.com/in/you");
       return;
     }
     if (form.website_url.trim() && !website) {
-      setError("That website link doesn't look right. Try yourproduct.com");
+      setError("That doesn't look like a link. Try yourproduct.com");
       return;
     }
     setBusy(true);
@@ -217,13 +217,13 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
 
       <Field label="LinkedIn" name="p-linkedin">
         {(p) => (
-          <Input {...p} type="url" inputMode="url" startIcon={<LinkedInGlyph />} value={form.linkedin_url} onChange={set("linkedin_url")} placeholder="https://linkedin.com/in/you" />
+          <Input {...p} type="url" inputMode="url" startIcon={<LinkedInGlyph />} value={form.linkedin_url} onChange={set("linkedin_url")} placeholder="linkedin.com/in/you" />
         )}
       </Field>
 
       <Field label="Website" name="p-website" hint="Your site or product link.">
         {(p) => (
-          <Input {...p} type="url" inputMode="url" startIcon={<Globe className="h-4 w-4" aria-hidden />} value={form.website_url} onChange={set("website_url")} placeholder="https://yourproduct.com" />
+          <Input {...p} type="url" inputMode="url" startIcon={<Globe className="h-4 w-4" aria-hidden />} value={form.website_url} onChange={set("website_url")} placeholder="yourproduct.com" />
         )}
       </Field>
 

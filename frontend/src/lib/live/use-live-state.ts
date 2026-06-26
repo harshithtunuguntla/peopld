@@ -23,6 +23,8 @@ export interface Tablemate {
   interests: string[];
   shared_interests: string[];
   avatar_url: string | null;
+  linkedin_url: string | null;
+  website_url: string | null;
   liked: boolean;
   wanted: boolean; // I picked this person pre-event (Phase 3a) → at-table nudge
   note: string | null; // my own private note about this person (pre-fills the at-table note editor)

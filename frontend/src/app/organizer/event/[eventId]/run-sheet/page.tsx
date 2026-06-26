@@ -2,7 +2,7 @@
 
 import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Printer, Loader2, AlertTriangle, Search, Download, MapPin, X } from "lucide-react";
+import { ArrowLeft, Printer, Loader2, AlertTriangle, Search, Download, MapPin, X, CheckCircle2, Sparkles } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { useOrganizer } from "@/lib/organizer/use-organizer";
@@ -17,6 +17,10 @@ interface RunSheetRound {
   round_number: number;
   theme: string | null;
   tables: RunSheetTable[];
+  // true = read verbatim from real seating — already played, frozen. false =
+  // a projection for a round that hasn't happened yet (reshapes if the roster
+  // changes; never rewrites an actual round).
+  actual: boolean;
 }
 interface RunSheet {
   event_name: string;
@@ -84,10 +88,18 @@ export default function RunSheetPage({ params }: { params: Promise<{ eventId: st
 
   function exportCsv() {
     if (!sheet) return;
-    const rows: string[][] = [["Round", "Theme", "Table", "Person"]];
+    const rows: string[][] = [["Round", "Status", "Theme", "Table", "Person"]];
     sheet.rounds.forEach((r) =>
       r.tables.forEach((t) =>
-        t.people.forEach((p) => rows.push([String(r.round_number), r.theme || defaultRoundName(r.round_number - 1), String(t.table_number), p])),
+        t.people.forEach((p) =>
+          rows.push([
+            String(r.round_number),
+            r.actual ? "Played" : "Projected",
+            r.theme || defaultRoundName(r.round_number - 1),
+            String(t.table_number),
+            p,
+          ]),
+        ),
       ),
     );
     const csv = rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -108,6 +120,7 @@ export default function RunSheetPage({ params }: { params: Promise<{ eventId: st
   }
 
   const hasRounds = !!sheet && sheet.rounds.length > 0;
+  const hasActualRounds = !!sheet && sheet.rounds.some((r) => r.actual);
 
   return (
     <div className="min-h-dvh bg-white text-zinc-900">
@@ -220,10 +233,21 @@ export default function RunSheetPage({ params }: { params: Promise<{ eventId: st
                 {sheet.rounds.length === 1 ? "round" : "rounds"} · {sheet.num_tables} tables of {sheet.seats_per_table}
               </p>
               <p className="mt-2 rounded-lg bg-zinc-100 px-3 py-2 text-xs text-zinc-600">
-                {sheet.basis === "arrived"
-                  ? "Built from the people checked in right now."
-                  : "Built from the registered guest list (nobody checked in yet)."}{" "}
-                It assumes these are the people who attend — re-print after check-in for the exact plan.
+                {hasActualRounds ? (
+                  <>
+                    Rounds marked <span className="font-semibold text-emerald-700">Played</span> are the real record —
+                    locked in exactly as seated. Rounds marked{" "}
+                    <span className="font-semibold text-amber-700">Projected</span> are the plan ahead; they adapt as
+                    people check in or leave, without touching what already happened.
+                  </>
+                ) : (
+                  <>
+                    {sheet.basis === "arrived"
+                      ? "Built from the people checked in right now."
+                      : "Built from the registered guest list (nobody checked in yet)."}{" "}
+                    It assumes these are the people who attend — re-print after check-in for the exact plan.
+                  </>
+                )}
               </p>
             </header>
 
@@ -235,9 +259,18 @@ export default function RunSheetPage({ params }: { params: Promise<{ eventId: st
               <div className="space-y-8">
                 {sheet.rounds.map((rnd) => (
                   <section key={rnd.round_number} id={`round-${rnd.round_number}`} className="scroll-mt-44 break-inside-avoid">
-                    <h2 className="mb-3 text-lg font-semibold">
+                    <h2 className="mb-3 flex flex-wrap items-center gap-2 text-lg font-semibold">
                       Round {rnd.round_number}
-                      <span className="ml-2 font-normal text-zinc-500">{rnd.theme || defaultRoundName(rnd.round_number - 1)}</span>
+                      <span className="font-normal text-zinc-500">{rnd.theme || defaultRoundName(rnd.round_number - 1)}</span>
+                      {rnd.actual ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 print:border print:border-emerald-700">
+                          <CheckCircle2 className="h-3 w-3" aria-hidden /> Played
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 print:border print:border-amber-700">
+                          <Sparkles className="h-3 w-3" aria-hidden /> Projected
+                        </span>
+                      )}
                     </h2>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                       {rnd.tables.map((t) => (

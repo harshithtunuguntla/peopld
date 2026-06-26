@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { ArrowLeft, Check, Globe, Loader2 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
-import { loadProfileDraft, saveProfileDraft } from "@/lib/profile-draft";
+import { apiFetch } from "@/lib/api";
 import { isAcceptableUrl, normalizeUrl } from "@/lib/url";
 import type { RegisterValues } from "@/components/auth/register-form";
 import { Wordmark } from "@/components/brand/wordmark";
@@ -30,12 +30,28 @@ const EMPTY: RegisterValues = {
   interests: [],
 };
 
+type MyProfile = RegisterValues & { complete: boolean };
+
 type Errors = Partial<Record<keyof RegisterValues, string>>;
 
-export default function PersonalProfilePage() {
+/**
+ * Your one global profile — captured once, reused as the prefill for every
+ * event you join. Doubles as the mandatory first-login setup screen: arriving
+ * with `?next=/home` (only ever set by the /home gate) means save-and-continue
+ * routes there instead of staying on this page; visited directly (e.g. "Edit
+ * profile" from the account menu) it behaves as a normal editable page.
+ */
+export default function PersonalProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next } = use(searchParams);
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [profile, setProfile] = useState<MyProfile | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -48,7 +64,14 @@ export default function PersonalProfilePage() {
     if (authChecked && !user) router.replace("/home");
   }, [authChecked, user, router]);
 
-  if (!authChecked || !user) {
+  useEffect(() => {
+    if (!user) return;
+    apiFetch<MyProfile>("/me/profile")
+      .then(setProfile)
+      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load your profile"));
+  }, [user]);
+
+  if (!authChecked || !user || (!profile && !error)) {
     return (
       <div className="flex min-h-dvh items-center justify-center gap-2 bg-background text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -56,6 +79,8 @@ export default function PersonalProfilePage() {
       </div>
     );
   }
+
+  const isSetup = Boolean(next);
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
@@ -71,45 +96,64 @@ export default function PersonalProfilePage() {
           >
             <Wordmark size={24} />
           </Link>
-          <Link
-            href="/home"
-            className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Hub
-          </Link>
+          {!isSetup && (
+            <Link
+              href="/home"
+              className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Hub
+            </Link>
+          )}
         </div>
 
         <header className="mt-8">
-          <p className="text-[11px] uppercase tracking-[0.3em] text-accent">Your profile</p>
+          <p className="text-[11px] uppercase tracking-[0.3em] text-accent">
+            {isSetup ? "Welcome" : "Your profile"}
+          </p>
           <h1 className="mt-2 font-display text-3xl leading-tight tracking-[-0.02em] text-foreground sm:text-4xl">
-            Edit your details
+            {isSetup ? "Tell us about yourself" : "Edit your details"}
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            This becomes your starting profile when you join an event.
+            {isSetup
+              ? "One quick profile, reused at every event you join — tweak it any time, you won't have to retype it."
+              : "This becomes your starting profile when you join an event."}
           </p>
         </header>
 
-        <ProfileDraftForm user={user} />
+        {error && !profile && (
+          <p role="alert" className="mt-6 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
+            {error}
+          </p>
+        )}
+
+        {profile && <ProfileForm user={user} profile={profile} next={next} />}
       </div>
     </div>
   );
 }
 
-function ProfileDraftForm({ user }: { user: User }) {
-  const [form, setForm] = useState<RegisterValues>(() => {
-    const draft = loadProfileDraft(user.id);
-    return {
-      ...EMPTY,
-      ...draft,
-      name:
-        draft?.name ||
-        (user.user_metadata?.full_name as string | undefined)?.trim() ||
-        (user.user_metadata?.name as string | undefined)?.trim() ||
-        "",
-    };
-  });
+function ProfileForm({
+  user,
+  profile,
+  next,
+}: {
+  user: User;
+  profile: MyProfile;
+  next?: string;
+}) {
+  const [form, setForm] = useState<RegisterValues>(() => ({
+    ...EMPTY,
+    ...profile,
+    name:
+      profile.name ||
+      (user.user_metadata?.full_name as string | undefined)?.trim() ||
+      (user.user_metadata?.name as string | undefined)?.trim() ||
+      "",
+  }));
   const [errors, setErrors] = useState<Errors>({});
+  const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const set = (key: keyof RegisterValues) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setForm((current) => ({ ...current, [key]: e.target.value }));
@@ -118,19 +162,19 @@ function ProfileDraftForm({ user }: { user: User }) {
   };
 
   function validate(values: RegisterValues): Errors {
-    const next: Errors = {};
-    if (!values.name.trim()) next.name = "Tell us your name so tablemates know who you are.";
-    if (!values.role.trim()) next.role = "A quick role helps people break the ice.";
+    const found: Errors = {};
+    if (!values.name.trim()) found.name = "Tell us your name so tablemates know who you are.";
+    if (!values.role.trim()) found.role = "A quick role helps people break the ice.";
     if (!isAcceptableUrl(values.linkedin_url)) {
-      next.linkedin_url = "That doesn't look like a link. Try linkedin.com/in/you";
+      found.linkedin_url = "That doesn't look like a link. Try linkedin.com/in/you";
     }
     if (!isAcceptableUrl(values.website_url)) {
-      next.website_url = "That doesn't look like a link. Try yourproduct.com";
+      found.website_url = "That doesn't look like a link. Try yourproduct.com";
     }
-    return next;
+    return found;
   }
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     const found = validate(form);
     if (Object.keys(found).length) {
@@ -139,17 +183,32 @@ function ProfileDraftForm({ user }: { user: User }) {
       if (firstKey) document.getElementById(`draft-${firstKey}`)?.focus();
       return;
     }
-    saveProfileDraft(user.id, {
-      name: form.name.trim(),
-      role: form.role.trim(),
-      company: form.company.trim(),
-      description: form.description.trim(),
-      looking_for: form.looking_for.trim(),
-      linkedin_url: normalizeUrl(form.linkedin_url) ?? "",
-      website_url: normalizeUrl(form.website_url) ?? "",
-      interests: form.interests,
-    });
-    setSaved(true);
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch("/me/profile", {
+        method: "PUT",
+        body: JSON.stringify({
+          name: form.name.trim(),
+          role: form.role.trim(),
+          company: form.company.trim() || null,
+          description: form.description.trim() || null,
+          looking_for: form.looking_for.trim() || null,
+          linkedin_url: normalizeUrl(form.linkedin_url),
+          website_url: normalizeUrl(form.website_url),
+          interests: form.interests,
+        }),
+      });
+      if (next) {
+        window.location.href = next; // full navigation — re-resolve /home's gate cleanly
+        return;
+      }
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save your profile");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -195,8 +254,8 @@ function ProfileDraftForm({ user }: { user: User }) {
             id={p.id}
             aria-describedby={p["aria-describedby"]}
             value={form.interests}
-            onChange={(next) => {
-              setForm((current) => ({ ...current, interests: next }));
+            onChange={(tags) => {
+              setForm((current) => ({ ...current, interests: tags }));
               setSaved(false);
             }}
             suggestions={INTEREST_SUGGESTIONS}
@@ -235,9 +294,15 @@ function ProfileDraftForm({ user }: { user: User }) {
         )}
       </Field>
 
-      <Button type="submit" variant="accent" size="xl" className="w-full glow-ember">
-        {saved ? <Check className="h-4 w-4" /> : null}
-        {saved ? "Saved" : "Save profile"}
+      {error && (
+        <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <Button type="submit" variant="accent" size="xl" disabled={busy} className="w-full glow-ember">
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <Check className="h-4 w-4" /> : null}
+        {busy ? "Saving…" : saved ? "Saved" : next ? "Save & continue" : "Save profile"}
       </Button>
     </form>
   );

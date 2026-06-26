@@ -2,11 +2,49 @@ from fastapi import APIRouter, Depends
 from supabase import Client
 
 from app.database import get_supabase
-from app.deps import AuthUser, get_current_user
-from app.models.schemas import MyConnectionEntry, MyConnectionsResponse
+from app.deps import AuthUser, fetch_profile_defaults, get_current_user, upsert_user_profile
+from app.models.schemas import (
+    MyConnectionEntry,
+    MyConnectionsResponse,
+    MyProfileResponse,
+    MyProfileUpdate,
+)
 from app.routers.connections import build_connection_entries
 
 router = APIRouter(prefix="/me", tags=["me"])
+
+
+@router.get("/profile", response_model=MyProfileResponse)
+def get_my_profile(
+    user: AuthUser = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """The caller's global profile — one per signed-in user, reused as the
+    prefill for every event they join. `complete` tells the frontend whether to
+    show the mandatory first-login setup gate."""
+    return MyProfileResponse(**fetch_profile_defaults(db, user.id))
+
+
+@router.put("/profile", response_model=MyProfileResponse)
+def update_my_profile(
+    payload: MyProfileUpdate,
+    user: AuthUser = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """Create or update the caller's global profile (upsert by user_id)."""
+    fields = {
+        "name": payload.name,
+        "role": payload.role,
+        "company": payload.company,
+        "description": payload.description,
+        "looking_for": payload.looking_for,
+        "linkedin_url": payload.linkedin_url,
+        "website_url": payload.website_url,
+        "interests": payload.interests,
+        "avatar_url": payload.avatar_url,
+    }
+    upsert_user_profile(db, user.id, fields)
+    return MyProfileResponse(**fields, complete=True)
 
 
 @router.get("/connections", response_model=MyConnectionsResponse)

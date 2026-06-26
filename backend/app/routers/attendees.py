@@ -9,10 +9,12 @@ from app.deps import (
     fetch_access_code,
     fetch_event_or_404,
     fetch_my_attendee,
+    fetch_profile_defaults,
     fetch_room_code,
     get_current_organizer_id,
     get_current_user,
     require_event_owner,
+    sync_user_profile_best_effort,
 )
 from app.models.schemas import (
     ArriveRequest,
@@ -91,6 +93,25 @@ def register_attendee(
 
     result = db.table("attendees").insert(row).execute()
     created = result.data[0]
+    # Keep the one global profile in sync: if they corrected something while
+    # joining (the registration form prefills FROM it), the fix flows back here
+    # instead of only living on this one event's attendee row. Best-effort —
+    # registration itself must succeed even if this side sync hiccups.
+    sync_user_profile_best_effort(
+        db,
+        user.id,
+        {
+            "name": created.get("name"),
+            "role": created.get("role"),
+            "company": created.get("company"),
+            "description": created.get("description"),
+            "looking_for": created.get("looking_for"),
+            "linkedin_url": created.get("linkedin_url"),
+            "website_url": created.get("website_url"),
+            "interests": created.get("interests") or [],
+            "avatar_url": created.get("avatar_url"),
+        },
+    )
     record_audit(
         db,
         action="attendee.registered",
@@ -182,38 +203,14 @@ def get_my_profile_defaults(
     user: AuthUser = Depends(get_current_user),
     db: Client = Depends(get_supabase),
 ):
-    """Reusable attendee profile defaults for joining another event.
-
-    Profile fields live on attendee rows today. To avoid making people retype the
-    same details for every event, use the signed-in user's most recent attendee
-    record as the next registration's editable starting point.
-    """
+    """Reusable profile defaults for joining another event — the caller's saved
+    global profile (`user_profiles`), or (for a user who registered before that
+    table existed) derived from their most recent attendee row. Same single
+    source as GET /me/profile, just shaped for the registration form."""
     fetch_event_or_404(db, event_id)
-    rows = (
-        db.table("attendees")
-        .select(
-            "name, role, company, description, looking_for, linkedin_url, website_url, interests"
-        )
-        .eq("user_id", user.id)
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
-        .data
-        or []
-    )
-    if not rows:
-        return AttendeeProfileDefaults()
-    latest = rows[0]
-    return AttendeeProfileDefaults(
-        name=latest.get("name"),
-        role=latest.get("role"),
-        company=latest.get("company"),
-        description=latest.get("description"),
-        looking_for=latest.get("looking_for"),
-        linkedin_url=latest.get("linkedin_url"),
-        website_url=latest.get("website_url"),
-        interests=latest.get("interests") or [],
-    )
+    defaults = fetch_profile_defaults(db, user.id)
+    defaults.pop("complete", None)
+    return AttendeeProfileDefaults(**defaults)
 
 
 @router.get("/me", response_model=AttendeeResponse)
@@ -272,6 +269,24 @@ def update_my_registration(
         return attendee
 
     updated = db.table("attendees").update(changes).eq("id", attendee["id"]).execute().data[0]
+    # Same sync as registration: fixing a typo on this event's profile is a fix
+    # to THE profile, not a fork — keep the global one current too. Best-effort,
+    # same reasoning as registration: this self-edit must succeed regardless.
+    sync_user_profile_best_effort(
+        db,
+        user.id,
+        {
+            "name": updated.get("name"),
+            "role": updated.get("role"),
+            "company": updated.get("company"),
+            "description": updated.get("description"),
+            "looking_for": updated.get("looking_for"),
+            "linkedin_url": updated.get("linkedin_url"),
+            "website_url": updated.get("website_url"),
+            "interests": updated.get("interests") or [],
+            "avatar_url": updated.get("avatar_url"),
+        },
+    )
     record_audit(
         db,
         action="attendee.profile_updated",

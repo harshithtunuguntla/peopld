@@ -1,3 +1,4 @@
+import logging
 import secrets
 from dataclasses import dataclass
 
@@ -7,6 +8,8 @@ from fastapi import Depends, Header, HTTPException, Request
 from supabase import Client
 
 from app.config import settings
+
+logger = logging.getLogger("app.deps")
 
 ORGANIZER_ROLE = "organizer"
 
@@ -164,6 +167,87 @@ def fetch_my_attendee(db: Client, event_id: str, user_id: str) -> dict | None:
         .execute()
     )
     return res.data[0] if res.data else None
+
+
+PROFILE_FIELDS = (
+    "name, role, company, description, looking_for, linkedin_url, website_url, "
+    "interests, avatar_url"
+)
+
+
+def fetch_profile_defaults(db: Client, user_id: str) -> dict:
+    """The caller's reusable profile fields: their saved global profile
+    (`user_profiles`) when one exists, else derived from their most recent
+    attendee row — so a user who registered before the global-profile table
+    existed isn't forced to retype data we already have. Shared by `/me/profile`
+    and the per-event registration prefill so both read the same one truth.
+
+    Returns a plain field dict + `complete` (name + role both present); the
+    caller maps it onto whichever response model it needs.
+    """
+    rows = (
+        db.table("user_profiles").select("*").eq("user_id", user_id).limit(1).execute().data
+        or []
+    )
+    source = rows[0] if rows else None
+    if source is None:
+        attendee_rows = (
+            db.table("attendees")
+            .select(PROFILE_FIELDS)
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        source = attendee_rows[0] if attendee_rows else {}
+    return {
+        "name": source.get("name"),
+        "role": source.get("role"),
+        "company": source.get("company"),
+        "description": source.get("description"),
+        "looking_for": source.get("looking_for"),
+        "linkedin_url": source.get("linkedin_url"),
+        "website_url": source.get("website_url"),
+        "interests": source.get("interests") or [],
+        "avatar_url": source.get("avatar_url"),
+        "complete": bool((source.get("name") or "").strip() and (source.get("role") or "").strip()),
+    }
+
+
+def upsert_user_profile(db: Client, user_id: str, fields: dict) -> None:
+    """Create or update the caller's global profile (upsert by user_id).
+
+    The explicit save path (PUT /me/profile) — raises on failure, because a
+    user who asked to save their profile must be told if it didn't work, not
+    given a false "Saved". For the SIDE-EFFECT sync (registration, in-event
+    edit also touching the global profile), use the best-effort wrapper below
+    instead. `fields` carries only the profile columns — caller trims/validates.
+    """
+    row = {"user_id": user_id, **fields}
+    existing = (
+        db.table("user_profiles").select("user_id").eq("user_id", user_id).limit(1).execute().data
+    )
+    if existing:
+        db.table("user_profiles").update(row).eq("user_id", user_id).execute()
+    else:
+        db.table("user_profiles").insert(row).execute()
+
+
+def sync_user_profile_best_effort(db: Client, user_id: str, fields: dict) -> None:
+    """Keep the global profile in sync as a SIDE EFFECT of registering for an
+    event or editing an event profile — never the main point of that request.
+
+    Reliability over cleverness: a hiccup here (a lagging migration, a
+    transient write error) must never turn into a 500 on registration itself,
+    which is the one flow that absolutely cannot break at a live event. Logs
+    and moves on; the attendee row (the real write) is already committed.
+    """
+    try:
+        upsert_user_profile(db, user_id, fields)
+    except Exception:
+        logger.warning("global profile sync failed (non-fatal)", extra={"user_id": user_id})
 
 
 # Meeting-intent ("I want to meet X") pick cap. Tied to the round count so it

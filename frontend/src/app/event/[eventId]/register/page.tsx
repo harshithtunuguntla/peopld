@@ -15,7 +15,7 @@ import {
 } from "@/components/auth";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
-import { hasProfileDefaults, loadProfileDraft, saveProfileDraft } from "@/lib/profile-draft";
+import { loadProfileDraft, saveProfileDraft } from "@/lib/profile-draft";
 import { supabase } from "@/lib/supabase";
 
 interface EventSummary {
@@ -116,10 +116,11 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
       return;
     }
     setProfileDefaultsChecked(false);
+    // The backend is the single source (your global profile, set up at first
+    // sign-in) — only fall back to the local draft cache on a network failure,
+    // never to second-guess a genuinely empty server response.
     apiFetch<ProfileDefaults>(`/events/${eventId}/attendees/me/profile-defaults`)
-      .then((defaults) => {
-        setProfileDefaults(hasProfileDefaults(defaults) ? defaults : loadProfileDraft(user.id));
-      })
+      .then(setProfileDefaults)
       .catch(() => setProfileDefaults(loadProfileDraft(user.id)))
       .finally(() => setProfileDefaultsChecked(true));
   }, [user, eventId]);

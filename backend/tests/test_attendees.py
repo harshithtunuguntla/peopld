@@ -362,6 +362,54 @@ def test_profile_defaults_uses_latest_attendee_profile(client, db, event):
     assert body["interests"] == ["AI", "Events"]
 
 
+def test_register_upserts_global_profile(client, db, event):
+    """Registering for an event keeps the one global profile (user_profiles) in
+    sync — not just this event's attendee row — so a correction made while
+    joining flows back into what prefills the NEXT event too."""
+    response = client.post(f"/events/{event['id']}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH)
+    assert response.status_code == 201
+
+    profiles = db.store.get("user_profiles", [])
+    assert len(profiles) == 1
+    assert profiles[0]["name"] == REGISTER_PAYLOAD["name"]
+    assert profiles[0]["role"] == REGISTER_PAYLOAD["role"]
+    assert profiles[0]["linkedin_url"] == REGISTER_PAYLOAD["linkedin_url"]
+
+    got = client.get("/me/profile", headers=ATTENDEE_AUTH).json()
+    assert got["complete"] is True
+    assert got["name"] == REGISTER_PAYLOAD["name"]
+
+
+def test_register_succeeds_even_if_global_profile_sync_fails(client, db, event, monkeypatch):
+    """Reliability over cleverness: a broken/lagging global-profile sync (e.g. a
+    migration that hasn't landed yet) must never block registration itself —
+    the one flow that absolutely cannot fail at a live event."""
+    def _boom(*_args, **_kwargs):
+        raise Exception("relation \"user_profiles\" does not exist")
+
+    monkeypatch.setattr("app.deps.upsert_user_profile", _boom)
+
+    response = client.post(f"/events/{event['id']}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH)
+    assert response.status_code == 201
+    assert response.json()["name"] == REGISTER_PAYLOAD["name"]
+    assert db.store.get("user_profiles", []) == []  # the sync genuinely failed
+
+
+def test_registering_for_a_second_event_updates_the_same_global_profile(client, db, event):
+    client.post(f"/events/{event['id']}/attendees", json=REGISTER_PAYLOAD, headers=ATTENDEE_AUTH)
+
+    second_event = db.seed(
+        "events", {**{k: v for k, v in event.items() if k != "id"}, "name": "Second Mixer"}
+    )[0]
+    corrected = {**REGISTER_PAYLOAD, "role": "Founder & CEO"}
+    client.post(f"/events/{second_event['id']}/attendees", json=corrected, headers=ATTENDEE_AUTH)
+
+    # One global profile row throughout, now reflecting the correction.
+    assert len(db.store.get("user_profiles", [])) == 1
+    got = client.get("/me/profile", headers=ATTENDEE_AUTH).json()
+    assert got["role"] == "Founder & CEO"
+
+
 def test_patch_attendee_requires_auth(client, db, event):
     attendee = make_attendee(db, event["id"])
 

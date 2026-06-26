@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 interface AccessCodeGateProps {
   /** Verify the code with the backend. Resolve true to unlock, false if wrong. */
   onVerify: (code: string) => Promise<boolean>;
+  /** Prefilled from a shared invite link's `?code=` — still editable in case it's stale. */
+  initialCode?: string;
 }
 
 /**
@@ -16,8 +18,8 @@ interface AccessCodeGateProps {
  * fixed segments) — organizer codes vary in length, and one field is the most
  * robust input on mobile keyboards. Verification is case-insensitive server-side.
  */
-export function AccessCodeGate({ onVerify }: AccessCodeGateProps) {
-  const [code, setCode] = useState("");
+export function AccessCodeGate({ onVerify, initialCode }: AccessCodeGateProps) {
+  const [code, setCode] = useState(initialCode ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 

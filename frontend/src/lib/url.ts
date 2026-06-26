@@ -15,8 +15,8 @@
  * `http://` link is accepted; we keep an explicit `http://` as-is rather than
  * silently upgrading it, but add `https://` when there's no scheme at all.
  */
-export function normalizeUrl(raw: string): string | null {
-  const v = raw.trim();
+export function normalizeUrl(raw: string | null | undefined): string | null {
+  const v = (raw ?? "").trim();
   if (!v) return null;
   const withScheme = /^https?:\/\//i.test(v) ? v : `https://${v}`;
   try {
@@ -33,6 +33,6 @@ export function normalizeUrl(raw: string): string | null {
 }
 
 /** True when the input is blank or can be normalised to a usable web URL. */
-export function isAcceptableUrl(raw: string): boolean {
-  return raw.trim() === "" || normalizeUrl(raw) !== null;
+export function isAcceptableUrl(raw: string | null | undefined): boolean {
+  return (raw ?? "").trim() === "" || normalizeUrl(raw) !== null;
 }

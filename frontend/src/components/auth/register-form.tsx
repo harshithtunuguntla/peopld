@@ -206,7 +206,11 @@ export function RegisterForm({ onSubmit, busy, error, defaultValues, defaultName
   );
 }
 
-function cleanDefaults(defaults?: Partial<RegisterValues> | null): RegisterValues {
+/** Coerce a possibly-null/partial API profile (the global profile, or a prior
+ * event's prefill) into a fully-stringed `RegisterValues` — controlled inputs
+ * must never receive `null`, only "" for "not set". Shared by every form that
+ * seeds its state from a profile-defaults response. */
+export function cleanDefaults(defaults?: Partial<RegisterValues> | null): RegisterValues {
   return {
     name: defaults?.name?.trim() ?? "",
     role: defaults?.role?.trim() ?? "",

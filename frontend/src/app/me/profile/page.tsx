@@ -9,7 +9,7 @@ import { ArrowLeft, Check, Globe, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
 import { isAcceptableUrl, normalizeUrl } from "@/lib/url";
-import type { RegisterValues } from "@/components/auth/register-form";
+import { cleanDefaults, type RegisterValues } from "@/components/auth/register-form";
 import { Wordmark } from "@/components/brand/wordmark";
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { LinkedInGlyph } from "@/components/brand/glyphs";
@@ -19,18 +19,10 @@ import { Input } from "@/components/ui/input";
 import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
 import { Textarea } from "@/components/ui/textarea";
 
-const EMPTY: RegisterValues = {
-  name: "",
-  role: "",
-  company: "",
-  description: "",
-  looking_for: "",
-  linkedin_url: "",
-  website_url: "",
-  interests: [],
-};
-
-type MyProfile = RegisterValues & { complete: boolean };
+// The backend's nullable columns mean any string field can come back `null`
+// (e.g. a profile that's never had a company filled in) — never assume the
+// API shape already matches the form's all-strings `RegisterValues`.
+type MyProfile = Partial<RegisterValues> & { complete: boolean };
 
 type Errors = Partial<Record<keyof RegisterValues, string>>;
 
@@ -141,15 +133,17 @@ function ProfileForm({
   profile: MyProfile;
   next?: string;
 }) {
-  const [form, setForm] = useState<RegisterValues>(() => ({
-    ...EMPTY,
-    ...profile,
-    name:
-      profile.name ||
-      (user.user_metadata?.full_name as string | undefined)?.trim() ||
-      (user.user_metadata?.name as string | undefined)?.trim() ||
-      "",
-  }));
+  const [form, setForm] = useState<RegisterValues>(() => {
+    const defaults = cleanDefaults(profile);
+    return {
+      ...defaults,
+      name:
+        defaults.name ||
+        (user.user_metadata?.full_name as string | undefined)?.trim() ||
+        (user.user_metadata?.name as string | undefined)?.trim() ||
+        "",
+    };
+  });
   const [errors, setErrors] = useState<Errors>({});
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);

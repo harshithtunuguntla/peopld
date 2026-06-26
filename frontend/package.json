@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "export:posters": "node scripts/export-posters.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
@@ -37,6 +38,7 @@
     "autoprefixer": "^10.0.1",
     "eslint": "^8",
     "eslint-config-next": "^15.2.3",
+    "playwright": "^1.61.1",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
     "typescript": "^5"

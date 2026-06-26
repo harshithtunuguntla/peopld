@@ -2,20 +2,26 @@
 
 import { useState, useEffect, type ReactElement } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, MapPin, Timer, Heart, ArrowRight, Crown, Play, Download } from "lucide-react";
+import { Sparkles, MapPin, ArrowRight, Crown, Play } from "lucide-react";
 import { Avatar } from "@/components/brand/avatar";
-import { BoardingPass } from "@/components/brand/boarding-pass";
-import { roundFor, ROUNDS } from "@/lib/design/rounds";
+import { roundFor } from "@/lib/design/rounds";
 import { COLORS } from "@/lib/design/colors";
-import { ATTENDEES, SAMPLE_ICEBREAKER } from "@/lib/content/landing";
+import { ATTENDEES } from "@/lib/content/landing";
 
 /**
- * Marketing-only preview screens for the landing ScenesGallery. These are
- * presentational mocks; the real wired attendee/organizer pages are separate and
- * reuse the same brand components. See docs/design/DESIGN_SYSTEM.md §9.
+ * Preview screens for the landing ScenesGallery. Waiting/live/recap are real
+ * screenshots captured from a live demo event (see frontend/scripts/capture-*.js);
+ * join/organizer stay as presentational mocks built from brand components. See
+ * docs/design/DESIGN_SYSTEM.md §9.
  */
 
 export type SceneKey = "join" | "waiting" | "reveal" | "live" | "recap" | "organizer";
+
+/** A real screenshot of the shipped app, captured from a live demo event —
+ * not a redrawn mock. Fills the PhoneFrame exactly like the hand-built scenes. */
+function RealScreenshot({ src, alt }: { src: string; alt: string }) {
+  return <img src={src} alt={alt} className="h-full w-full object-cover object-top" />;
+}
 
 export const SCENE_META: { key: SceneKey; label: string; sub: string }[] = [
   { key: "join", label: "Join", sub: "They tap in. 8 seconds." },
@@ -40,7 +46,7 @@ function JoinScene() {
         Founders &amp;<br />Friends <em className="italic text-coral">Summer Mixer</em>
       </h1>
       <p className="mb-8 flex items-center gap-1.5 text-xs text-cream/55">
-        <MapPin className="h-3 w-3" /> The Battery, SF · Tonight 7:00 PM
+        <MapPin className="h-3 w-3" /> The Battery, SF · Doors 7:00 PM
       </p>
       <div className="mb-6 space-y-4">
         <div>
@@ -77,54 +83,7 @@ function JoinScene() {
 }
 
 function WaitingScene() {
-  return (
-    <div className="flex h-full flex-col p-6 pt-8 text-cream">
-      <div className="mb-7 flex items-center justify-between">
-        <div className="inline-flex items-center gap-1.5 rounded-full bg-chlorine px-2.5 py-1 text-[10px] font-medium text-ink-900">
-          <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-ink-900" /> You are in
-        </div>
-        <span className="text-[10px] text-cream/50">Hi, Alex</span>
-      </div>
-      <div className="my-5 text-center">
-        <p className="mb-2 text-[10px] uppercase tracking-[0.3em] text-cream/50">Doors close in</p>
-        <div className="font-display text-[64px] leading-none tracking-[-0.03em]">04:32</div>
-        <p className="mx-auto mt-3 max-w-[230px] text-xs text-cream/55">
-          Grab a drink. We will buzz the second your table is ready.
-        </p>
-      </div>
-      <div className="mb-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-        <div className="mb-2.5 flex items-center justify-between">
-          <p className="text-[10px] uppercase tracking-[0.22em] text-cream/50">Tonight</p>
-          <span className="text-[10px] text-cream/40">5 rounds · 8 min</span>
-        </div>
-        <div className="space-y-2">
-          {ROUNDS.map((r, i) => (
-            <div key={r.key} className="flex items-center gap-2.5 text-xs">
-              <div
-                className="flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-semibold"
-                style={{ background: r.bg, color: r.ink }}
-              >
-                {i + 1}
-              </div>
-              <span className={i === 0 ? "text-cream" : "text-cream/55"}>{r.name}</span>
-              {i === 0 && <span className="ml-auto text-[9px] text-chlorine">Up next</span>}
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-        <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-cream/50">38 in the room</p>
-        <div className="flex -space-x-1.5">
-          {ATTENDEES.slice(0, 8).map((a) => (
-            <Avatar key={a.id} name={a.name} color={a.color} size={26} />
-          ))}
-          <div className="flex h-[26px] w-[26px] items-center justify-center rounded-full border-2 border-ink-950 bg-white/10 text-[9px]">
-            +30
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return <RealScreenshot src="/captures/waiting-room.png" alt="The Peopld waiting room — agenda and who's already in the room" />;
 }
 
 function RevealScene({ roundIdx = 1 }: { roundIdx?: number }) {
@@ -208,108 +167,11 @@ function RevealScene({ roundIdx = 1 }: { roundIdx?: number }) {
 }
 
 function LiveScene() {
-  const round = roundFor(1);
-  const tablemates = ATTENDEES.slice(0, 3);
-  const [secs, setSecs] = useState(7 * 60 + 23);
-  useEffect(() => {
-    const i = setInterval(() => setSecs((s) => Math.max(0, s - 1)), 1000);
-    return () => clearInterval(i);
-  }, []);
-  const mm = String(Math.floor(secs / 60)).padStart(2, "0");
-  const ss = String(secs % 60).padStart(2, "0");
-  const progress = ((8 * 60 - secs) / (8 * 60)) * 100;
-
-  return (
-    <div className="flex h-full flex-col text-cream">
-      <div className="px-3 pt-3">
-        <BoardingPass round={round} tableNumber="07" showIcebreaker={false} />
-      </div>
-      <div className="mt-3 px-3">
-        <div className="rounded-2xl bg-chlorine p-4 text-ink-900">
-          <div className="mb-2 flex items-center gap-1.5 text-[9px] uppercase tracking-[0.22em] opacity-70">
-            <Sparkles className="h-3 w-3" /> AI Icebreaker
-          </div>
-          <p className="font-display text-[15px] italic leading-snug">&ldquo;{SAMPLE_ICEBREAKER}&rdquo;</p>
-        </div>
-      </div>
-      <div className="mt-3 space-y-1.5 px-3">
-        {tablemates.map((a) => (
-          <div key={a.id} className="flex items-center gap-2.5 rounded-xl border border-white/5 bg-white/[0.04] p-2.5">
-            <Avatar name={a.name} color={a.color} size={34} />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-semibold">{a.name}</p>
-              <p className="truncate text-[10px] text-cream/55">{a.role}</p>
-            </div>
-            <button className="flex h-7 w-7 items-center justify-center rounded-full bg-white/5" aria-label={`Heart ${a.name}`}>
-              <Heart className="h-3 w-3" />
-            </button>
-          </div>
-        ))}
-      </div>
-      <div className="mt-auto px-3 pb-3 pt-3">
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
-          <div className="mb-1.5 flex items-center justify-between">
-            <div className="flex items-center gap-1 text-[10px] text-cream/55">
-              <Timer className="h-3 w-3" /> Round ends
-            </div>
-            <div className="font-mono text-lg tabular-nums">
-              {mm}:{ss}
-            </div>
-          </div>
-          <div className="h-1 overflow-hidden rounded-full bg-white/5">
-            <motion.div className="h-full" animate={{ width: `${progress}%` }} style={{ background: round.bg }} />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return <RealScreenshot src="/captures/live-table.png" alt="A real Peopld table — round, tablemates, and an AI icebreaker" />;
 }
 
 function RecapScene() {
-  const stats = [
-    { v: "15", l: "Connections", fill: "rose" },
-    { v: "5", l: "Rounds", fill: "chlorine" },
-    { v: "4", l: "Hearted", fill: "ice" },
-  ] as const;
-  const fillMap: Record<string, string> = { rose: "bg-rose", chlorine: "bg-chlorine", ice: "bg-ice" };
-  return (
-    <div className="flex h-full flex-col text-cream">
-      <div className="px-5 pt-8 text-center">
-        <div className="mb-2 text-[10px] uppercase tracking-[0.3em] text-cream/45">That is a wrap</div>
-        <h1 className="font-display text-3xl leading-tight tracking-[-0.02em]">
-          You met <em className="italic text-coral">15 brilliant<br />humans</em> tonight.
-        </h1>
-      </div>
-      <div className="mt-4 grid grid-cols-3 gap-1.5 px-5">
-        {stats.map((s) => (
-          <div key={s.l} className={`rounded-xl py-3 text-center text-ink-900 ${fillMap[s.fill]}`}>
-            <div className="font-display text-2xl">{s.v}</div>
-            <div className="mt-0.5 text-[9px] uppercase tracking-[0.18em] opacity-65">{s.l}</div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-4 flex-1 space-y-1.5 overflow-y-auto scrollbar-hide px-5 pb-3">
-        {ATTENDEES.slice(0, 6).map((a, i) => (
-          <div key={a.id} className="flex items-center gap-2.5 rounded-xl border border-white/5 bg-white/[0.04] p-2.5">
-            <Avatar name={a.name} color={a.color} size={32} ring={i < 3} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1">
-                <p className="truncate text-xs font-semibold">{a.name}</p>
-                {i < 3 && <Heart className="h-2.5 w-2.5 fill-ember text-ember" />}
-              </div>
-              <p className="truncate text-[10px] text-cream/55">{a.role}</p>
-            </div>
-            <button className="rounded-full bg-ember px-2.5 py-1 text-[10px] font-medium text-white">Save</button>
-          </div>
-        ))}
-      </div>
-      <div className="border-t border-white/5 p-4">
-        <div className="flex h-11 items-center justify-center gap-2 rounded-full bg-cream font-medium text-ink-950">
-          <Download className="h-3.5 w-3.5" /> Download my night
-        </div>
-      </div>
-    </div>
-  );
+  return <RealScreenshot src="/captures/connections.png" alt="The Peopld rolodex — everyone you met, ready to follow up" />;
 }
 
 function OrganizerScene() {

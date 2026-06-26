@@ -23,8 +23,8 @@ export const ATTENDEES: Attendee[] = [
 
 export const HERO = {
   subcopy:
-    "Peopld runs structured networking at your live event. AI seats your guests at the right table, hands them a question worth answering, and gives you a one-button command center to orchestrate the night.",
-  proofCount: 12400,
+    "Peopld runs structured networking at your live event. AI seats your guests at the right table, hands them a question worth answering, and gives you a one-button command center to orchestrate the room.",
+  proofCount: 50,
   proofSuffix: "+ connections made last month",
   passIcebreaker: "What is a tool you used this week that felt suspiciously like magic?",
   giftIcebreaker: "What unpopular bet are you making now?",
@@ -76,10 +76,7 @@ export const TIMELINE: { t: string; label: string; desc: string; color: string }
 export const TIMELINE_GRADIENT = [BRAND.coral, BRAND.plasma, BRAND.chlorine, BRAND.gold, BRAND.ice];
 
 export const FOOTER_LINKS = [
-  { label: "Manifesto", href: "#" },
-  { label: "Hosts", href: "#" },
-  { label: "Changelog", href: "#" },
-  { label: "Twitter", href: "#" },
+  { label: "Instagram", href: "https://instagram.com/peopld.in" },
 ];
 
 /** Where the marketing CTAs point in the real app. */
@@ -87,4 +84,6 @@ export const ROUTES = {
   host: "/organizer/login",
   /** Attendee sign in / sign up (Google or email code) → lands on the hub. */
   signIn: "/auth",
+  /** Anchor for the in-page "Book a demo" form (final CTA section). */
+  bookDemo: "#book-demo",
 };

@@ -14,7 +14,13 @@ export function SiteFooter() {
         </div>
         <nav aria-label="Footer" className="flex gap-5 text-sm text-ink/55">
           {FOOTER_LINKS.map((l) => (
-            <a key={l.label} href={l.href} className="transition hover:text-ink">
+            <a
+              key={l.label}
+              href={l.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="transition hover:text-ink"
+            >
               {l.label}
             </a>
           ))}

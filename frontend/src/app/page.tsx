@@ -1,11 +1,9 @@
 import {
   LandingNav,
   Hero,
-  LogoStrip,
   ProblemSection,
   HowItWorks,
   ScenesGallery,
-  Timeline,
   FinalCta,
   SiteFooter,
 } from "@/components/landing";
@@ -21,11 +19,9 @@ export default function Home() {
       <LandingNav />
       {/* Hero's own top padding clears the fixed nav — no extra wrapper padding. */}
       <Hero />
-      <LogoStrip />
       <ProblemSection />
       <HowItWorks />
       <ScenesGallery />
-      <Timeline />
       <FinalCta />
       <SiteFooter />
     </main>

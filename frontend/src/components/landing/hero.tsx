@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { ArrowRight, ArrowUpRight } from "lucide-react";
 import { SplitReveal } from "@/components/brand/split-reveal";
 import { CountUp } from "@/components/brand/count-up";
@@ -41,9 +40,9 @@ export function Hero() {
             <p className="mt-6 max-w-xl text-[clamp(15px,1.15vw,18px)] leading-relaxed text-ink/65">{HERO.subcopy}</p>
 
             <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row sm:items-center">
-              <Link href={ROUTES.host} className={cn(buttonVariants({ size: "lg" }), "hover:-translate-y-0.5")}>
-                Host an event <ArrowRight className="h-4 w-4" />
-              </Link>
+              <a href={ROUTES.bookDemo} className={cn(buttonVariants({ size: "lg" }), "hover:-translate-y-0.5")}>
+                Book a demo <ArrowRight className="h-4 w-4" />
+              </a>
               <a href="#experience" className={cn(buttonVariants({ variant: "ghost", size: "lg" }))}>
                 See it live <ArrowUpRight className="h-4 w-4" />
               </a>

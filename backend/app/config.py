@@ -45,5 +45,15 @@ class Settings(BaseSettings):
     icebreaker_temperature: float = 0.7
     icebreaker_timeout_seconds: float = 8.0  # exceed => fallback, never hang the room
 
+    # --- Book-a-demo notification email (optional) ---
+    # The lead is ALWAYS stored in `demo_requests`; the email is a best-effort
+    # nudge that fires only when SMTP creds are present (Gmail app password
+    # recommended for the pilot). Absent creds => store-only, no error.
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""  # the sending Gmail address
+    smtp_password: str = ""  # a Gmail App Password (not the account password)
+    demo_notify_email: str = "harshithtunuguntla@gmail.com"  # where leads are sent
+
 
 settings = Settings()  # type: ignore[call-arg]

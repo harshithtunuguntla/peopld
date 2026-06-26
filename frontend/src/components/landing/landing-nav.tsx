@@ -5,13 +5,11 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ROUTES } from "@/lib/content/landing";
 
-const LINKS = [
-  { label: "How it works", href: "#how" },
-  { label: "Experience", href: "#experience" },
-  { label: "The night", href: "#timeline" },
-];
-
-/** Sticky landing header: mark + wordmark, section links (lg+), host CTA. */
+/**
+ * Minimal sticky landing header: mark + wordmark, Sign in, and the Book-a-demo
+ * CTA. The old section-link nav (How it works / Experience / The night) was
+ * removed to declutter; the page reads top-to-bottom without jump links.
+ */
 export function LandingNav() {
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-ink/10 bg-paper/80 backdrop-blur-xl">
@@ -21,18 +19,6 @@ export function LandingNav() {
           <span className="font-display text-2xl leading-none tracking-tight text-ink">Peopld</span>
         </Link>
 
-        <nav aria-label="Primary" className="hidden items-center gap-0.5 rounded-full border border-ink/10 bg-ink/[0.04] p-1 lg:flex">
-          {LINKS.map((l) => (
-            <a
-              key={l.href}
-              href={l.href}
-              className="rounded-full px-3.5 py-1.5 text-[13px] font-medium text-ink/70 transition hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {l.label}
-            </a>
-          ))}
-        </nav>
-
         <div className="flex items-center gap-1.5 sm:gap-2">
           <Link
             href={ROUTES.signIn}
@@ -40,9 +26,9 @@ export function LandingNav() {
           >
             Sign in
           </Link>
-          <Link href={ROUTES.host} className={cn(buttonVariants({ size: "sm" }), "h-10 px-5")}>
-            Host an event <ArrowUpRight className="h-3.5 w-3.5" />
-          </Link>
+          <a href={ROUTES.bookDemo} className={cn(buttonVariants({ size: "sm" }), "h-10 px-5")}>
+            Book a demo <ArrowUpRight className="h-3.5 w-3.5" />
+          </a>
         </div>
       </div>
     </header>

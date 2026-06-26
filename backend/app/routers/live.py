@@ -104,6 +104,8 @@ def _make_tablemate(
             interests=their_interests,
             shared_interests=shared,
             avatar_url=info.get("avatar_url"),
+            linkedin_url=info.get("linkedin_url"),
+            website_url=info.get("website_url"),
             liked=aid in liked_ids,
             wanted=aid in wanted_ids,
             note=notes_by_target.get(aid),

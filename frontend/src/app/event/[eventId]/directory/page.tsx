@@ -207,7 +207,7 @@ export default function DirectoryPage({ params }: { params: Promise<{ eventId: s
             <AccountMenu
               user={user}
               editProfileHref={`/event/${eventId}/profile`}
-              connectionsHref={`/event/${eventId}/connections`}
+              connectionsHref="/me/connections"
             />
           </div>
         </div>

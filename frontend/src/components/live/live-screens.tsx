@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { CalendarX2, Loader2, Sparkles, Heart, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star, MapPin } from "lucide-react";
+import { CalendarX2, Loader2, Sparkles, Heart, Users, ArrowRight, DoorOpen, UserCheck, RefreshCw, StickyNote, Check, Star, MapPin, Globe } from "lucide-react";
 
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Wordmark } from "@/components/brand/wordmark";
 import { BoardingPass } from "@/components/brand/boarding-pass";
 import { Avatar } from "@/components/brand/avatar";
 import { AccountMenu } from "@/components/attendee/account-menu";
+import { LinkedInGlyph } from "@/components/brand/glyphs";
 import { IcebreakerCard } from "@/components/brand/icebreaker-card";
 import { buttonVariants } from "@/components/ui/button";
 import { ROUNDS, agendaFor, type Round } from "@/lib/design/rounds";
@@ -20,6 +21,54 @@ import { CountdownPill, useCountdown } from "./countdown";
 import type { LiveState, Tablemate } from "@/lib/live/use-live-state";
 import { useEventBranding, type Sponsor } from "@/lib/live/use-branding";
 import { SponsorShowcase, EventLogo, WaitingStage } from "./sponsor-showcase";
+
+/** Small icon-only links to a tablemate's public professional profiles — just
+ *  LinkedIn/website (never a phone or email), so you can look someone up while
+ *  sitting with them. A plain https link, not a custom app-scheme hack: on a
+ *  phone with the LinkedIn app installed, the OS's own Universal/App Links
+ *  hand the tap straight to the app; otherwise it opens the browser. Renders
+ *  nothing when neither link exists. */
+function ContactLinks({
+  name,
+  linkedinUrl,
+  websiteUrl,
+}: {
+  name: string;
+  linkedinUrl: string | null;
+  websiteUrl: string | null;
+}) {
+  if (!linkedinUrl && !websiteUrl) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-1">
+      {linkedinUrl && (
+        <a
+          href={linkedinUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`${name}'s LinkedIn`}
+          title="LinkedIn"
+          onClick={(e) => e.stopPropagation()}
+          className="flex h-5 w-5 items-center justify-center rounded-full transition-opacity hover:opacity-75"
+        >
+          <LinkedInGlyph className="h-3.5 w-3.5" />
+        </a>
+      )}
+      {websiteUrl && (
+        <a
+          href={websiteUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`${name}'s website`}
+          title="Website"
+          onClick={(e) => e.stopPropagation()}
+          className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <Globe className="h-3.5 w-3.5" aria-hidden />
+        </a>
+      )}
+    </span>
+  );
+}
 
 /** One tablemate, with a like (❤️) toggle and a private-note affordance. Likes
  * persist and surface in the rolodex later (mutual = a match); notes are
@@ -107,7 +156,10 @@ function TablemateRow({
               </span>
             )}
           </div>
-          <p className="truncate text-sm text-muted-foreground">{[mate.role, mate.company].filter(Boolean).join(" · ")}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="truncate text-sm text-muted-foreground">{[mate.role, mate.company].filter(Boolean).join(" · ")}</p>
+            <ContactLinks name={mate.name} linkedinUrl={mate.linkedin_url} websiteUrl={mate.website_url} />
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
@@ -228,11 +280,12 @@ export function LiveShell({
           </Link>
           <div className="flex items-center gap-3">
             {right}
+            {eventId && <DirectoryButton eventId={eventId} />}
             {onRefresh && <RefreshButton onRefresh={onRefresh} />}
             {eventId && (
               <AccountMenu
                 editProfileHref={`/event/${eventId}/profile`}
-                connectionsHref={`/event/${eventId}/connections`}
+                connectionsHref="/me/connections"
                 buttonSize="sm"
               />
             )}
@@ -247,6 +300,23 @@ export function LiveShell({
         <div className="mt-8">{children}</div>
       </div>
     </div>
+  );
+}
+
+/** Always-on entry to the guest directory, in the LiveShell top bar. Every live
+ *  phase (waiting, mid-round, between rounds) renders through LiveShell, so this
+ *  one addition makes "who's coming" reachable the whole event — not just while
+ *  waiting in the lobby (where the bigger DirectoryLink card also still lives). */
+function DirectoryButton({ eventId }: { eventId: string }) {
+  return (
+    <Link
+      href={`/event/${eventId}/directory`}
+      aria-label="Browse the guest directory"
+      title="Directory"
+      className="flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:text-foreground"
+    >
+      <Users className="h-4 w-4" aria-hidden />
+    </Link>
   );
 }
 
@@ -341,8 +411,8 @@ function RoomRoster({ roster }: { roster: LiveState["roster"] }) {
   );
 }
 
-/** The "Tonight" agenda — the planned rounds and their themes. Names come from the
- * organizer-authored agenda (event.round_topics) when set, else the canonical set. */
+/** The agenda — the planned rounds and their themes. Names come from the
+ * organizer-authored agenda (event.round_topics) when set, else a plain "Round N". */
 function AgendaCard({
   targetRounds,
   roundSeconds,
@@ -358,7 +428,7 @@ function AgendaCard({
   return (
     <div className="rounded-2xl border border-border bg-card/60 p-4">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Tonight</span>
+        <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Agenda</span>
         <span className="text-[11px] text-muted-foreground">
           {count} {count === 1 ? "round" : "rounds"} · {minutes} min
         </span>
@@ -470,9 +540,19 @@ export function RoomCodeCheckIn({
 }) {
   const firstName = (state.attendee_name ?? "").trim().split(/\s+/)[0] || "there";
   const returning = state.attendee_status === "left"; // stepped out / marked gone → re-checking in
+  const roster = state.roster ?? { count: 0, preview: [] };
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // A couple of first names to make the highlight feel concrete, not just a count.
+  const previewNames = roster.preview.slice(0, 2).map((p) => p.name.trim().split(/\s+/)[0]);
+  const whosHereLine =
+    roster.count === 0
+      ? "Be the first to check in — others will show up here as they arrive."
+      : previewNames.length > 0
+        ? `${previewNames.join(" and ")}${roster.count > previewNames.length ? ` +${roster.count - previewNames.length} more` : ""} ${roster.count === 1 ? "is" : "are"} already here.`
+        : `${roster.count} ${roster.count === 1 ? "person is" : "people are"} already here.`;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -500,7 +580,7 @@ export function RoomCodeCheckIn({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-[11px] font-medium text-accent ring-1 ring-inset ring-accent/25">
           <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
@@ -509,65 +589,68 @@ export function RoomCodeCheckIn({
         <span className="truncate text-xs text-muted-foreground">Hi, {firstName}</span>
       </div>
 
+      {/* HIGHLIGHT: who's here/coming — the thing worth looking at right after
+          you've already typed an access code, not another code prompt. */}
       <div className="flex flex-col items-center pt-2 text-center">
         <div className="relative">
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-card/60 text-accent">
-            <DoorOpen className="h-7 w-7" aria-hidden />
+            <Users className="h-7 w-7" aria-hidden />
           </div>
           <span className="absolute inset-0 -z-10 rounded-2xl bg-accent/20 blur-xl" aria-hidden />
         </div>
         <h1 className="mt-4 font-display text-2xl text-foreground">
-          {returning ? "Ready to rejoin?" : "You're on the list"}
+          {returning ? "Ready to rejoin?" : "Look who's coming"}
         </h1>
-        <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">
-          {returning ? (
-            <>Enter the <span className="text-foreground">room code</span> shown at the venue to check back in and be seated in the next round.</>
-          ) : (
-            <>When you arrive, enter the <span className="text-foreground">room code</span> shown at the venue to check in and join the first round.</>
-          )}
-        </p>
+        <p className="mt-2 max-w-[300px] text-sm leading-relaxed text-muted-foreground">{whosHereLine}</p>
       </div>
 
-      <form onSubmit={submit} className="space-y-3">
-        <input
-          value={code}
-          onChange={(e) => {
-            setCode(e.target.value.toUpperCase());
-            if (error) setError(null);
-          }}
-          inputMode="text"
-          autoCapitalize="characters"
-          autoComplete="off"
-          autoCorrect="off"
-          maxLength={8}
-          placeholder="ENTER CODE"
-          aria-label="Room code"
-          aria-invalid={Boolean(error)}
-          className="h-16 w-full rounded-2xl border border-border bg-card text-center font-mono text-3xl font-semibold uppercase tracking-[0.4em] text-foreground outline-none transition-colors placeholder:text-base placeholder:font-sans placeholder:font-normal placeholder:tracking-normal placeholder:text-muted-foreground focus:border-accent"
-        />
-        {error && (
-          <p role="alert" className="text-center text-sm text-destructive">
-            {error}
-          </p>
-        )}
-        <button
-          type="submit"
-          disabled={submitting || !code.trim()}
-          className={cn(
-            buttonVariants({ variant: "accent", size: "lg" }),
-            "glow-ember w-full disabled:opacity-50",
-          )}
-        >
-          {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <DoorOpen className="h-4 w-4" aria-hidden />}
-          {submitting ? "Checking you in…" : "Check in"}
-        </button>
-      </form>
-
-      <p className="text-center text-xs text-muted-foreground">
-        Don&apos;t have it yet? The host will share the code once doors open.
-      </p>
-
+      <RoomRoster roster={roster} />
       <DirectoryLink eventId={eventId} />
+
+      {/* SECONDARY: the actual check-in mechanic — present, functional, but calm.
+          You already used a code to get here; this is for the day-of room code,
+          a different secret announced at the venue. */}
+      <div className="rounded-2xl border border-border bg-card/40 p-4">
+        <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+          <DoorOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" aria-hidden />
+          {returning ? (
+            <>Enter the room code shown at the venue to check back in for the next round.</>
+          ) : (
+            <>Enter the check-in code once your host reads it out at the venue, to join the rotation.</>
+          )}
+        </p>
+        <form onSubmit={submit} className="mt-3 space-y-2.5">
+          <input
+            value={code}
+            onChange={(e) => {
+              setCode(e.target.value.toUpperCase());
+              if (error) setError(null);
+            }}
+            inputMode="text"
+            autoCapitalize="characters"
+            autoComplete="off"
+            autoCorrect="off"
+            maxLength={8}
+            placeholder="ENTER CODE"
+            aria-label="Room code"
+            aria-invalid={Boolean(error)}
+            className="h-12 w-full rounded-xl border border-border bg-card text-center font-mono text-xl font-semibold uppercase tracking-[0.3em] text-foreground outline-none transition-colors placeholder:text-sm placeholder:font-sans placeholder:font-normal placeholder:tracking-normal placeholder:text-muted-foreground focus:border-accent"
+          />
+          {error && (
+            <p role="alert" className="text-center text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={submitting || !code.trim()}
+            className={cn(buttonVariants({ variant: "outline", size: "default" }), "w-full disabled:opacity-50")}
+          >
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <DoorOpen className="h-4 w-4" aria-hidden />}
+            {submitting ? "Checking you in…" : "Check in"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

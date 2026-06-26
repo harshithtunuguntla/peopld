@@ -276,7 +276,10 @@ def test_live_ended(client, db, event):
 # --- privacy: realtime path never carries contact PII ---
 
 
-def test_live_payload_has_no_contact_pii(client, db, event):
+def test_live_payload_includes_tablemate_contact_links(client, db, event):
+    """Tablemates' public professional links (LinkedIn/website) surface live, so
+    you can look someone up while seated with them — but never a phone or email
+    (those still only exist on the post-event rolodex, never the live path)."""
     me = _me(db, event["id"])
     mate = make_attendee(
         db, event["id"], name="Bobby", status="arrived",
@@ -287,11 +290,9 @@ def test_live_payload_has_no_contact_pii(client, db, event):
     make_assignment(db, event["id"], rnd["id"], mate["id"], table_number=1)
 
     r = client.get(f"/events/{event['id']}/live", headers=ATTENDEE_AUTH)
-    raw = r.text
-    # Tablemate name/role are shown; contact details are NOT (rolodex only).
-    assert "Bobby" in raw
-    assert "bobby.dev" not in raw.lower()
-    assert "linkedin" not in raw.lower()
+    tablemate = r.json()["seat"]["tablemates"][0]
+    assert tablemate["website_url"] == "https://bobby.dev"
+    assert tablemate["linkedin_url"] == "https://linkedin.com/in/bobby"
 
 
 # --- icebreaker hook (Step 6) ---

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronLeft, Radio, Users, Lock, Settings, BarChart3 } from "lucide-react";
+import { ChevronLeft, Radio, Users, Lock, Settings, BarChart3, MessageSquareText } from "lucide-react";
 import { StatusChip, type EventStatus } from "./console-ui";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ const TABS = [
   { key: "live", label: "Command Center", icon: Radio },
   { key: "people", label: "People", icon: Users },
   { key: "analytics", label: "Analytics", icon: BarChart3 },
+  { key: "feedback", label: "Feedback", icon: MessageSquareText },
   { key: "settings", label: "Settings", icon: Settings },
 ] as const;
 
@@ -32,7 +33,7 @@ export function EventHeader({
   eventId: string;
   name?: string;
   status?: EventStatus;
-  active: "live" | "people" | "analytics" | "settings";
+  active: "live" | "people" | "analytics" | "feedback" | "settings";
   actions?: React.ReactNode;
 }) {
   return (
@@ -57,27 +58,31 @@ export function EventHeader({
         {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
       </div>
 
-      {/* Sub-nav: switch between this event's screens. */}
-      <div className="mt-5 inline-flex items-center gap-1 rounded-full border border-border bg-surface-2 p-1">
-        {TABS.map((t) => {
-          const isActive = t.key === active;
-          const Icon = t.icon;
-          return (
-            <Link
-              key={t.key}
-              href={`/organizer/event/${eventId}/${t.key}`}
-              aria-current={isActive ? "page" : undefined}
-              className={cn(
-                "inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-accent text-accent-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon className="h-4 w-4" aria-hidden /> {t.label}
-            </Link>
-          );
-        })}
+      {/* Sub-nav: switch between this event's screens. On a phone the four labelled
+          tabs are wider than the viewport, so the strip bleeds to the screen edges
+          and scrolls horizontally; on ≥sm it's the centered pill. */}
+      <div className="-mx-4 mt-5 overflow-x-auto px-4 scrollbar-hide sm:mx-0 sm:px-0">
+        <div className="inline-flex w-max items-center gap-1 rounded-full border border-border bg-surface-2 p-1">
+          {TABS.map((t) => {
+            const isActive = t.key === active;
+            const Icon = t.icon;
+            return (
+              <Link
+                key={t.key}
+                href={`/organizer/event/${eventId}/${t.key}`}
+                aria-current={isActive ? "page" : undefined}
+                className={cn(
+                  "inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-sm font-medium transition-colors sm:px-4",
+                  isActive
+                    ? "bg-accent text-accent-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" aria-hidden /> {t.label}
+              </Link>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

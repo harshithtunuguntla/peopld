@@ -180,6 +180,7 @@ def test_analytics_empty_event(client, event):
     body = response.json()
     assert body == {
         "total_attendees": 0,
+        "checked_in_count": 0,
         "rounds_completed": 0,
         "avg_unique_people_met": 0.0,
         "total_likes": 0,
@@ -190,6 +191,8 @@ def test_analytics_empty_event(client, event):
         "seated_attendees": 0,
         "possible_introductions": 0,
         "min_people_met": 0,
+        "met_someone_count": 0,
+        "matched_people_count": 0,
         "round_performance": [],
         "top_connectors": [],
         "graph_nodes": [],
@@ -240,6 +243,48 @@ def test_analytics_computes_unique_people_met(client, db, event):
     assert len(body["graph_nodes"]) == 4
     assert len(body["graph_edges"]) == 4  # one per pair who met
     assert all(e["matched"] is False for e in body["graph_edges"])  # no likes in this event
+
+
+def test_analytics_uses_checked_in_population_and_handles_late_joins(client, db, event):
+    """Analytics must reflect who ACTUALLY showed up, and a late join must not drag
+    the room's reach down:
+      - E registered but never came (no-show) → excluded from checked_in_count and
+        from the "% of room" math.
+      - D checked in but was never seated → counts as checked-in, not seated.
+      - C joined in round 2 only (late) → still scores 100% reach because they met
+        everyone they COULD (co-present normalization), and coverage stays honest.
+    """
+    a = make_attendee(db, event["id"], name="A", status="arrived")
+    b = make_attendee(db, event["id"], name="B", status="arrived")
+    c = make_attendee(db, event["id"], name="C", status="arrived")  # late joiner
+    make_attendee(db, event["id"], name="D", status="arrived")      # here, never seated
+    make_attendee(db, event["id"], name="E", status="registered")   # no-show
+    r1 = make_round(db, event["id"], round_number=1, status="completed")
+    r2 = make_round(db, event["id"], round_number=2, status="completed")
+
+    # R1: A+B together. R2: A+B+C together (C appears only now).
+    make_assignment(db, event["id"], r1["id"], a["id"], 1)
+    make_assignment(db, event["id"], r1["id"], b["id"], 1)
+    make_assignment(db, event["id"], r2["id"], a["id"], 1)
+    make_assignment(db, event["id"], r2["id"], b["id"], 1)
+    make_assignment(db, event["id"], r2["id"], c["id"], 1)
+
+    body = client.get(f"/events/{event['id']}/analytics", headers=AUTH).json()
+
+    # People funnel: registered ≥ checked-in ≥ seated ≥ met-someone.
+    assert body["total_attendees"] == 5      # everyone registered
+    assert body["checked_in_count"] == 4     # A,B,C,D — the no-show E is excluded
+    assert body["seated_attendees"] == 3     # A,B,C — D was never seated
+    assert body["met_someone_count"] == 3    # A,B,C each met ≥1 person
+    assert body["matched_people_count"] == 0 # no likes in this event
+
+    # Pairs: A-B, A-C, B-C all met; all three shared ≥1 round → 100% coverage.
+    assert body["total_introductions"] == 3
+    assert body["possible_introductions"] == 3
+    # Late joiner C met both people present in their only round → room is at 100%,
+    # NOT diluted by C's missed round or by the no-show.
+    assert body["pct_room_met"] == 100
+    assert body["min_people_met"] == 2
 
 
 def test_analytics_preserves_repeat_pairings(client, db, event):

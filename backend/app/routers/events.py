@@ -728,19 +728,49 @@ def get_analytics(
     met_pairs = set(pair_rounds)  # distinct pairs who ever shared a table
     total_introductions = len(met_pairs)
 
+    # Honest population: people who ACTUALLY showed up (checked in → arrived, or
+    # arrived-then-left), not registrants who never came. No-shows must not dilute
+    # the connection metrics or the "% of room" denominator.
+    checked_in_count = sum(1 for a in attendees if a.get("status") in ("arrived", "left"))
+
     # People actually seated at least once = the population the connection metrics
     # are about (a registrant who never sat down can't have "met" anyone).
     seated_ids = {str(a["attendee_id"]) for a in assignments}
     seated_attendees = len(seated_ids)
-    possible_introductions = seated_attendees * (seated_attendees - 1) // 2
+
+    # Rounds each person was actually seated in — the basis for "who COULD have met
+    # whom". Two people could only meet if they shared ≥1 round, so late joins and
+    # early leaves never distort coverage or per-person reach (the mid-event-add case).
+    seated_rounds: dict[str, set] = {}
+    for a in assignments:
+        seated_rounds.setdefault(str(a["attendee_id"]), set()).add(str(a["round_id"]))
+    co_present = {
+        aid: sum(
+            1
+            for other in seated_ids
+            if other != aid and seated_rounds.get(other, set()) & seated_rounds.get(aid, set())
+        )
+        for aid in seated_ids
+    }
+
+    # Coverage ceiling = pairs who shared ≥1 round (could have been introduced), not
+    # a naive n² that assumes everyone overlapped for the whole event. Each pair is
+    # counted once from both endpoints, so halve the co-present total.
+    possible_introductions = sum(co_present.values()) // 2
     # Nobody-left-behind: the fewest distinct people any seated person met. Someone
     # seated alone for a round (no tablemates) has 0 — that's worth surfacing.
     min_people_met = min((len(met.get(aid, set())) for aid in seated_ids), default=0)
 
-    # Avg % of the rest of the room each person met (a single, intuitive headline).
-    pct_room_met = (
-        round(avg_met / max(len(attendees) - 1, 1) * 100) if attendees else 0
-    )
+    # Avg % of the people each person COULD have met (those co-present with them)
+    # that they actually did — normalised per person so partial attendance is fair.
+    per_person_pct = [
+        len(met.get(aid, set())) / co * 100 for aid, co in co_present.items() if co > 0
+    ]
+    pct_room_met = round(sum(per_person_pct) / len(per_person_pct)) if per_person_pct else 0
+
+    # People funnel tail: showed up → seated → met someone → made a match.
+    met_someone_count = sum(1 for aid in seated_ids if met.get(aid))
+    matched_people_count = len({pid for pair in matched_pairs for pid in pair})
 
     # Per-round performance: seated count + NEW pairs created that round (so the
     # bar chart shows fresh connections per round, not cumulative). Rounds in order.
@@ -773,9 +803,6 @@ def get_analytics(
     # they liked/matched, so the graph is a relationship-intelligence tool — not a
     # decorative chart. Pilot-scale (~40) so the full graph is tiny.
     profile = {str(a["id"]): a for a in attendees}
-    present_rounds: dict[str, set] = {}
-    for a in assignments:
-        present_rounds.setdefault(str(a["attendee_id"]), set()).add(str(a["round_id"]))
     mutual_by_person: dict[str, int] = {}
     for pair in matched_pairs:
         for pid in pair:
@@ -788,7 +815,7 @@ def get_analytics(
             met=len(met.get(aid, set())),
             company=(profile.get(aid) or {}).get("company"),
             role=(profile.get(aid) or {}).get("role"),
-            rounds_present=len(present_rounds.get(aid, set())),
+            rounds_present=len(seated_rounds.get(aid, set())),
             mutual_likes=mutual_by_person.get(aid, 0),
         )
         for aid in sorted(seated_ids, key=lambda x: names.get(x, "").lower())
@@ -809,6 +836,7 @@ def get_analytics(
 
     return EventAnalytics(
         total_attendees=len(attendees),
+        checked_in_count=checked_in_count,
         rounds_completed=rounds_completed,
         avg_unique_people_met=avg_met,
         total_likes=total_likes,
@@ -819,6 +847,8 @@ def get_analytics(
         seated_attendees=seated_attendees,
         possible_introductions=possible_introductions,
         min_people_met=min_people_met,
+        met_someone_count=met_someone_count,
+        matched_people_count=matched_people_count,
         round_performance=round_performance,
         top_connectors=top_connectors,
         graph_nodes=graph_nodes,

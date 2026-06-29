@@ -1,7 +1,7 @@
 import re
 
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, Literal, List
+from typing import Optional, Literal, List, Dict, Any
 from datetime import date, time, datetime
 from datetime import date as DateType, time as TimeType  # aliases for models that also have date/time FIELDS (avoids name shadowing)
 from uuid import UUID
@@ -723,6 +723,133 @@ class MyFeedbackResponse(BaseModel):
     comment: Optional[str] = None
 
 
+# --- Customizable post-event feedback forms (builder + gating + results) ---
+
+# The supported question types. `rating` is a 1..scale star scale; `nps` is the
+# fixed 0-10 Net Promoter scale; choice types carry `options`.
+QuestionType = Literal[
+    "short_text", "long_text", "single_choice", "multi_choice", "rating", "nps", "yes_no"
+]
+CHOICE_TYPES = {"single_choice", "multi_choice"}
+
+
+class FormQuestion(BaseModel):
+    """A single question — used both in the builder (authoring) and the fill view.
+    `id` is present once persisted; the builder may send questions without an id."""
+    id: Optional[UUID] = None
+    type: QuestionType
+    label: str = Field(min_length=1, max_length=300)
+    help_text: Optional[str] = Field(default=None, max_length=500)
+    required: bool = False
+    options: List[str] = Field(default_factory=list, max_length=20)  # choice types
+    scale: int = Field(default=5, ge=2, le=10)                       # rating types
+
+    @field_validator("help_text")
+    @classmethod
+    def _blank_help_to_none(cls, v: Optional[str]) -> Optional[str]:
+        v = (v or "").strip()
+        return v or None
+
+    @field_validator("options")
+    @classmethod
+    def _clean_options(cls, v: List[str]) -> List[str]:
+        return [o.strip() for o in v if o and o.strip()]
+
+
+class FormConfigUpdate(BaseModel):
+    """Whole-form upsert from the builder (replaces title/desc/questions/gating)."""
+    title: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    gate_recap: bool = False
+    collect_identity: bool = True  # show WHO answered in the results view
+    questions: List[FormQuestion] = Field(default_factory=list, max_length=50)
+
+    @field_validator("description")
+    @classmethod
+    def _blank_desc_to_none(cls, v: Optional[str]) -> Optional[str]:
+        v = (v or "").strip()
+        return v or None
+
+
+class FormConfigResponse(BaseModel):
+    """Full form for the organizer builder (includes publish state)."""
+    id: Optional[UUID] = None
+    event_id: UUID
+    title: str = "Event feedback"
+    description: Optional[str] = None
+    is_published: bool = False
+    gate_recap: bool = False
+    collect_identity: bool = True
+    questions: List[FormQuestion] = Field(default_factory=list)
+
+
+class PublishUpdate(BaseModel):
+    is_published: bool
+
+
+class AnswerInput(BaseModel):
+    question_id: UUID
+    value: Any = None  # str | int | list[str], validated against the question in the router
+
+
+class FormSubmission(BaseModel):
+    answers: List[AnswerInput] = Field(default_factory=list)
+
+
+class AttendeeFormResponse(BaseModel):
+    """What an attendee sees on the recap: the published form (no internal flags),
+    whether they've already submitted, and whether the recap is gated behind it."""
+    available: bool = False     # a published form exists for this event
+    submitted: bool = False
+    gate_recap: bool = False
+    collect_identity: bool = True  # whether the attendee's name is shared with the organizer
+    title: str = "Event feedback"
+    description: Optional[str] = None
+    questions: List[FormQuestion] = Field(default_factory=list)
+
+
+class QuestionResult(BaseModel):
+    """Aggregated answers for one question (organizer results view)."""
+    question_id: UUID
+    label: str
+    type: QuestionType
+    answered: int = 0
+    option_counts: Dict[str, int] = Field(default_factory=dict)  # choice / yes_no / nps buckets
+    average: Optional[float] = None                              # rating / nps
+    text_answers: List[str] = Field(default_factory=list)        # free-text
+
+
+class ResponseAnswer(BaseModel):
+    """One person's answer to one question (individual response view)."""
+    question_id: UUID
+    value: Any = None  # str | int | list[str], shaped by the question type
+
+
+class IndividualResponse(BaseModel):
+    """A single attendee's full submission. Identity fields are populated only
+    when the form's `collect_identity` is on; otherwise they stay None and the
+    console shows the response as anonymous."""
+    submission_id: UUID
+    respondent_name: Optional[str] = None
+    respondent_company: Optional[str] = None
+    respondent_avatar_url: Optional[str] = None
+    submitted_at: Optional[str] = None
+    answers: List[ResponseAnswer] = Field(default_factory=list)
+
+
+class FormResults(BaseModel):
+    form_id: Optional[UUID] = None
+    title: str = "Event feedback"
+    is_published: bool = False
+    gate_recap: bool = False
+    collect_identity: bool = True
+    total_recipients: int = 0   # checked-in attendees (the realistic denominator)
+    response_count: int = 0
+    response_rate: int = 0      # % of checked-in who submitted
+    questions: List[QuestionResult] = Field(default_factory=list)
+    responses: List[IndividualResponse] = Field(default_factory=list)  # per-respondent
+
+
 # --- Sponsors & event branding (shown between rounds + in the lobby) ---
 
 class SponsorInput(BaseModel):
@@ -794,17 +921,20 @@ class GraphEdge(BaseModel):
 
 
 class EventAnalytics(BaseModel):
-    total_attendees: int
+    total_attendees: int          # registered = every attendee row (incl. no-shows)
+    checked_in_count: int = 0     # actually showed up (status arrived or left) — the honest population
     rounds_completed: int
     avg_unique_people_met: float
     total_likes: int = 0          # one-directional likes cast across the whole event
     total_matches: int = 0        # mutual likes (counted once per pair)
     liked_pairs: int = 0          # unique pairs where ≥1 person liked the other (funnel middle stage)
     total_introductions: int = 0  # unique pairs of people who shared a table at least once
-    pct_room_met: int = 0         # avg % of the rest of the room each person met
+    pct_room_met: int = 0         # avg % of the people each person COULD meet (co-present) that they did
     seated_attendees: int = 0     # people seated at least once (graph nodes; coverage denominator base)
-    possible_introductions: int = 0  # n·(n-1)/2 over seated people — the coverage ceiling
+    possible_introductions: int = 0  # pairs who shared ≥1 round (could-have-met ceiling; robust to partial attendance)
     min_people_met: int = 0       # fewest distinct people any seated person met ("nobody left behind")
+    met_someone_count: int = 0    # seated people who met ≥1 other (people-funnel stage)
+    matched_people_count: int = 0  # distinct people in ≥1 mutual match (people-funnel tail)
     round_performance: List["RoundPerf"] = Field(default_factory=list)
     top_connectors: List["TopConnector"] = Field(default_factory=list)
     graph_nodes: List["GraphNode"] = Field(default_factory=list)  # the connection web

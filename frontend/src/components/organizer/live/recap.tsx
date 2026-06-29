@@ -50,7 +50,8 @@ const RelationshipGraph = dynamic(
 );
 
 interface Analytics {
-  total_attendees: number;
+  total_attendees: number; // registered (incl. no-shows)
+  checked_in_count: number; // actually showed up
   rounds_completed: number;
   avg_unique_people_met: number;
   total_likes: number;
@@ -61,6 +62,8 @@ interface Analytics {
   seated_attendees: number;
   possible_introductions: number;
   min_people_met: number;
+  met_someone_count: number;
+  matched_people_count: number;
   round_performance: RoundPerf[];
   top_connectors: TopConnector[];
   graph_nodes: GraphNode[];
@@ -137,6 +140,10 @@ export function EventRecap({ eventId, live = false }: { eventId: string; live?: 
           {/* Headline bento */}
           <HeadlineTiles stats={stats} matchRate={matchRate} />
 
+          {/* Who showed up — the honest attendance funnel (no-shows are visible,
+              not hidden). Every connection metric below is over who CHECKED IN. */}
+          <PeopleFunnel stats={stats} />
+
           {/* How introductions converted + how much of the room we reached */}
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="p-5 sm:p-6">
@@ -156,7 +163,7 @@ export function EventRecap({ eventId, live = false }: { eventId: string; live?: 
 
           {/* Secondary line */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Metric value={stats.total_attendees} label="attendees" />
+            <Metric value={stats.checked_in_count} label="checked in" info={`${stats.total_attendees} registered in total — this is how many actually arrived.`} />
             <Metric value={stats.rounds_completed} label={stats.rounds_completed === 1 ? "round" : "rounds"} />
             <Metric value={stats.avg_unique_people_met} label="avg new people / guest" info="Average number of distinct people each guest met across all rounds." />
             <Metric value={stats.total_likes} label="hearts sent" info="Total one-way likes guests sent each other (a mutual pair becomes a connection)." />
@@ -326,7 +333,7 @@ function HeadlineTiles({ stats, matchRate }: { stats: Analytics; matchRate: numb
       <BentoTile value={stats.total_matches} label="connections made" bg="#B66CFF" fg="#fff" icon={Heart}
         info="Mutual likes: both people liked each other and want to stay in touch." />
       <BentoTile value={`${stats.pct_room_met}%`} label="of the room met" bg="#A8D5FF" fg="#15130E" icon={Users}
-        info="On average, each guest met this share of everyone else in the room." />
+        info="On average, each guest met this share of the people they could have met — everyone seated in the same rounds they attended. Fair to people who joined late or left early." />
       <BentoTile value={`${matchRate}%`} label="match rate" bg="#D9FF4D" fg="#15130E" icon={Percent}
         info="Of all the conversations we created, this share turned into a mutual connection." />
     </div>
@@ -406,6 +413,48 @@ function Metric({ value, label, info }: { value: number; label: string; info?: s
   );
 }
 
+/** The people funnel: registered → checked in → seated → met someone → matched.
+ *  Surfaces attendance reality (the no-show gap) instead of hiding it, and makes
+ *  clear that every connection metric below is over who actually CHECKED IN. */
+function PeopleFunnel({ stats }: { stats: Analytics }) {
+  const stages = [
+    { label: "Registered", value: stats.total_attendees, color: "hsl(var(--muted-foreground))" },
+    { label: "Checked in", value: stats.checked_in_count, color: "#A8D5FF" },
+    { label: "Seated", value: stats.seated_attendees, color: "#FF5A3C" },
+    { label: "Met someone", value: stats.met_someone_count, color: "#B66CFF" },
+    { label: "Made a match", value: stats.matched_people_count, color: "#D9FF4D" },
+  ];
+  const max = Math.max(1, stats.total_attendees);
+  const noShow = stats.total_attendees - stats.checked_in_count;
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="flex items-center gap-1.5">
+        <Users className="h-3.5 w-3.5 text-accent" aria-hidden />
+        <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ who showed up</span>
+        <InfoHint text="Each person's journey: who registered, actually arrived, got seated, met someone, and made a mutual match. The gap from registered to checked in is your no-show rate — every connection number on this page is measured over who checked in." />
+      </div>
+      <div className="mt-4 space-y-3">
+        {stages.map((s) => (
+          <div key={s.label}>
+            <div className="mb-1 flex items-baseline justify-between text-sm">
+              <span className="font-medium text-foreground">{s.label}</span>
+              <span className="font-display text-lg text-foreground">{s.value.toLocaleString()}</span>
+            </div>
+            <div className="h-3 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(2, (s.value / max) * 100)}%`, background: s.color }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      {noShow > 0 && stats.total_attendees > 0 && (
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          {noShow} registered {noShow === 1 ? "person" : "people"} didn&apos;t check in — {Math.round((noShow / stats.total_attendees) * 100)}% no-show.
+        </p>
+      )}
+    </Card>
+  );
+}
+
 /** Sat together → sparked interest → matched. A true funnel (each stage ⊆ the one
  *  above), so the conversion line is always ≤ 100% — easy for anyone to read. */
 function IntroFunnel({
@@ -464,7 +513,7 @@ function CoverageCard({
     <Card className="p-5 sm:p-6">
       <div className="flex items-center gap-1.5">
         <span className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">/ room coverage</span>
-        <InfoHint text="Of every possible pair of people in the room, how many we actually introduced. 100% would mean everyone met everyone." />
+        <InfoHint text="Of every pair who could have met — they were seated in at least one of the same rounds — how many we actually introduced. 100% means everyone who overlapped in the room met." />
       </div>
       <div className="mt-4 flex items-baseline gap-2">
         <span className="font-display text-4xl leading-none text-foreground">{pct}%</span>

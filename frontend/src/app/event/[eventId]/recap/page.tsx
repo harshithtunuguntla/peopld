@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
 import { motion } from "framer-motion";
-import { Loader2, Users, Sparkles, Heart, HandHeart, ArrowRight, PartyPopper, UserCheck, Linkedin, Globe, Star, Check } from "lucide-react";
+import { Loader2, Users, Sparkles, Heart, HandHeart, ArrowRight, PartyPopper, UserCheck, Linkedin, Globe, Lock } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
@@ -14,6 +14,8 @@ import { CountUp } from "@/components/brand/count-up";
 import { groupByPerson, type Connection } from "@/components/connections/person-card";
 import { Avatar } from "@/components/brand/avatar";
 import { buttonVariants } from "@/components/ui/button";
+import { FeedbackFillForm } from "@/components/feedback/fill-form";
+import { type AttendeeForm } from "@/lib/feedback";
 import { COLORS } from "@/lib/design/colors";
 import { inkOn } from "@/lib/design/rounds";
 import { cn } from "@/lib/utils";
@@ -45,10 +47,12 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
   const [matches, setMatches] = useState<IntentMatch[]>([]);
   const [eventName, setEventName] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
-  // "show" only once we know they haven't already submitted — never flashes the
-  // card before that's confirmed, and a fetch failure just keeps it hidden
-  // (the ask is optional; it's never worth erroring the page over).
-  const [feedbackVisible, setFeedbackVisible] = useState(false);
+  // Customizable feedback form (new system). When the organizer requires it, the
+  // recap stays LOCKED until it's submitted; otherwise it's an optional ask below.
+  // `formChecked` prevents flashing the recap before we know the gating state.
+  const [feedbackForm, setFeedbackForm] = useState<AttendeeForm | null>(null);
+  const [formChecked, setFormChecked] = useState(false);
+  const [feedbackDismissed, setFeedbackDismissed] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -78,9 +82,13 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
         apiFetch<{ matches: IntentMatch[] }>(`/events/${eventId}/intents/matches`)
           .then((m) => !cancelled && setMatches(m.matches))
           .catch(() => {});
-        apiFetch<{ submitted: boolean }>(`/events/${eventId}/feedback/me`)
-          .then((f) => !cancelled && setFeedbackVisible(!f.submitted))
-          .catch(() => {});
+        apiFetch<AttendeeForm>(`/events/${eventId}/feedback-form/fill`)
+          .then((f) => {
+            if (cancelled) return;
+            setFeedbackForm(f);
+            setFormChecked(true);
+          })
+          .catch(() => !cancelled && setFormChecked(true));
       } catch (e) {
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : "Couldn't load your recap";
@@ -102,6 +110,37 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
     return (
       <LiveShell>
         <Centered label="Loading…" />
+      </LiveShell>
+    );
+  }
+
+  const markSubmitted = () => setFeedbackForm((f) => (f ? { ...f, submitted: true } : f));
+  const gated = !!(feedbackForm?.available && feedbackForm.gate_recap && !feedbackForm.submitted);
+
+  // The recap is locked behind the form: show ONLY the form until it's submitted.
+  if (gated && feedbackForm) {
+    return (
+      <LiveShell eventId={eventId} className="max-w-2xl">
+        <motion.header
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="mx-auto max-w-xl text-center"
+        >
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-accent-foreground">
+            <Lock className="h-7 w-7" aria-hidden />
+          </div>
+          <p className="mt-4 text-[11px] uppercase tracking-[0.3em] text-accent">One quick step</p>
+          <h1 className="mt-2 text-balance font-display text-[clamp(26px,7vw,38px)] leading-[1.05] tracking-[-0.02em] text-foreground">
+            Share your feedback to unlock your recap
+          </h1>
+          <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">
+            It takes under a minute — then your connections and matches are all yours.
+          </p>
+        </motion.header>
+        <div className="mx-auto mt-6 max-w-xl">
+          <FeedbackFillForm eventId={eventId} form={feedbackForm} onSubmitted={markSubmitted} />
+        </div>
       </LiveShell>
     );
   }
@@ -142,7 +181,7 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
         </p>
       )}
 
-      {!data && !error && (
+      {(!data || !formChecked) && !error && (
         <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="h-28 skeleton rounded-3xl border border-border" />
@@ -150,7 +189,7 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
         </div>
       )}
 
-      {data && (
+      {data && formChecked && (
         <>
           {/* The event in numbers */}
           <div className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -234,108 +273,24 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
             </p>
           </motion.div>
 
-          {feedbackVisible && (
+          {feedbackForm?.available && !feedbackForm.submitted && !feedbackForm.gate_recap && !feedbackDismissed && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.32, duration: 0.4 }}
               className="mx-auto mt-7 max-w-xl"
             >
-              <FeedbackCard eventId={eventId} onDone={() => setFeedbackVisible(false)} />
+              <FeedbackFillForm
+                eventId={eventId}
+                form={feedbackForm}
+                onSubmitted={markSubmitted}
+                onSkip={() => setFeedbackDismissed(true)}
+              />
             </motion.div>
           )}
         </>
       )}
     </LiveShell>
-  );
-}
-
-/** A calm, dismissible testimonial ask — last thing on the recap page, after
- * the main CTA. Never blocks anything; "Skip" just hides it for this visit,
- * and it never shows again once submitted (checked server-side via /feedback/me
- * so that holds across devices, not just this browser). */
-function FeedbackCard({ eventId, onDone }: { eventId: string; onDone: () => void }) {
-  const [rating, setRating] = useState(0);
-  const [hovered, setHovered] = useState(0);
-  const [comment, setComment] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
-
-  async function submit() {
-    if (!rating || busy) return;
-    setBusy(true);
-    try {
-      await apiFetch(`/events/${eventId}/feedback`, {
-        method: "POST",
-        body: JSON.stringify({ rating, comment: comment.trim() || null }),
-      });
-      setDone(true);
-      setTimeout(onDone, 1400);
-    } catch {
-      setBusy(false);
-    }
-  }
-
-  if (done) {
-    return (
-      <div className="flex items-center justify-center gap-2 rounded-2xl border border-success/30 bg-success/10 px-5 py-4 text-sm text-success">
-        <Check className="h-4 w-4" aria-hidden /> Thanks for the feedback!
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-2xl border border-border bg-card/50 p-5">
-      <p className="font-display text-base text-foreground">How was it?</p>
-      <p className="mt-0.5 text-sm text-muted-foreground">30 seconds — tell us how you felt about tonight.</p>
-
-      <div className="mt-3 flex items-center gap-1">
-        {[1, 2, 3, 4, 5].map((n) => (
-          <button
-            key={n}
-            type="button"
-            onClick={() => setRating(n)}
-            onMouseEnter={() => setHovered(n)}
-            onMouseLeave={() => setHovered(0)}
-            aria-label={`${n} star${n === 1 ? "" : "s"}`}
-            className="p-0.5 text-muted-foreground transition-colors hover:text-accent"
-          >
-            <Star
-              className={cn("h-7 w-7", (hovered || rating) >= n && "fill-accent text-accent")}
-              aria-hidden
-            />
-          </button>
-        ))}
-      </div>
-
-      <textarea
-        value={comment}
-        onChange={(e) => setComment(e.target.value)}
-        rows={2}
-        maxLength={1000}
-        placeholder="Anything you'd want to tell us? (optional)"
-        className="mt-3 w-full resize-none rounded-xl border border-input bg-secondary/50 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-      />
-
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <button
-          type="button"
-          onClick={onDone}
-          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          Skip
-        </button>
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!rating || busy}
-          className={cn(buttonVariants({ variant: "accent", size: "default" }), "gap-1.5 disabled:opacity-50")}
-        >
-          {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
-          Submit
-        </button>
-      </div>
-    </div>
   );
 }
 

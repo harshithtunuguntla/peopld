@@ -29,6 +29,7 @@ import { roundFor, agendaFor } from "@/lib/design/rounds";
 
 import dynamic from "next/dynamic";
 
+import { FeedbackNudge } from "@/components/organizer/feedback-nudge";
 import { groupByTable, type Attendee, type RoundDraft, type ActiveRound } from "./types";
 import { FloorMap, TimerRing } from "./floor-map";
 import { NotSeated, Guests } from "./rails";
@@ -616,5 +617,10 @@ export function ActiveView({
 // The rich recap (bento + charts + top connectors) lives in ./recap to keep this
 // file lean and isolate the recharts import to the one screen that needs it.
 export function EndedView({ eventId }: { eventId: string }) {
-  return <EventRecapSummary eventId={eventId} />;
+  return (
+    <>
+      <FeedbackNudge eventId={eventId} />
+      <EventRecapSummary eventId={eventId} />
+    </>
+  );
 }

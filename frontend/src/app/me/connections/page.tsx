@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
-import { Loader2, ChevronLeft, Users, CalendarDays, Heart, Search, Bookmark, UserCheck } from "lucide-react";
+import { Loader2, ChevronLeft, Users, CalendarDays, Heart, Bookmark, UserCheck } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
@@ -12,6 +12,8 @@ import { AccountMenu } from "@/components/attendee/account-menu";
 import { Wordmark } from "@/components/brand/wordmark";
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { PersonCard, type Person, type Connection } from "@/components/connections/person-card";
+import { SearchBox } from "@/components/connections/search-box";
+import { searchItems, tokenize, type FieldSpec } from "@/lib/connections/search";
 import { SelectMenu } from "@/components/ui/select-menu";
 import { cn } from "@/lib/utils";
 
@@ -98,6 +100,17 @@ function groupCrossEvent(rows: MyConnection[]): CrossEventCard[] {
   );
 }
 
+/** Searchable fields for the cross-event rolodex (generic engine, see
+ *  lib/connections/search). Reads through each card's person. */
+const CROSS_FIELDS: FieldSpec<CrossEventCard>[] = [
+  { get: (c) => c.person.name, weight: 5 },
+  { get: (c) => c.person.role, weight: 4 },
+  { get: (c) => c.person.company, weight: 3 },
+  { get: (c) => c.person.looking_for, weight: 2 },
+  { get: (c) => c.person.interests, weight: 2 },
+  { get: (c) => c.person.note, weight: 1 },
+];
+
 export default function MyConnectionsPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -165,18 +178,17 @@ export default function MyConnectionsPage() {
     [cards],
   );
 
+  const terms = useMemo(() => tokenize(query), [query]);
   const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return cards.filter((c) => {
+    const byFilter = cards.filter((c) => {
       if (eventFilter !== "all" && c.eventId !== eventFilter) return false;
       if (relFilter === "met" && !c.person.met) return false;
       if (relFilter === "matches" && !c.person.mutual) return false;
       if (relFilter === "liked" && !c.person.liked) return false;
       if (relFilter === "saved" && !c.person.saved) return false;
-      if (!needle) return true;
-      const hay = `${c.person.name} ${c.person.role} ${c.person.company ?? ""}`.toLowerCase();
-      return hay.includes(needle);
+      return true;
     });
+    return searchItems(byFilter, query, CROSS_FIELDS);
   }, [cards, query, eventFilter, relFilter]);
 
   return (
@@ -243,16 +255,12 @@ export default function MyConnectionsPage() {
               <>
                 {/* Search + filters — find anyone fast, or narrow to one event. */}
                 <div className="mt-7 flex flex-col gap-3">
-                  <div className="flex h-11 items-center gap-2 rounded-full border border-border bg-card px-3.5">
-                    <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <input
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      placeholder="Search by name, role, or company…"
-                      aria-label="Search connections"
-                      className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-                    />
-                  </div>
+                  <SearchBox
+                    value={query}
+                    onChange={setQuery}
+                    placeholder="Search name, role, interest, note…"
+                    ariaLabel="Search connections"
+                  />
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <RelTabs filter={relFilter} onChange={setRelFilter} counts={relCounts} />
                     {eventOptions.length > 1 && (
@@ -278,7 +286,7 @@ export default function MyConnectionsPage() {
                   // its own content and pack tightly.
                   <ul className="mt-5 columns-1 gap-x-3 sm:columns-2 [&>li]:mb-3 [&>li]:break-inside-avoid">
                     {visible.map(({ person, eventId }) => (
-                      <PersonCard key={`${eventId}-${person.attendee_id}`} person={person} eventId={eventId} />
+                      <PersonCard key={`${eventId}-${person.attendee_id}`} person={person} eventId={eventId} highlight={terms} />
                     ))}
                   </ul>
                 )}

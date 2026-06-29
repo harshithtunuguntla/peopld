@@ -10,7 +10,6 @@ import {
   Globe,
   Linkedin,
   Mic,
-  Search,
   Sparkles,
   UserPlus,
   UserCheck,
@@ -23,6 +22,8 @@ import { AccountMenu } from "@/components/attendee/account-menu";
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Wordmark } from "@/components/brand/wordmark";
 import { Avatar } from "@/components/brand/avatar";
+import { SearchBox, Highlight } from "@/components/connections/search-box";
+import { searchItems, tokenize, type FieldSpec } from "@/lib/connections/search";
 import { cn } from "@/lib/utils";
 
 type Tag = "attendee" | "speaker" | "host";
@@ -52,6 +53,16 @@ interface DirectoryResp {
 }
 
 type FilterKey = "all" | "speakers" | "shared";
+
+/** Searchable fields for the guest list (generic engine, see lib/connections/search). */
+const DIRECTORY_FIELDS: FieldSpec<DirectoryEntry>[] = [
+  { get: (p) => p.name, weight: 5 },
+  { get: (p) => p.role, weight: 4 },
+  { get: (p) => p.company, weight: 3 },
+  { get: (p) => p.looking_for, weight: 2 },
+  { get: (p) => p.interests, weight: 2 },
+  { get: (p) => p.description, weight: 1 }, // the free-text bio
+];
 
 /** Pre-event "who's coming" — browse everyone registered, and pick who you most
  * want to meet (Phase 3a). Picks are private; we seat you with mutual picks. */
@@ -162,20 +173,15 @@ export default function DirectoryPage({ params }: { params: Promise<{ eventId: s
     [eventId, wantedIds, pending, capReached, cap],
   );
 
+  const terms = useMemo(() => tokenize(q), [q]);
   const visible = useMemo(() => {
     if (!data) return [];
-    const needle = q.trim().toLowerCase();
-    return data.attendees.filter((p) => {
+    const byFilter = data.attendees.filter((p) => {
       if (filter === "speakers" && p.tag !== "speaker") return false;
       if (filter === "shared" && p.shared_interests.length === 0) return false;
-      if (!needle) return true;
-      return (
-        p.name.toLowerCase().includes(needle) ||
-        (p.role ?? "").toLowerCase().includes(needle) ||
-        (p.company ?? "").toLowerCase().includes(needle) ||
-        p.interests.some((t) => t.toLowerCase().includes(needle))
-      );
+      return true;
     });
+    return searchItems(byFilter, q, DIRECTORY_FIELDS);
   }, [data, q, filter]);
 
   const sharedCount = useMemo(
@@ -255,16 +261,13 @@ export default function DirectoryPage({ params }: { params: Promise<{ eventId: s
         {/* Search + filters */}
         {data && data.count > 0 && (
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="flex h-11 w-full items-center gap-2 rounded-full border border-border bg-card px-3.5 sm:max-w-xs">
-              <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search name, role, interest…"
-                aria-label="Search the guest list"
-                className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-              />
-            </div>
+            <SearchBox
+              value={q}
+              onChange={setQ}
+              placeholder="Search name, role, interest, bio…"
+              ariaLabel="Search the guest list"
+              className="w-full sm:max-w-xs"
+            />
             <div className="flex gap-2 overflow-x-auto scrollbar-hide">
               {filters.map((f) => {
                 const active = f.key === filter;
@@ -326,6 +329,7 @@ export default function DirectoryPage({ params }: { params: Promise<{ eventId: s
                 pending={pending.has(p.attendee_id)}
                 capReached={capReached}
                 onToggle={() => toggleIntent(p)}
+                highlight={terms}
               />
             ))}
           </ul>
@@ -348,6 +352,7 @@ function DirectoryCard({
   pending,
   capReached,
   onToggle,
+  highlight = [],
 }: {
   person: DirectoryEntry;
   index: number;
@@ -356,6 +361,7 @@ function DirectoryCard({
   pending: boolean;
   capReached: boolean;
   onToggle: () => void;
+  highlight?: string[];
 }) {
   const roleLine = [person.role, person.company].filter(Boolean).join(" · ");
   const sharedSet = new Set(person.shared_interests.map((s) => s.toLowerCase()));
@@ -385,7 +391,9 @@ function DirectoryCard({
         <Avatar name={person.name} seed={person.attendee_id} src={person.avatar_url} size={48} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate font-display text-lg leading-tight text-foreground">{person.name}</span>
+            <span className="truncate font-display text-lg leading-tight text-foreground">
+              <Highlight text={person.name} terms={highlight} />
+            </span>
             {tagChip && (
               <span className={cn("inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide", tagChip.cls)}>
                 {person.tag === "speaker" && <Mic className="h-2.5 w-2.5" aria-hidden />}
@@ -393,17 +401,24 @@ function DirectoryCard({
               </span>
             )}
           </div>
-          {roleLine && <p className="truncate text-xs text-muted-foreground">{roleLine}</p>}
+          {roleLine && (
+            <p className="truncate text-xs text-muted-foreground">
+              <Highlight text={roleLine} terms={highlight} />
+            </p>
+          )}
         </div>
       </div>
 
       {person.description && (
-        <p className="mt-3 line-clamp-2 text-sm leading-snug text-muted-foreground">{person.description}</p>
+        <p className="mt-3 line-clamp-2 text-sm leading-snug text-muted-foreground">
+          <Highlight text={person.description} terms={highlight} />
+        </p>
       )}
 
       {person.looking_for && (
         <p className="mt-2 line-clamp-1 text-xs text-muted-foreground">
-          <span className="text-muted-foreground/70">Looking for:</span> {person.looking_for}
+          <span className="text-muted-foreground/70">Looking for:</span>{" "}
+          <Highlight text={person.looking_for} terms={highlight} />
         </p>
       )}
 
@@ -411,12 +426,12 @@ function DirectoryCard({
         <div className="mt-3 flex flex-wrap gap-1.5">
           {person.shared_interests.map((tag) => (
             <span key={`s-${tag}`} className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2.5 py-0.5 text-[11px] font-medium text-accent">
-              <Sparkles className="h-2.5 w-2.5" aria-hidden /> {tag}
+              <Sparkles className="h-2.5 w-2.5" aria-hidden /> <Highlight text={tag} terms={highlight} />
             </span>
           ))}
           {otherInterests.map((tag) => (
             <span key={`o-${tag}`} className="rounded-full border border-border px-2.5 py-0.5 text-[11px] text-muted-foreground">
-              {tag}
+              <Highlight text={tag} terms={highlight} />
             </span>
           ))}
         </div>

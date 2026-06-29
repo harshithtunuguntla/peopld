@@ -5,6 +5,7 @@ import { Heart, Globe, Linkedin, StickyNote, Loader2, Check, CalendarDays, Bookm
 
 import { apiFetch } from "@/lib/api";
 import { Avatar } from "@/components/brand/avatar";
+import { Highlight } from "@/components/connections/search-box";
 import { downloadVCard } from "@/lib/vcard";
 import { cn } from "@/lib/utils";
 
@@ -113,11 +114,14 @@ export function PersonCard({
   person,
   eventId,
   onSavedChange,
+  highlight = [],
 }: {
   person: Person;
   eventId: string;
   /** Notifies a parent (e.g. the Saved filter) when this card's saved state flips. */
   onSavedChange?: (attendeeId: string, saved: boolean) => void;
+  /** Active search terms — matched substrings get highlighted in the card text. */
+  highlight?: string[];
 }) {
   const roleLine = [person.role, person.company].filter(Boolean).join(" · ");
   const sharedSet = new Set(person.shared_interests.map((s) => s.toLowerCase()));
@@ -160,7 +164,9 @@ export function PersonCard({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <p className="truncate font-semibold text-foreground">{person.name}</p>
+            <p className="truncate font-semibold text-foreground">
+              <Highlight text={person.name} terms={highlight} />
+            </p>
             {person.mutual ? (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent">
                 <Heart className="h-2.5 w-2.5 fill-current" aria-hidden /> Match
@@ -174,7 +180,9 @@ export function PersonCard({
               </span>
             )}
           </div>
-          <p className="truncate text-sm text-muted-foreground">{roleLine}</p>
+          <p className="truncate text-sm text-muted-foreground">
+            <Highlight text={roleLine} terms={highlight} />
+          </p>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {person.met ? (
               <MetaChip icon={<Sparkles className="h-3 w-3" aria-hidden />}>
@@ -209,7 +217,8 @@ export function PersonCard({
 
       {person.looking_for && (
         <p className="mt-3 text-xs text-muted-foreground">
-          <span className="text-muted-foreground/70">Looking for:</span> {person.looking_for}
+          <span className="text-muted-foreground/70">Looking for:</span>{" "}
+          <Highlight text={person.looking_for} terms={highlight} />
         </p>
       )}
 
@@ -217,12 +226,12 @@ export function PersonCard({
         <div className="mt-3 flex flex-wrap gap-1.5">
           {person.shared_interests.map((tag) => (
             <span key={`s-${tag}`} className="rounded-full bg-accent/15 px-2.5 py-0.5 text-[11px] font-medium text-accent">
-              {tag}
+              <Highlight text={tag} terms={highlight} />
             </span>
           ))}
           {otherInterests.map((tag) => (
             <span key={`o-${tag}`} className="rounded-full border border-border px-2.5 py-0.5 text-[11px] text-muted-foreground">
-              {tag}
+              <Highlight text={tag} terms={highlight} />
             </span>
           ))}
         </div>

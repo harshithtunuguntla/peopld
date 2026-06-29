@@ -9,8 +9,21 @@ import { ArrowLeft, Loader2, Heart, Sparkles, Users, Bookmark, UserCheck, Mail, 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
 import { LiveShell } from "@/components/live/live-screens";
-import { PersonCard, groupByPerson, type Connection } from "@/components/connections/person-card";
+import { PersonCard, groupByPerson, type Connection, type Person } from "@/components/connections/person-card";
+import { SearchBox } from "@/components/connections/search-box";
+import { searchItems, tokenize, type FieldSpec } from "@/lib/connections/search";
 import { cn } from "@/lib/utils";
+
+/** Which fields the people-search matches, and how strongly each counts. Generic
+ *  config — the engine itself is field-agnostic (see lib/connections/search). */
+const PERSON_FIELDS: FieldSpec<Person>[] = [
+  { get: (p) => p.name, weight: 5 },
+  { get: (p) => p.role, weight: 4 },
+  { get: (p) => p.company, weight: 3 },
+  { get: (p) => p.looking_for, weight: 2 },
+  { get: (p) => p.interests, weight: 2 },
+  { get: (p) => p.note, weight: 1 }, // your own private note about them
+];
 
 type RelFilter = "all" | "met" | "matches" | "liked" | "saved";
 
@@ -77,6 +90,8 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
     setSavedIds(new Set(people.filter((p) => p.saved).map((p) => p.attendee_id)));
   }, [people]);
   const [filter, setFilter] = useState<RelFilter>("all");
+  const [query, setQuery] = useState("");
+  const terms = useMemo(() => tokenize(query), [query]);
   const handleSavedChange = useCallback((id: string, saved: boolean) => {
     setSavedIds((prev) => {
       const next = new Set(prev);
@@ -116,14 +131,15 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
     [people, savedIds],
   );
   const visible = useMemo(() => {
-    return people.filter((p) => {
+    const byRel = people.filter((p) => {
       if (filter === "met") return p.met;
       if (filter === "matches") return p.mutual;
       if (filter === "liked") return p.liked;
       if (filter === "saved") return savedIds.has(p.attendee_id);
       return true;
     });
-  }, [people, filter, savedIds]);
+    return searchItems(byRel, query, PERSON_FIELDS);
+  }, [people, filter, savedIds, query]);
 
   if (!authChecked || !user) {
     return (
@@ -206,14 +222,21 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
                 )}
               </div>
               <div className="mt-7">
+                <SearchBox value={query} onChange={setQuery} placeholder="Search name, role, interest, note…" />
+              </div>
+              <div className="mt-3">
                 <RelTabs filter={filter} onChange={setFilter} counts={relCounts} />
               </div>
               {visible.length === 0 ? (
-                <SavedEmptyState />
+                query.trim() ? (
+                  <NoMatches query={query} />
+                ) : (
+                  <SavedEmptyState />
+                )
               ) : (
                 <ul className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {visible.map((p) => (
-                    <PersonCard key={p.attendee_id} person={p} eventId={eventId} onSavedChange={handleSavedChange} />
+                    <PersonCard key={p.attendee_id} person={p} eventId={eventId} onSavedChange={handleSavedChange} highlight={terms} />
                   ))}
                 </ul>
               )}
@@ -276,6 +299,14 @@ function RelTabs({
           );
         })}
     </div>
+  );
+}
+
+function NoMatches({ query }: { query: string }) {
+  return (
+    <p className="mt-8 text-center text-sm text-muted-foreground">
+      No one matches &ldquo;<span className="text-foreground">{query.trim()}</span>&rdquo;.
+    </p>
   );
 }
 

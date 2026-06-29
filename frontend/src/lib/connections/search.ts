@@ -10,10 +10,20 @@ export interface FieldSpec<T> {
   weight: number;
 }
 
-/** Split a raw query into lowercased terms (used by the engine and by highlighting). */
+/** Lowercase + strip accents so "José" matches "jose" and "café" matches "cafe".
+ *  Robustness for real names/interests; uses the combining-marks range (no \p{}
+ *  dependency on the TS/JS target). */
+// Combining diacritical marks (U+0300–U+036F) left after NFD decomposition.
+// Built from an ASCII-only source string so the pattern can't be mangled by editor
+// or git unicode normalization.
+const COMBINING_MARKS = new RegExp("[\\u0300-\\u036f]", "g");
+export function fold(s: string): string {
+  return s.toLowerCase().normalize("NFD").replace(COMBINING_MARKS, "");
+}
+
+/** Split a raw query into folded terms (used by the engine and by highlighting). */
 export function tokenize(query: string): string[] {
-  return query
-    .toLowerCase()
+  return fold(query)
     .split(/\s+/)
     .map((t) => t.trim())
     .filter(Boolean);
@@ -21,7 +31,7 @@ export function tokenize(query: string): string[] {
 
 function toText(v: string | string[] | null | undefined): string {
   if (!v) return "";
-  return (Array.isArray(v) ? v.join(" ") : v).toLowerCase();
+  return fold(Array.isArray(v) ? v.join(" ") : v);
 }
 
 /**

@@ -4,13 +4,14 @@ import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
-import { ArrowLeft, Loader2, Heart, Sparkles, Users, Bookmark, UserCheck, Mail, Check } from "lucide-react";
+import { ArrowLeft, Loader2, Heart, Sparkles, Users, Bookmark, UserCheck, Mail, Check, TrendingUp, ChevronDown } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
 import { LiveShell } from "@/components/live/live-screens";
 import { PersonCard, groupByPerson, type Connection, type Person } from "@/components/connections/person-card";
 import { SearchBox } from "@/components/connections/search-box";
+import { AttendeeInsights } from "@/components/connections/attendee-insights";
 import { searchItems, tokenize, type FieldSpec } from "@/lib/connections/search";
 import { cn } from "@/lib/utils";
 
@@ -221,7 +222,24 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
                   </span>
                 )}
               </div>
-              <div className="mt-7">
+              {/* Personal insights — collapsed by default so the list stays primary;
+                  available during the event, not just after. Only when you've
+                  actually met someone (picks-only has nothing to chart). */}
+              {people.some((p) => p.met) && (
+              <details className="group mt-6 overflow-hidden rounded-3xl border border-border bg-card/50">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-4 [&::-webkit-details-marker]:hidden">
+                  <span className="flex items-center gap-2 font-display text-lg text-foreground">
+                    <TrendingUp className="h-4 w-4 text-accent" aria-hidden /> Your insights
+                  </span>
+                  <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden />
+                </summary>
+                <div className="px-4 pb-4">
+                  <AttendeeInsights people={people} embedded />
+                </div>
+              </details>
+              )}
+
+              <div className="mt-6">
                 <SearchBox value={query} onChange={setQuery} placeholder="Search name, role, interest, note…" />
               </div>
               <div className="mt-3">

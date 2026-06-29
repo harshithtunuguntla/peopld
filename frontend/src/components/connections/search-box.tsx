@@ -25,11 +25,19 @@ export function SearchBox({
     <div className={cn("flex h-11 items-center gap-2 rounded-full border border-border bg-card px-3.5", className)}>
       <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
       <input
+        type="search"
+        inputMode="search"
+        enterKeyHint="search"
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         aria-label={ariaLabel}
-        className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+        // Hide the native WebKit clear button — we render our own (X) for a
+        // consistent look across browsers.
+        className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
       />
       {value && (
         <button

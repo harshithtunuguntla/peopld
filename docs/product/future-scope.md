@@ -74,6 +74,28 @@ later also power a **server-rendered OG image** (`next/og`) so pasting a recap l
 into WhatsApp/Twitter shows a rich preview. Deferred because it needs an
 unauthenticated, signed data path (don't let numbers be spoofed via query params).
 
+## AI / natural-language people search (Search — Phase 2)
+
+**Phase 1 shipped:** generic keyword search (`lib/connections/search.ts` +
+`components/connections/search-box.tsx`) on the rolodex, event directory, and
+cross-event list — matches name/role/company/looking-for/interests/bio, ranked,
+highlighted. That covers literal queries ("developer", "b2b").
+
+**Phase 2 = understanding intent**, e.g. *"someone who could be my fractional CTO"*
+or *"who can help me hire"* — where the right person never wrote those words. Two
+options (deferred decision):
+- **B. LLM query-expansion (leaning this first):** one cheap Haiku call turns the
+  natural-language query into structured keywords/roles, then runs the Phase-1
+  engine. No new infra, explainable ("we searched: engineer, swe, backend"), ~1s.
+- **A. Embeddings + Supabase pgvector:** embed every profile + the query, rank by
+  meaning. Best recall, but needs an embeddings provider (Claude has none → Voyage/
+  Vertex), re-embedding on profile edit, and a vector store.
+
+**Why deferred (chosen 2026-06-29):** Phase 1 keyword search is robust and enough
+for this week's event; prove the UX first, add AI when literal search hits its
+ceiling. Privacy boundary stays the same — you only ever search your own network /
+events you attended.
+
 ## Cross-event "Event Memory" (community intelligence)
 
 Returning-attendee detection across events, a community network graph that grows

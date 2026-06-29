@@ -15,6 +15,7 @@ import { groupByPerson, type Connection } from "@/components/connections/person-
 import { Avatar } from "@/components/brand/avatar";
 import { buttonVariants } from "@/components/ui/button";
 import { ShareRecap } from "@/components/recap/share-recap";
+import { AttendeeInsights } from "@/components/connections/attendee-insights";
 import { FeedbackFillForm } from "@/components/feedback/fill-form";
 import { type AttendeeForm } from "@/lib/feedback";
 import { COLORS } from "@/lib/design/colors";
@@ -203,6 +204,9 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
             <RecapStat icon={HandHeart} value={heartsGiven} label="hearts sent" bg={COLORS.gold} delay={0.15} />
             <RecapStat icon={Heart} value={data.matches_count} label={data.matches_count === 1 ? "match" : "matches"} bg={COLORS.plasma} delay={0.2} highlight />
           </div>
+
+          {/* Personal insights — your night, charted. */}
+          {people.length > 0 && <AttendeeInsights people={people} className="mt-7" />}
 
           {/* Shareable story card — the growth loop. Only when there's a night to
               show off (you actually met people). */}

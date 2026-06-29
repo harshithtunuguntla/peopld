@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
-import { Loader2, LogOut, UserRound, Users } from "lucide-react";
+import { Loader2, LogOut, UserRound, Users, Sun, Moon, Monitor } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
+import { useTheme, type ThemePref } from "@/lib/theme/theme-provider";
 import { cn } from "@/lib/utils";
 
 type AccountMenuProps = {
@@ -114,6 +115,11 @@ export function AccountMenu({
             <MenuLink href={connectionsHref} icon={<Users className="h-4 w-4" aria-hidden />} onClick={() => setOpen(false)}>
               My connections
             </MenuLink>
+
+            <div className="my-1.5 border-t border-border" />
+            <ThemeControl />
+            <div className="my-1.5 border-t border-border" />
+
             <button
               type="button"
               role="menuitem"
@@ -127,6 +133,46 @@ export function AccountMenu({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Light / Dark / Auto appearance switch, inline in the profile menu. Flips the
+ *  theme live (menu stays open so the change is visible behind it). "Auto" follows
+ *  the device. Persists via the ThemeProvider (localStorage). */
+function ThemeControl() {
+  const { pref, setPref } = useTheme();
+  const options: { key: ThemePref; label: string; icon: ReactNode }[] = [
+    { key: "light", label: "Light", icon: <Sun className="h-3.5 w-3.5" aria-hidden /> },
+    { key: "dark", label: "Dark", icon: <Moon className="h-3.5 w-3.5" aria-hidden /> },
+    { key: "system", label: "Auto", icon: <Monitor className="h-3.5 w-3.5" aria-hidden /> },
+  ];
+  return (
+    <div className="px-1 py-0.5">
+      <p className="px-2 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Appearance</p>
+      <div role="radiogroup" aria-label="Theme" className="flex items-center gap-1 rounded-xl bg-secondary/60 p-1">
+        {options.map((o) => {
+          const active = pref === o.key;
+          return (
+            <button
+              key={o.key}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => setPref(o.key)}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium transition-colors",
+                active
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {o.icon}
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

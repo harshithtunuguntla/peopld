@@ -10,13 +10,13 @@ export interface FieldSpec<T> {
   weight: number;
 }
 
-/** Lowercase + strip accents so "José" matches "jose" and "café" matches "cafe".
- *  Robustness for real names/interests; uses the combining-marks range (no \p{}
- *  dependency on the TS/JS target). */
-// Combining diacritical marks (U+0300–U+036F) left after NFD decomposition.
-// Built from an ASCII-only source string so the pattern can't be mangled by editor
-// or git unicode normalization.
+// Combining diacritical marks (U+0300–U+036F) left after NFD decomposition. Built
+// from an ASCII-only source string so the pattern can't be mangled by editor/git
+// unicode normalization.
 const COMBINING_MARKS = new RegExp("[\\u0300-\\u036f]", "g");
+
+/** Lowercase + strip accents so "José" matches "jose" and "café" matches "cafe".
+ *  Used by both the search engine and tokenizing, for robust real-name matching. */
 export function fold(s: string): string {
   return s.toLowerCase().normalize("NFD").replace(COMBINING_MARKS, "");
 }

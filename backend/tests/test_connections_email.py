@@ -1,5 +1,7 @@
 """Email-me-my-connections endpoint — self-only, clear errors, sends when configured."""
 
+import app.email as email_mod
+from app.email import send_connections_recap
 from tests.conftest import AUTH, ATTENDEE_AUTH, ATTENDEE_USER_ID, make_attendee, make_round
 
 EMAIL = "/events/{eid}/attendees/{aid}/connections/email"
@@ -57,3 +59,59 @@ def test_email_sends_when_configured(client, db, event, monkeypatch):
     r = client.post(EMAIL.format(eid=eid, aid=me["id"]), headers=ATTENDEE_AUTH)
     assert r.status_code == 200 and r.json()["sent"] is True
     assert captured["to"] == "asha@test.local" and captured["count"] == 1
+
+
+class _Person:
+    """Minimal stand-in for a ConnectionEntry (just the attrs the email reads)."""
+
+    def __init__(self, name, role=None, company=None, linkedin_url=None, website_url=None, mutual=False):
+        self.name = name
+        self.role = role
+        self.company = company
+        self.linkedin_url = linkedin_url
+        self.website_url = website_url
+        self.mutual = mutual
+
+
+def test_send_connections_recap_builds_message(monkeypatch):
+    """Exercise the REAL send body (the path the endpoint tests monkeypatch past),
+    so the HTML builder can't regress — e.g. the `html` module-shadowing crash."""
+    monkeypatch.setattr(email_mod.settings, "smtp_user", "host@peopld.app")
+    monkeypatch.setattr(email_mod.settings, "smtp_password", "app-password")
+
+    sent = {}
+
+    class FakeSMTP:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self):
+            pass
+
+        def login(self, *a):
+            pass
+
+        def send_message(self, msg):
+            sent["msg"] = msg
+
+    monkeypatch.setattr(email_mod.smtplib, "SMTP", FakeSMTP)
+
+    people = [
+        _Person("Ravi", role="Founder", company="Acme", linkedin_url="https://li/ravi", mutual=True),
+        # A name with HTML metacharacters must be escaped in the HTML alternative.
+        _Person("<script>evil</script>", role="Hacker"),
+    ]
+    send_connections_recap("asha@test.local", "Pilot Night", people)
+
+    msg = sent["msg"]
+    assert msg["To"] == "asha@test.local"
+    html_part = msg.get_body(preferencelist=("html",)).get_content()
+    assert "Ravi" in html_part
+    assert "<script>evil</script>" not in html_part  # escaped, not raw
+    assert "&lt;script&gt;" in html_part

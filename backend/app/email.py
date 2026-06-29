@@ -55,7 +55,10 @@ def send_connections_recap(to_email: str, event_name: str, people: list) -> None
         f"</li>"
         for p in people
     )
-    html = (
+    # NB: don't name this `html` — that would shadow the module-level `import html`
+    # for this whole function scope and break `e()` (the closure above) with a
+    # NameError when it runs before this assignment.
+    html_body = (
         f"<div style='font-family:system-ui,sans-serif;max-width:560px'>"
         f"<h2>Your connections from {html.escape(event_name)}</h2>"
         f"<ul style='list-style:none;padding:0'>{rows}</ul>"
@@ -68,7 +71,7 @@ def send_connections_recap(to_email: str, event_name: str, people: list) -> None
     msg["From"] = settings.smtp_user
     msg["To"] = to_email
     msg.set_content(text)
-    msg.add_alternative(html, subtype="html")
+    msg.add_alternative(html_body, subtype="html")
 
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as server:
         server.starttls()

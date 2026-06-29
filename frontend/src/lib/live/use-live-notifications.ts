@@ -25,16 +25,18 @@ import type { LiveState } from "@/lib/live/use-live-state";
  */
 export interface LiveNotice {
   id: number;
-  kind: "round_started" | "round_ended" | "event_ended";
+  kind: "round_started" | "round_ended" | "event_ended" | "ending_soon" | "announcement";
   title: string;
   body: string;
   cta: { label: string; href: string } | null;
-  sticky: boolean; // round-start stays until tapped/closed; others auto-dismiss
+  sticky: boolean; // round-start/announcement stay until tapped/closed; others auto-dismiss
 }
 
 const DEBOUNCE_MS = 300;
 const POLL_MS = 20_000; // light backstop behind the doorbell (only when not suppressed)
+const ENDING_SOON_LEAD_MS = 30_000; // nudge ~30s before a round's timer runs out
 const seenKey = (eventId: string) => `notify:seen:${eventId}`;
+const annKey = (eventId: string) => `notify:ann:${eventId}`;
 
 /** A compact fingerprint of "where the room is" — changes exactly on a real
  *  transition (publish/begin/end/advance/event-end), so comparing it de-dupes
@@ -56,6 +58,23 @@ function writeSeen(eventId: string, sig: string): void {
   if (typeof window === "undefined") return;
   try {
     sessionStorage.setItem(seenKey(eventId), sig);
+  } catch {
+    /* best-effort */
+  }
+}
+
+function readAnnSeen(eventId: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return sessionStorage.getItem(annKey(eventId));
+  } catch {
+    return null;
+  }
+}
+function writeAnnSeen(eventId: string, id: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(annKey(eventId), id);
   } catch {
     /* best-effort */
   }
@@ -116,11 +135,14 @@ export function useLiveNotifications(eventId: string, suppress: boolean) {
   const [dormant, setDormant] = useState(false);
   const dormantRef = useRef(false);
   const seenRef = useRef<string | null>(readSeen(eventId));
+  const annSeenRef = useRef<string | null>(readAnnSeen(eventId)); // last announcement id shown
   const suppressRef = useRef(suppress);
   const idRef = useRef(1);
   const inFlight = useRef(false);
   const pending = useRef(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null); // "ending soon" nudge
+  const nudgedRounds = useRef<Set<string>>(new Set()); // round_ids already nudged
 
   suppressRef.current = suppress; // always read the latest in async callbacks
 
@@ -140,30 +162,81 @@ export function useLiveNotifications(eventId: string, suppress: boolean) {
           dormantRef.current = false; // they're a participant now — resume backstop
           setDormant(false);
         }
+
+        // Add a notice (replace any same-kind so toasts never stack) + best-effort buzz.
+        const push = (notice: LiveNotice, vibrateMs?: number) => {
+          if (vibrateMs) {
+            try {
+              navigator.vibrate?.(vibrateMs);
+            } catch {
+              /* unsupported (iOS) */
+            }
+          }
+          setNotices((list) => [...list.filter((n) => n.kind !== notice.kind), notice]);
+        };
+
+        // 1) Round / phase transitions — de-duped by signature; silent baseline on
+        //    first load; suppressed on /live + /recap (baseline still advances).
         const sig = signatureOf(next);
         const prev = seenRef.current;
-        // First sighting (this tab) → silent baseline, never a toast.
         if (prev === null) {
           seenRef.current = sig;
           writeSeen(eventId, sig);
-          return;
-        }
-        if (sig === prev) return; // unchanged / de-duped re-broadcast
-        seenRef.current = sig;
-        writeSeen(eventId, sig);
-        if (suppressRef.current) return; // on /live: advance baseline, don't toast
-        const notice = noticeFor(eventId, next, idRef.current++);
-        if (!notice) return;
-        // Best-effort haptic on a round starting (Android; ignored on iOS).
-        if (notice.kind === "round_started") {
-          try {
-            navigator.vibrate?.(180);
-          } catch {
-            /* unsupported */
+        } else if (sig !== prev) {
+          seenRef.current = sig;
+          writeSeen(eventId, sig);
+          if (!suppressRef.current) {
+            const notice = noticeFor(eventId, next, idRef.current++);
+            if (notice) push(notice, notice.kind === "round_started" ? 180 : undefined);
           }
         }
-        // Replace any same-kind notice so we never stack duplicates.
-        setNotices((list) => [...list.filter((n) => n.kind !== notice.kind), notice]);
+
+        // 2) Organizer announcement — deduped by id, silent baseline. Shown on
+        //    EVERY page (even /live/recap): an announcement isn't a round move.
+        const ann = next.latest_announcement;
+        if (ann) {
+          const seenAnn = annSeenRef.current;
+          if (seenAnn === null) {
+            annSeenRef.current = ann.id;
+            writeAnnSeen(eventId, ann.id);
+          } else if (ann.id !== seenAnn) {
+            annSeenRef.current = ann.id;
+            writeAnnSeen(eventId, ann.id);
+            push(
+              { id: idRef.current++, kind: "announcement", title: "📣 Announcement", body: ann.message, cta: null, sticky: true },
+              150,
+            );
+          }
+        }
+
+        // 3) "Round ending soon" nudge — schedule a one-shot ~30s before the timer
+        //    runs out. Re-derived from the freshest snapshot each fetch.
+        if (endTimer.current) {
+          clearTimeout(endTimer.current);
+          endTimer.current = null;
+        }
+        const r = next.round;
+        if (!suppressRef.current && next.phase === "in_round" && next.seated && r?.ends_at && !r.paused_at) {
+          const roundId = r.round_id;
+          const endMs = Date.parse(r.ends_at);
+          if (!nudgedRounds.current.has(roundId) && !Number.isNaN(endMs)) {
+            const fire = () => {
+              if (suppressRef.current || nudgedRounds.current.has(roundId)) return;
+              nudgedRounds.current.add(roundId);
+              push(
+                { id: idRef.current++, kind: "ending_soon", title: "About 30 seconds left", body: "This round is wrapping up — say your goodbyes.", cta: null, sticky: false },
+                80,
+              );
+            };
+            const msLeft = endMs - Date.now();
+            if (msLeft > ENDING_SOON_LEAD_MS) {
+              endTimer.current = setTimeout(fire, msLeft - ENDING_SOON_LEAD_MS);
+            } else if (msLeft > 5_000) {
+              fire(); // already inside the lead window, still worth saying
+            }
+            // <5s left → too late to be useful, skip
+          }
+        }
       })
       .catch((e: unknown) => {
         // Not a participant (or signed out) → go dormant so the interval poll
@@ -219,10 +292,20 @@ export function useLiveNotifications(eventId: string, suppress: boolean) {
     return () => {
       if (channel) supabase.removeChannel(channel);
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      if (endTimer.current) clearTimeout(endTimer.current);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("online", refetch);
     };
   }, [eventId, refetch, ping]);
+
+  // Cancel a pending "ending soon" nudge the moment we're suppressed (navigated
+  // onto /live or /recap), so it can't fire on a screen that shouldn't get it.
+  useEffect(() => {
+    if (suppress && endTimer.current) {
+      clearTimeout(endTimer.current);
+      endTimer.current = null;
+    }
+  }, [suppress]);
 
   // Light backstop poll — covers a dropped doorbell. Off when suppressed (on
   // /live the page already polls) and when dormant (not a participant — don't

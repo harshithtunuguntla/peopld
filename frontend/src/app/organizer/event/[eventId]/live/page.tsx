@@ -23,6 +23,7 @@ import {
 } from "@/components/organizer/live/types";
 import { IdleView, DraftView, ActiveView, EndedView } from "@/components/organizer/live/views";
 import { RoomCodePanel } from "@/components/organizer/live/room-code-panel";
+import { AnnouncePanel } from "@/components/organizer/live/announce-panel";
 
 export default function OrganizerLiveControlPage({ params }: { params: Promise<{ eventId: string }> }) {
   const { eventId } = use(params);
@@ -248,6 +249,7 @@ export default function OrganizerLiveControlPage({ params }: { params: Promise<{
       )}
 
       {event && event.status !== "ended" && <RoomCodePanel eventId={eventId} />}
+      {event && event.status !== "ended" && <AnnouncePanel eventId={eventId} />}
 
       <div>
         {phase.kind === "ended" && <EndedView eventId={eventId} />}

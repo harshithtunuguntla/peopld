@@ -29,6 +29,7 @@ from supabase import Client
 from app.database import get_supabase
 from app.deps import AuthUser, get_current_user
 from app.models.schemas import (
+    Announcement,
     LiveIcebreaker,
     LiveRound,
     LiveSeat,
@@ -257,6 +258,27 @@ async def get_live_state(
         )
 
 
+def _latest_announcement_row(db: Client, event_id: str) -> dict | None:
+    """The most recent organizer announcement, or None. Defensive: an error (e.g.
+    migration 027 not yet run) must NEVER take down the whole /live snapshot —
+    announcements are a nice-to-have, the live dashboard is critical."""
+    try:
+        rows = (
+            db.table("event_announcements")
+            .select("id, message, created_at")
+            .eq("event_id", event_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return rows[0] if rows else None
+    except Exception:
+        logger.warning("could not load announcements", extra={"event_id": event_id})
+        return None
+
+
 async def _assemble_live_state(
     event_id: str,
     user: AuthUser,
@@ -265,7 +287,7 @@ async def _assemble_live_state(
     """Build the authoritative snapshot. Queries are issued in parallel batches so
     total latency ≈ slowest single query rather than the sum of all queries."""
     # --- Batch 1: always needed, all independent ---
-    event_res, me_res, rounds_res = await asyncio.gather(
+    event_res, me_res, rounds_res, announce_res = await asyncio.gather(
         asyncio.to_thread(
             lambda: db.table("events").select("*").eq("id", event_id).limit(1).execute()
         ),
@@ -280,6 +302,7 @@ async def _assemble_live_state(
         asyncio.to_thread(
             lambda: db.table("rounds").select("*").eq("event_id", event_id).execute()
         ),
+        asyncio.to_thread(_latest_announcement_row, db, event_id),
     )
 
     if not event_res.data:
@@ -477,6 +500,14 @@ async def _assemble_live_state(
     if attendee_status not in ("registered", "arrived", "left"):
         attendee_status = "registered"
 
+    announcement_payload: Announcement | None = None
+    if announce_res:
+        announcement_payload = Announcement(
+            id=announce_res["id"],
+            message=announce_res.get("message") or "",
+            created_at=announce_res.get("created_at"),
+        )
+
     return LiveStateResponse(
         server_time=now,
         event_status=event_status,
@@ -497,4 +528,5 @@ async def _assemble_live_state(
         icebreaker=icebreaker_payload,
         recent_seat=recent_seat_payload,
         recent_round_number=recent_round_number,
+        latest_announcement=announcement_payload,
     )

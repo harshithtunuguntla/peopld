@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, Hourglass, PartyPopper, X, ArrowRight } from "lucide-react";
+import { Bell, Hourglass, PartyPopper, Clock, Megaphone, X, ArrowRight } from "lucide-react";
 
 import { useLiveNotifications, type LiveNotice } from "@/lib/live/use-live-notifications";
 import { cn } from "@/lib/utils";
@@ -45,6 +45,8 @@ const ICONS = {
   round_started: Bell,
   round_ended: Hourglass,
   event_ended: PartyPopper,
+  ending_soon: Clock,
+  announcement: Megaphone,
 } as const;
 
 function Toast({ notice, onDismiss }: { notice: LiveNotice; onDismiss: () => void }) {

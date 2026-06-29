@@ -67,6 +67,12 @@ export interface LiveState {
   icebreaker: LiveIcebreaker | null;
   recent_seat: LiveSeat | null; // between rounds: the table you just left, so you can still like/note
   recent_round_number: number | null;
+  latest_announcement: LiveAnnouncement | null; // most recent organizer broadcast (deduped by id on the client)
+}
+export interface LiveAnnouncement {
+  id: string;
+  message: string;
+  created_at: string | null;
 }
 
 export interface UseLiveState {

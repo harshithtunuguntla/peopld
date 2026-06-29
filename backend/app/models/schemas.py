@@ -610,6 +610,31 @@ class LiveStateResponse(BaseModel):
     icebreaker: Optional[LiveIcebreaker] = None
     recent_seat: Optional[LiveSeat] = None  # between rounds: the table you JUST left, so you can still ❤️/note the people you met before the next round
     recent_round_number: Optional[int] = None  # which round recent_seat is from
+    latest_announcement: Optional["Announcement"] = None  # most recent organizer broadcast (deduped by id on the client)
+
+
+class Announcement(BaseModel):
+    """One organizer broadcast to the room. Carried on the /live snapshot so a
+    phone that was asleep still catches the latest when it returns."""
+    id: UUID
+    message: str
+    created_at: Optional[str] = None
+
+
+class AnnouncementCreate(BaseModel):
+    message: str = Field(min_length=1, max_length=280)  # one short, glanceable line
+
+    @field_validator("message")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("Announcement can't be empty")
+        return v
+
+
+# Resolve the forward reference in LiveStateResponse.latest_announcement.
+LiveStateResponse.model_rebuild()
 
 
 # --- Icebreaker ---

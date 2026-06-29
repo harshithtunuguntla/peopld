@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Heart, Globe, Linkedin, StickyNote, Loader2, Check, CalendarDays, Bookmark, UserCheck, Users, Sparkles } from "lucide-react";
+import { Heart, Globe, Linkedin, StickyNote, Loader2, Check, CalendarDays, Bookmark, UserCheck, Users, Sparkles, UserPlus } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
 import { Avatar } from "@/components/brand/avatar";
+import { downloadVCard } from "@/lib/vcard";
 import { cn } from "@/lib/utils";
 
 /** One round-level connection row as returned by the API. */
@@ -227,30 +228,38 @@ export function PersonCard({
         </div>
       )}
 
-      {(person.linkedin_url || person.website_url) && (
-        <div className="mt-3 flex gap-2">
-          {person.linkedin_url && (
-            <a
-              href={person.linkedin_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              <Linkedin className="h-4 w-4" aria-hidden /> LinkedIn
-            </a>
-          )}
-          {person.website_url && (
-            <a
-              href={person.website_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              <Globe className="h-4 w-4" aria-hidden /> Website
-            </a>
-          )}
-        </div>
-      )}
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          onClick={() => downloadVCard(person, person.eventLabel)}
+          title="Save to your phone's contacts"
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+        >
+          <UserPlus className="h-4 w-4" aria-hidden /> Add to contacts
+        </button>
+        {person.linkedin_url && (
+          <a
+            href={person.linkedin_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`${person.name} on LinkedIn`}
+            className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            <Linkedin className="h-4 w-4" aria-hidden /> <span className="hidden sm:inline">LinkedIn</span>
+          </a>
+        )}
+        {person.website_url && (
+          <a
+            href={person.website_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`${person.name}'s website`}
+            className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            <Globe className="h-4 w-4" aria-hidden /> <span className="hidden sm:inline">Website</span>
+          </a>
+        )}
+      </div>
 
       <NoteEditor eventId={eventId} targetId={person.attendee_id} initial={person.note} />
     </li>

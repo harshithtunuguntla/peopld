@@ -4,7 +4,7 @@ import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
-import { ArrowLeft, Loader2, Heart, Sparkles, Users, Bookmark, UserCheck } from "lucide-react";
+import { ArrowLeft, Loader2, Heart, Sparkles, Users, Bookmark, UserCheck, Mail, Check } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
@@ -28,6 +28,9 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
   const [authChecked, setAuthChecked] = useState(false);
   const [data, setData] = useState<ConnectionsResp | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [meId, setMeId] = useState<string | null>(null);
+  const [emailState, setEmailState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [emailMsg, setEmailMsg] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -49,7 +52,10 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
         const conns = await apiFetch<ConnectionsResp>(
           `/events/${eventId}/attendees/${me.id}/connections`,
         );
-        if (!cancelled) setData(conns);
+        if (!cancelled) {
+          setMeId(me.id);
+          setData(conns);
+        }
       } catch (e) {
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : "Couldn't load your connections";
@@ -79,6 +85,23 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
       return next;
     });
   }, []);
+
+  const emailList = useCallback(async () => {
+    if (!meId || emailState === "sending") return;
+    setEmailState("sending");
+    setEmailMsg(null);
+    try {
+      const r = await apiFetch<{ to: string }>(
+        `/events/${eventId}/attendees/${meId}/connections/email`,
+        { method: "POST" },
+      );
+      setEmailState("sent");
+      setEmailMsg(`Sent to ${r.to}`);
+    } catch (e) {
+      setEmailState("error");
+      setEmailMsg(e instanceof Error ? e.message : "Couldn't send — try again.");
+    }
+  }, [meId, eventId, emailState]);
 
   // Per-relationship counts; saved tracks the live optimistic set, the rest read
   // off the grouped people. A chip only shows when it would match someone.
@@ -155,6 +178,33 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
             <EmptyState />
           ) : (
             <>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={emailList}
+                  disabled={emailState === "sending" || emailState === "sent"}
+                  className={cn(
+                    "inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium transition-colors disabled:opacity-70",
+                    emailState === "sent"
+                      ? "border-success/40 bg-success/10 text-success"
+                      : "border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground",
+                  )}
+                >
+                  {emailState === "sending" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  ) : emailState === "sent" ? (
+                    <Check className="h-3.5 w-3.5" aria-hidden />
+                  ) : (
+                    <Mail className="h-3.5 w-3.5" aria-hidden />
+                  )}
+                  {emailState === "sent" ? "Emailed to you" : "Email me this list"}
+                </button>
+                {emailMsg && (
+                  <span className={cn("text-xs", emailState === "error" ? "text-destructive" : "text-muted-foreground")}>
+                    {emailMsg}
+                  </span>
+                )}
+              </div>
               <div className="mt-7">
                 <RelTabs filter={filter} onChange={setFilter} counts={relCounts} />
               </div>

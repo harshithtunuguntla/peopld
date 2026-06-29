@@ -25,7 +25,7 @@ import type { LiveState } from "@/lib/live/use-live-state";
  */
 export interface LiveNotice {
   id: number;
-  kind: "round_started" | "round_ended" | "event_ended" | "ending_soon" | "announcement";
+  kind: "round_started" | "round_ended" | "event_ended" | "ending_soon" | "announcement" | "match";
   title: string;
   body: string;
   cta: { label: string; href: string } | null;
@@ -37,6 +37,7 @@ const POLL_MS = 20_000; // light backstop behind the doorbell (only when not sup
 const ENDING_SOON_LEAD_MS = 30_000; // nudge ~30s before a round's timer runs out
 const seenKey = (eventId: string) => `notify:seen:${eventId}`;
 const annKey = (eventId: string) => `notify:ann:${eventId}`;
+const matchKey = (eventId: string) => `notify:matches:${eventId}`;
 
 /** A compact fingerprint of "where the room is" — changes exactly on a real
  *  transition (publish/begin/end/advance/event-end), so comparing it de-dupes
@@ -75,6 +76,26 @@ function writeAnnSeen(eventId: string, id: string): void {
   if (typeof window === "undefined") return;
   try {
     sessionStorage.setItem(annKey(eventId), id);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Returns the stored matched-ids array, or null if we've never recorded a
+ *  baseline for this event/tab (so we can stay silent on the very first load). */
+function readMatchSeen(eventId: string): string[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(matchKey(eventId));
+    return raw ? (JSON.parse(raw) as string[]) : null;
+  } catch {
+    return null;
+  }
+}
+function writeMatchSeen(eventId: string, ids: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(matchKey(eventId), JSON.stringify(ids));
   } catch {
     /* best-effort */
   }
@@ -136,6 +157,9 @@ export function useLiveNotifications(eventId: string, suppress: boolean) {
   const dormantRef = useRef(false);
   const seenRef = useRef<string | null>(readSeen(eventId));
   const annSeenRef = useRef<string | null>(readAnnSeen(eventId)); // last announcement id shown
+  const storedMatches = readMatchSeen(eventId);
+  const matchSeenRef = useRef<Set<string>>(new Set(storedMatches ?? [])); // matched ids already toasted
+  const matchBaselineRef = useRef<boolean>(storedMatches !== null); // false until first load recorded
   const suppressRef = useRef(suppress);
   const idRef = useRef(1);
   const inFlight = useRef(false);
@@ -209,7 +233,29 @@ export function useLiveNotifications(eventId: string, suppress: boolean) {
           }
         }
 
-        // 3) "Round ending soon" nudge — schedule a one-shot ~30s before the timer
+        // 3) Mutual matches — toast NEW ones (shown everywhere; a match is a moment).
+        //    Silent baseline on first load so existing matches don't replay.
+        if (!matchBaselineRef.current) {
+          next.matches.forEach((m) => matchSeenRef.current.add(m.attendee_id));
+          writeMatchSeen(eventId, [...matchSeenRef.current]);
+          matchBaselineRef.current = true;
+        } else {
+          const fresh = next.matches.filter((m) => !matchSeenRef.current.has(m.attendee_id));
+          if (fresh.length) {
+            fresh.forEach((m) => matchSeenRef.current.add(m.attendee_id));
+            writeMatchSeen(eventId, [...matchSeenRef.current]);
+            const body =
+              fresh.length === 1
+                ? `You and ${fresh[0].name} liked each other.`
+                : `You matched with ${fresh[0].name} +${fresh.length - 1} more.`;
+            push(
+              { id: idRef.current++, kind: "match", title: "It's a match! 🎉", body, cta: { label: "See your matches", href: `/event/${eventId}/connections` }, sticky: true },
+              200,
+            );
+          }
+        }
+
+        // 4) "Round ending soon" nudge — schedule a one-shot ~30s before the timer
         //    runs out. Re-derived from the freshest snapshot each fetch.
         if (endTimer.current) {
           clearTimeout(endTimer.current);

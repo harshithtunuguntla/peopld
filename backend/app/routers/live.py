@@ -34,6 +34,7 @@ from app.models.schemas import (
     LiveRound,
     LiveSeat,
     LiveStateResponse,
+    MatchPerson,
     RosterPerson,
     Tablemate,
     WaitingRoster,
@@ -279,6 +280,33 @@ def _latest_announcement_row(db: Client, event_id: str) -> dict | None:
         return None
 
 
+def _my_matches_rows(db: Client, event_id: str, attendee_id: str) -> list[dict]:
+    """Mutual matches for this attendee (we liked each other), as [{attendee_id,
+    name}]. Defensive: a likes-table hiccup must never take down /live."""
+    try:
+        likes = (
+            db.table("connection_likes")
+            .select("liker_attendee_id, liked_attendee_id")
+            .eq("event_id", event_id)
+            .execute()
+            .data
+            or []
+        )
+        i_liked = {str(l["liked_attendee_id"]) for l in likes if str(l["liker_attendee_id"]) == attendee_id}
+        liked_me = {str(l["liker_attendee_id"]) for l in likes if str(l["liked_attendee_id"]) == attendee_id}
+        matched = list(i_liked & liked_me)
+        if not matched:
+            return []
+        people = (
+            db.table("attendees").select("id, name").eq("event_id", event_id).in_("id", matched).execute().data
+            or []
+        )
+        return [{"attendee_id": str(p["id"]), "name": p.get("name") or "Someone"} for p in people]
+    except Exception:
+        logger.warning("could not load matches", extra={"event_id": event_id})
+        return []
+
+
 async def _assemble_live_state(
     event_id: str,
     user: AuthUser,
@@ -508,6 +536,9 @@ async def _assemble_live_state(
             created_at=announce_res.get("created_at"),
         )
 
+    match_rows = await asyncio.to_thread(_my_matches_rows, db, event_id, str(attendee["id"]))
+    matches_payload = [MatchPerson(attendee_id=m["attendee_id"], name=m["name"]) for m in match_rows]
+
     return LiveStateResponse(
         server_time=now,
         event_status=event_status,
@@ -529,4 +560,5 @@ async def _assemble_live_state(
         recent_seat=recent_seat_payload,
         recent_round_number=recent_round_number,
         latest_announcement=announcement_payload,
+        matches=matches_payload,
     )

@@ -611,6 +611,13 @@ class LiveStateResponse(BaseModel):
     recent_seat: Optional[LiveSeat] = None  # between rounds: the table you JUST left, so you can still ❤️/note the people you met before the next round
     recent_round_number: Optional[int] = None  # which round recent_seat is from
     latest_announcement: Optional["Announcement"] = None  # most recent organizer broadcast (deduped by id on the client)
+    matches: List["MatchPerson"] = Field(default_factory=list)  # mutual likes — the client toasts NEW ones ("you matched with X")
+
+
+class MatchPerson(BaseModel):
+    """A mutual match (you liked each other) — drives the live "it's a match" toast."""
+    attendee_id: UUID
+    name: str
 
 
 class Announcement(BaseModel):

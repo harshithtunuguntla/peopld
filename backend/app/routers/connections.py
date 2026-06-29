@@ -5,6 +5,7 @@ from supabase import Client
 
 from app.database import get_supabase
 from app.deps import ORGANIZER_ROLE, AuthUser, fetch_event_or_404, get_current_user
+from app.email import send_connections_recap
 from app.models.schemas import ConnectionEntry, ConnectionsResponse
 
 router = APIRouter(
@@ -47,6 +48,51 @@ def get_connections(
         raise HTTPException(status_code=403, detail="Not allowed to view these connections")
 
     return build_connection_entries(db, event, attendee.data[0])
+
+
+@router.post("/email")
+def email_connections(
+    event_id: str,
+    attendee_id: str,
+    user: AuthUser = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """Email the attendee their own rolodex (self only — never the organizer, since
+    it sends to the requester's own inbox). Best-effort SMTP; clear errors when
+    email isn't configured or a send fails so the UI can tell the user."""
+    event = fetch_event_or_404(db, event_id)
+    attendee = (
+        db.table("attendees").select("*").eq("id", attendee_id).eq("event_id", event_id).limit(1).execute()
+    )
+    if not attendee.data:
+        raise HTTPException(status_code=404, detail="Attendee not found")
+    is_self = (
+        attendee.data[0].get("user_id") is not None and str(attendee.data[0]["user_id"]) == user.id
+    )
+    if not is_self:
+        raise HTTPException(status_code=403, detail="You can only email your own connections")
+    if not user.email:
+        raise HTTPException(status_code=400, detail="Your account has no email address to send to")
+
+    resp = build_connection_entries(db, event, attendee.data[0])
+    # One entry per person (matches first), for a clean list.
+    seen: dict[str, ConnectionEntry] = {}
+    for c in resp.connections:
+        prev = seen.get(str(c.attendee_id))
+        if prev is None or (c.mutual and not prev.mutual):
+            seen[str(c.attendee_id)] = c
+    people = sorted(seen.values(), key=lambda p: (not p.mutual, p.name.lower()))
+    if not people:
+        raise HTTPException(status_code=400, detail="No connections to email yet")
+
+    try:
+        send_connections_recap(user.email, event.get("name") or "the event", people)
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Email isn't set up for this event yet")
+    except Exception:
+        logger.exception("connections recap email failed", extra={"event_id": event_id})
+        raise HTTPException(status_code=502, detail="Couldn't send the email — try again")
+    return {"sent": True, "to": user.email, "count": len(people)}
 
 
 def build_connection_entries(

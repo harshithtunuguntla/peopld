@@ -57,7 +57,7 @@ export function FeedbackNudge({ eventId }: { eventId: string }) {
         </div>
       </div>
       <Link
-        href={`/organizer/event/${eventId}/feedback`}
+        href={`/organizer/event/${eventId}/feedback${published ? "?view=responses" : ""}`}
         className={cn(buttonVariants({ variant: published ? "outline" : "accent", size: "sm" }), "gap-1.5")}
       >
         {published ? "View responses" : "Set up form"} <ArrowRight className="h-4 w-4" aria-hidden />

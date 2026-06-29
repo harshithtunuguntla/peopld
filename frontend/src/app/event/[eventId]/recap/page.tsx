@@ -123,6 +123,17 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
   const markSubmitted = () => setFeedbackForm((f) => (f ? { ...f, submitted: true } : f));
   const gated = !!(feedbackForm?.available && feedbackForm.gate_recap && !feedbackForm.submitted);
 
+  // Until we know the gating state, show a neutral loader — NOT the recap hero.
+  // Otherwise, right after the organizer ends the event, the recap ("Your time at
+  // …") flashes for a beat before the gated feedback form replaces it.
+  if (!error && !formChecked) {
+    return (
+      <LiveShell eventId={eventId} className="max-w-2xl">
+        <Centered label="Loading your recap…" />
+      </LiveShell>
+    );
+  }
+
   // The recap is locked behind the form: show ONLY the form until it's submitted.
   if (gated && feedbackForm) {
     return (

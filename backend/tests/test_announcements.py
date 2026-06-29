@@ -30,6 +30,12 @@ def test_announce_creates_rings_doorbell_and_surfaces_in_live(client, db, event,
     # the realtime doorbell fired (so phones re-fetch /live)
     assert any(c["json"]["messages"][0]["event"] == "resync" for c in realtime_post)
 
+    # ...and on BOTH topics — the /live page AND the app-wide notifier. The notifier
+    # subscribes to notify:{id}, so without this an announcement only lands on its
+    # slow backstop poll (the "doesn't arrive until I tap something" bug).
+    topics = {m["topic"] for c in realtime_post for m in c["json"]["messages"]}
+    assert f"live:{eid}" in topics and f"notify:{eid}" in topics
+
     live = client.get(LIVE.format(eid=eid), headers=ATTENDEE_AUTH).json()
     assert live["latest_announcement"]["message"] == "Pizza's here"
 

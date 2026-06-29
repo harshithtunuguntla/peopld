@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { motion } from "framer-motion";
 import { ArrowDownRight, ArrowUpRight, Loader2, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -256,6 +257,10 @@ export function Segmented<T extends string>({
   value: T;
   onChange: (v: T) => void;
 }) {
+  // Unique per instance — two Segmented controls on one screen (e.g. Build|Responses
+  // + Summary|Individual) must NOT share a layoutId, or framer-motion ties their
+  // pills together and one renders without the accent fill (looked "white").
+  const pillId = useId();
   return (
     <div className="inline-flex items-center rounded-full border border-border bg-surface-2 p-1">
       {options.map((o) => {
@@ -271,7 +276,7 @@ export function Segmented<T extends string>({
           >
             {active && (
               <motion.span
-                layoutId="seg-pill"
+                layoutId={`seg-pill-${pillId}`}
                 className="absolute inset-0 rounded-full bg-accent"
                 transition={{ type: "spring", stiffness: 320, damping: 28 }}
               />

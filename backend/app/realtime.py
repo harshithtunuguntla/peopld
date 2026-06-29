@@ -53,25 +53,39 @@ logger = logging.getLogger("app.realtime")
 REPEAT_OFFSETS_SECONDS: tuple[float, ...] = (5.0, 12.0)
 
 
-# Must match the channel name the clients subscribe to (frontend uses
-# `live:${eventId}` in use-live-state.ts and the organizer console).
+# Must match the channel names the clients subscribe to. Two topics carry the SAME
+# resync doorbell:
+#   - `live:{id}`   — the /live page + organizer console (use-live-state.ts).
+#   - `notify:{id}` — the app-wide Live Notifier mounted on every in-event page
+#     (use-live-notifications.ts). It uses a separate channel so it never collides
+#     with the /live page's own subscription — but Supabase Broadcast is delivered
+#     per TOPIC, so the doorbell must be sent to BOTH or the notifier only ever
+#     learns of changes via its slow backstop poll (the "announcements don't land
+#     until I tap something" bug).
 def _topic(event_id: str) -> str:
     return f"live:{event_id}"
+
+
+def _notify_topic(event_id: str) -> str:
+    return f"notify:{event_id}"
 
 
 def _send_broadcast(event_id: str, kind: str) -> None:
     """One doorbell send. Never raises — the client poll is the real backstop."""
     url = f"{settings.supabase_url.rstrip('/')}/realtime/v1/api/broadcast"
     key = settings.supabase_service_role_key
+    # Same signal-only doorbell on both topics (one HTTP call, two messages) so the
+    # /live page AND the app-wide notifier both hear it in realtime.
     body = {
         "messages": [
             {
-                "topic": _topic(event_id),
+                "topic": topic,
                 "event": "resync",
                 # signal-only — deliberately no PII / seating / person ids
                 "payload": {"kind": kind},
                 "private": False,
             }
+            for topic in (_topic(event_id), _notify_topic(event_id))
         ]
     }
     try:

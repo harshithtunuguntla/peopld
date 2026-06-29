@@ -29,7 +29,7 @@ export function LiveNotifier({ eventId }: { eventId: string }) {
 
   return createPortal(
     <div
-      className="pointer-events-none fixed inset-x-3 bottom-3 z-[100] flex flex-col items-center gap-2 sm:inset-x-auto sm:right-5 sm:bottom-5 sm:items-end"
+      className="pointer-events-none fixed inset-x-3 top-3 z-[100] flex flex-col items-center gap-2 sm:inset-x-auto sm:right-5 sm:top-5 sm:items-end"
       role="region"
       aria-label="Live event updates"
     >
@@ -50,12 +50,30 @@ const ICONS = {
   match: Heart,
 } as const;
 
+// Celebratory / high-signal kinds get a richer, accent-tinted treatment so they
+// pop on a busy phone — the rest stay clean and neutral.
+const VIVID: Record<LiveNotice["kind"], boolean> = {
+  announcement: true,
+  match: true,
+  round_started: true,
+  event_ended: true,
+  ending_soon: false,
+  round_ended: false,
+};
+
+const EYEBROW: Partial<Record<LiveNotice["kind"], string>> = {
+  announcement: "Announcement",
+  match: "New match",
+};
+
 function Toast({ notice, onDismiss }: { notice: LiveNotice; onDismiss: () => void }) {
   const router = useRouter();
   const [shown, setShown] = useState(false);
   const Icon = ICONS[notice.kind];
+  const vivid = VIVID[notice.kind];
+  const eyebrow = EYEBROW[notice.kind];
 
-  // Slide/fade in on mount; auto-dismiss the non-sticky ones.
+  // Slide/fade in from the top on mount; auto-dismiss the non-sticky ones.
   useEffect(() => {
     const raf = requestAnimationFrame(() => setShown(true));
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -76,17 +94,30 @@ function Toast({ notice, onDismiss }: { notice: LiveNotice; onDismiss: () => voi
       role="status"
       aria-live="polite"
       className={cn(
-        "pointer-events-auto w-full max-w-sm overflow-hidden rounded-2xl border border-border bg-card/95 p-3.5 shadow-2xl backdrop-blur-xl transition-all duration-300 sm:w-80",
-        shown ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0",
+        "pointer-events-auto relative w-full max-w-sm overflow-hidden rounded-2xl border p-3.5 shadow-2xl backdrop-blur-xl transition-all duration-300 sm:w-80",
+        shown ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0",
+        vivid
+          ? "border-accent/40 bg-gradient-to-br from-accent/15 via-card/95 to-card/95 ring-1 ring-inset ring-accent/10"
+          : "border-border bg-card/95",
       )}
     >
+      {/* Accent edge for the high-signal toasts */}
+      {vivid && <span className="absolute inset-y-0 left-0 w-1 bg-accent" aria-hidden />}
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
+        <div
+          className={cn(
+            "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
+            vivid ? "bg-accent text-accent-foreground shadow-sm" : "bg-accent/15 text-accent",
+          )}
+        >
           <Icon className="h-4 w-4" aria-hidden />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-foreground">{notice.title}</p>
-          <p className="mt-0.5 text-sm text-muted-foreground">{notice.body}</p>
+          {eyebrow && (
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-accent">{eyebrow}</p>
+          )}
+          <p className="break-words text-sm font-semibold text-foreground">{notice.title}</p>
+          <p className="mt-0.5 break-words text-sm text-muted-foreground">{notice.body}</p>
           {notice.cta && (
             <button
               type="button"

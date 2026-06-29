@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Plus,
   Trash2,
@@ -25,10 +25,13 @@ import { useOrganizer } from "@/lib/organizer/use-organizer";
 import { ConsoleShell } from "@/components/organizer/console-shell";
 import { ConsoleGate } from "@/components/organizer/console-ui";
 import { Card } from "@/components/organizer/console-ui";
-import { Segmented, Toggle } from "@/components/organizer/console-ui";
+import { Segmented, Toggle, RefreshButton } from "@/components/organizer/console-ui";
 import { EventHeader, EventAccessError } from "@/components/organizer/event-header";
+import { QuestionResultCard } from "@/components/organizer/feedback/question-result-card";
 import { type EventInfo } from "@/components/organizer/live/types";
 import { AnswerField } from "@/components/feedback/answer-field";
+import { SearchBox } from "@/components/connections/search-box";
+import { searchItems, type FieldSpec } from "@/lib/connections/search";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -59,7 +62,16 @@ export default function FeedbackPage({ params }: { params: Promise<{ eventId: st
   const { user, checked } = useOrganizer();
   const [event, setEvent] = useState<EventInfo | null>(null);
   const [denied, setDenied] = useState<null | "forbidden" | "missing">(null);
-  const [view, setView] = useState<"build" | "responses">("build");
+  // Honour ?view=responses (deep link from the command center's "View responses").
+  const [view, setView] = useState<"build" | "responses">(() =>
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("view") === "responses"
+      ? "responses"
+      : "build",
+  );
+  // Manual refresh of the responses view (matches the rest of the console).
+  const [reloadToken, setReloadToken] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -84,7 +96,17 @@ export default function FeedbackPage({ params }: { params: Promise<{ eventId: st
 
   return (
     <ConsoleShell>
-      <EventHeader eventId={eventId} name={event?.name} status={event?.status} active="feedback" />
+      <EventHeader
+        eventId={eventId}
+        name={event?.name}
+        status={event?.status}
+        active="feedback"
+        actions={
+          view === "responses" ? (
+            <RefreshButton onClick={() => setReloadToken((t) => t + 1)} busy={refreshing} />
+          ) : undefined
+        }
+      />
       <div className="mb-6">
         <Segmented<"build" | "responses">
           value={view}
@@ -95,7 +117,11 @@ export default function FeedbackPage({ params }: { params: Promise<{ eventId: st
           ]}
         />
       </div>
-      {view === "build" ? <BuildView eventId={eventId} /> : <ResponsesView eventId={eventId} />}
+      {view === "build" ? (
+        <BuildView eventId={eventId} />
+      ) : (
+        <ResponsesView eventId={eventId} reloadToken={reloadToken} onLoadingChange={setRefreshing} />
+      )}
     </ConsoleShell>
   );
 }
@@ -240,16 +266,6 @@ function BuildView({ eventId }: { eventId: string }) {
               : "Only you can see this until you publish."}
           </p>
         </div>
-        <Button
-          variant={config.is_published ? "outline" : "accent"}
-          size="sm"
-          onClick={() => togglePublish(!config.is_published)}
-          disabled={publishing}
-          className="gap-1.5"
-        >
-          {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          {config.is_published ? "Unpublish" : "Publish"}
-        </Button>
       </div>
 
       {/* Form meta */}
@@ -364,14 +380,33 @@ function BuildView({ eventId }: { eventId: string }) {
               <span className="inline-flex items-center gap-1 text-success"><Check className="h-3.5 w-3.5" /> Saved</span>
             ) : dirty ? (
               "Unsaved changes"
+            ) : config.is_published ? (
+              <span className="inline-flex items-center gap-1 text-success"><span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden /> Live</span>
             ) : (
-              "All changes saved"
+              "Draft — saved"
             )}
           </p>
-          <Button variant="accent" onClick={save} disabled={saving || !dirty} className="gap-1.5">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            Save
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={save} disabled={saving || !dirty} className="gap-1.5">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              Save
+            </Button>
+            <Button
+              variant={config.is_published ? "outline" : "accent"}
+              onClick={() => togglePublish(!config.is_published)}
+              disabled={publishing}
+              className="gap-1.5"
+            >
+              {publishing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : config.is_published ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+              {config.is_published ? "Unpublish" : "Publish"}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -495,16 +530,33 @@ function IconBtn({ label, disabled, onClick, children }: { label: string; disabl
 
 /* ============================== Responses view ============================== */
 
-function ResponsesView({ eventId }: { eventId: string }) {
+function ResponsesView({
+  eventId,
+  reloadToken,
+  onLoadingChange,
+}: {
+  eventId: string;
+  reloadToken: number;
+  onLoadingChange?: (busy: boolean) => void;
+}) {
   const [results, setResults] = useState<FormResults | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"summary" | "individual">("summary");
 
+  // Refetch on mount and whenever the header Refresh is tapped (reloadToken bumps).
+  // Keeps the old data on screen while refreshing — no skeleton flash.
   useEffect(() => {
+    let cancelled = false;
+    onLoadingChange?.(true);
+    setError(null);
     apiFetch<FormResults>(`/events/${eventId}/feedback-form/results`)
-      .then(setResults)
-      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load responses"));
-  }, [eventId]);
+      .then((r) => !cancelled && setResults(r))
+      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : "Couldn't load responses"))
+      .finally(() => !cancelled && onLoadingChange?.(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, reloadToken, onLoadingChange]);
 
   /** CSV #1 — one row per question (quick read of the aggregate). */
   function exportSummaryCsv() {
@@ -628,15 +680,41 @@ function downloadCsv(rows: string[][], filename: string) {
   URL.revokeObjectURL(url);
 }
 
+/** Search the individual responses by who answered (name/company). Reuses the
+ *  generic engine from the connections search. */
+const RESP_FIELDS: FieldSpec<IndividualResponse>[] = [
+  { get: (r) => r.respondent_name, weight: 2 },
+  { get: (r) => r.respondent_company, weight: 1 },
+];
+
 /* ---- Individual ("one respondent at a time", like Google Forms) ---- */
 function IndividualResponses({ results }: { results: FormResults }) {
+  const [query, setQuery] = useState("");
+  // Search by person only makes sense when identity is collected.
+  const responses = useMemo(
+    () => (results.collect_identity ? searchItems(results.responses, query, RESP_FIELDS) : results.responses),
+    [results.responses, results.collect_identity, query],
+  );
   const [i, setI] = useState(0);
-  const responses = results.responses;
+  useEffect(() => {
+    setI(0); // jump back to the first match whenever the search changes
+  }, [query]);
   const r: IndividualResponse | undefined = responses[i];
-  // Question lookup so each answer can show its label + render by type.
-  const qMeta = new Map(results.questions.map((q) => [q.question_id, q]));
 
-  if (!r) return null;
+  const searchBox = results.collect_identity ? (
+    <SearchBox value={query} onChange={setQuery} placeholder="Find a respondent by name or company…" ariaLabel="Search responses" />
+  ) : null;
+
+  if (!r) {
+    return (
+      <div className="space-y-4">
+        {searchBox}
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          {query.trim() ? `No respondent matches “${query.trim()}”.` : "No responses yet."}
+        </p>
+      </div>
+    );
+  }
   const answerByQ = new Map(r.answers.map((a) => [a.question_id, a.value]));
   const initials = (r.respondent_name || "?")
     .split(/\s+/)
@@ -647,6 +725,7 @@ function IndividualResponses({ results }: { results: FormResults }) {
 
   return (
     <div className="space-y-4">
+      {searchBox}
       {/* Navigator */}
       <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card p-3">
         <IconBtn label="Previous response" disabled={i === 0} onClick={() => setI((n) => Math.max(0, n - 1))}>
@@ -710,55 +789,3 @@ function KpiTile({ value, label }: { value: number | string; label: string }) {
   );
 }
 
-function QuestionResultCard({ q }: { q: FormResults["questions"][number] }) {
-  const isNumeric = q.type === "rating" || q.type === "nps";
-  const total = Object.values(q.option_counts).reduce((s, n) => s + n, 0) || 1;
-  return (
-    <Card className="p-4 sm:p-6">
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="font-display text-base text-foreground">{q.label}</h3>
-        <span className="shrink-0 text-xs text-muted-foreground">{q.answered} answered</span>
-      </div>
-
-      {isNumeric && q.average != null && (
-        <p className="mt-2 font-display text-3xl text-accent">
-          {q.average}
-          <span className="ml-1 text-sm font-normal text-muted-foreground">avg{q.type === "nps" ? " / 10" : ""}</span>
-        </p>
-      )}
-
-      {(q.type === "single_choice" || q.type === "multi_choice" || q.type === "yes_no" || isNumeric) &&
-        Object.keys(q.option_counts).length > 0 && (
-          <div className="mt-3 space-y-2">
-            {Object.entries(q.option_counts)
-              .sort((a, b) => (isNumeric ? Number(a[0]) - Number(b[0]) : b[1] - a[1]))
-              .map(([opt, count]) => (
-                <div key={opt}>
-                  <div className="mb-1 flex items-baseline justify-between text-sm">
-                    <span className="text-foreground">{opt}</span>
-                    <span className="text-muted-foreground">{count}</span>
-                  </div>
-                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-accent" style={{ width: `${(count / total) * 100}%` }} />
-                  </div>
-                </div>
-              ))}
-          </div>
-        )}
-
-      {isText(q.type) && (
-        <ul className="mt-3 space-y-2">
-          {q.text_answers.length === 0 ? (
-            <li className="text-sm text-muted-foreground">No written answers.</li>
-          ) : (
-            q.text_answers.map((t, i) => (
-              <li key={i} className="rounded-xl border border-border bg-background/40 px-3 py-2 text-sm text-foreground">
-                {t}
-              </li>
-            ))
-          )}
-        </ul>
-      )}
-    </Card>
-  );
-}

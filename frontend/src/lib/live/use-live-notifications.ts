@@ -187,11 +187,13 @@ export function useLiveNotifications(eventId: string, suppress: boolean) {
           setDormant(false);
         }
 
-        // Add a notice (replace any same-kind so toasts never stack) + best-effort buzz.
-        const push = (notice: LiveNotice, vibrateMs?: number) => {
-          if (vibrateMs) {
+        // Add a notice (replace any same-kind so toasts never stack) + best-effort
+        // buzz. `vibrate` may be a single duration or a pattern (e.g. a double-buzz
+        // for announcements). Android only — iOS Safari has no navigator.vibrate.
+        const push = (notice: LiveNotice, vibrate?: number | number[]) => {
+          if (vibrate) {
             try {
-              navigator.vibrate?.(vibrateMs);
+              navigator.vibrate?.(vibrate);
             } catch {
               /* unsupported (iOS) */
             }
@@ -227,8 +229,8 @@ export function useLiveNotifications(eventId: string, suppress: boolean) {
             annSeenRef.current = ann.id;
             writeAnnSeen(eventId, ann.id);
             push(
-              { id: idRef.current++, kind: "announcement", title: "📣 Announcement", body: ann.message, cta: null, sticky: true },
-              150,
+              { id: idRef.current++, kind: "announcement", title: ann.message, body: "From the host", cta: null, sticky: true },
+              [40, 30, 70], // distinct double-buzz so a broadcast feels different
             );
           }
         }
@@ -250,7 +252,7 @@ export function useLiveNotifications(eventId: string, suppress: boolean) {
                 : `You matched with ${fresh[0].name} +${fresh.length - 1} more.`;
             push(
               { id: idRef.current++, kind: "match", title: "It's a match! 🎉", body, cta: { label: "See your matches", href: `/event/${eventId}/connections` }, sticky: true },
-              200,
+              [30, 40, 30, 40, 80], // celebratory triple-buzz
             );
           }
         }

@@ -14,6 +14,7 @@ import { CountUp } from "@/components/brand/count-up";
 import { groupByPerson, type Connection } from "@/components/connections/person-card";
 import { Avatar } from "@/components/brand/avatar";
 import { buttonVariants } from "@/components/ui/button";
+import { ShareRecap } from "@/components/recap/share-recap";
 import { FeedbackFillForm } from "@/components/feedback/fill-form";
 import { type AttendeeForm } from "@/lib/feedback";
 import { COLORS } from "@/lib/design/colors";
@@ -46,6 +47,7 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
   const [data, setData] = useState<ConnectionsResp | null>(null);
   const [matches, setMatches] = useState<IntentMatch[]>([]);
   const [eventName, setEventName] = useState<string>("");
+  const [attendeeName, setAttendeeName] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   // Customizable feedback form (new system). When the organizer requires it, the
   // recap stays LOCKED until it's submitted; otherwise it's an optional ask below.
@@ -73,9 +75,12 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
         apiFetch<{ name: string }>(`/events/${eventId}`)
           .then((e) => !cancelled && setEventName(e.name))
           .catch(() => {});
-        const me = await apiFetch<{ id: string }>(`/events/${eventId}/attendees/me`);
+        const me = await apiFetch<{ id: string; name: string }>(`/events/${eventId}/attendees/me`);
         const conns = await apiFetch<ConnectionsResp>(`/events/${eventId}/attendees/${me.id}/connections`);
-        if (!cancelled) setData(conns);
+        if (!cancelled) {
+          setAttendeeName(me.name);
+          setData(conns);
+        }
         // Mutual meeting picks ("you both wanted to meet") — revealed only after
         // the event. A 409 (event not ended) or any error just means no section;
         // never block the recap on it.
@@ -198,6 +203,22 @@ export default function RecapPage({ params }: { params: Promise<{ eventId: strin
             <RecapStat icon={HandHeart} value={heartsGiven} label="hearts sent" bg={COLORS.gold} delay={0.15} />
             <RecapStat icon={Heart} value={data.matches_count} label={data.matches_count === 1 ? "match" : "matches"} bg={COLORS.plasma} delay={0.2} highlight />
           </div>
+
+          {/* Shareable story card — the growth loop. Only when there's a night to
+              show off (you actually met people). */}
+          {data.total_people_met > 0 && (
+            <ShareRecap
+              data={{
+                eventName,
+                attendeeName,
+                peopleMet: data.total_people_met,
+                matches: data.matches_count,
+                rounds: data.rounds_count,
+                hearts: heartsGiven,
+                faces: faces.map((p) => ({ name: p.name, seed: p.attendee_id })),
+              }}
+            />
+          )}
 
           {/* Mutual meeting picks — "you both wanted to meet" (revealed post-event) */}
           {matches.length > 0 && (

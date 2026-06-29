@@ -41,6 +41,39 @@ the recap is opened deliberately.
 
 ---
 
+## "Loose ends" reconnect (post-event)
+
+Turn near-misses into follow-ups using data we already store. After the event,
+surface on the recap + in the email recap:
+- *"N people wanted to meet you, but the rounds ran out"* — from `meeting_intents`
+  (`wants_me` that never shared a table).
+- *"You sat with Ravi but never connected — here's their LinkedIn."* — people in
+  the rolodex with no like/note/save.
+- *"You liked 3 people who haven't liked back yet"* (gentle, no pressure).
+
+**Why deferred (chosen 2026-06-29):** valuable and low-effort (reuses likes/intents/
+assignments), but we're shipping the shareable story card first. Pairs naturally with
+the email recap — a "here's who to follow up with" section. Small build: a derived
+section, no new tables.
+
+## Mutual contact exchange (privacy-gated deeper details)
+
+Today the vCard / email recap share **public** info only (name, role, company,
+LinkedIn/website). Add an opt-in so that **when two people match** (mutual like),
+their exchange includes richer contact details (email, and phone if they choose to
+add it) — gated strictly on mutual consent.
+
+**Why deferred (chosen 2026-06-29):** makes a "match" genuinely actionable, but needs
+a consent UX + a profile field for shareable email/phone + careful privacy rules
+(only ever released on mutual match). Worth doing right, not rushed.
+
+## Shareable story card — link-preview (OG image) follow-up
+
+The story card (shipped — client-rasterized PNG via the native share sheet) could
+later also power a **server-rendered OG image** (`next/og`) so pasting a recap link
+into WhatsApp/Twitter shows a rich preview. Deferred because it needs an
+unauthenticated, signed data path (don't let numbers be spoofed via query params).
+
 ## Cross-event "Event Memory" (community intelligence)
 
 Returning-attendee detection across events, a community network graph that grows

@@ -237,41 +237,78 @@ export function PersonCard({
         </div>
       )}
 
-      <div className="mt-3 flex gap-2">
-        <button
-          type="button"
-          onClick={() => downloadVCard(person, person.eventLabel)}
+      {/* Compact contact actions — icon-only to stay on one line in narrow grid
+          columns; each is labelled (aria + desktop tooltip) so it stays clear. */}
+      <div className="mt-3 flex items-center gap-2">
+        <ActionIcon
+          label="Add to contacts"
           title="Save to your phone's contacts"
-          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          onClick={() => downloadVCard(person, person.eventLabel)}
+          primary
         >
-          <UserPlus className="h-4 w-4" aria-hidden /> Add to contacts
-        </button>
+          <UserPlus className="h-[18px] w-[18px]" aria-hidden />
+        </ActionIcon>
         {person.linkedin_url && (
-          <a
+          <ActionIcon
+            label={`${person.name} on LinkedIn`}
             href={person.linkedin_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={`${person.name} on LinkedIn`}
-            className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            hoverClass="hover:border-[#0a66c2]/45 hover:bg-[#0a66c2]/10 hover:text-[#0a66c2]"
           >
-            <Linkedin className="h-4 w-4" aria-hidden /> <span className="hidden sm:inline">LinkedIn</span>
-          </a>
+            <Linkedin className="h-[18px] w-[18px]" aria-hidden />
+          </ActionIcon>
         )}
         {person.website_url && (
-          <a
-            href={person.website_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={`${person.name}'s website`}
-            className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-          >
-            <Globe className="h-4 w-4" aria-hidden /> <span className="hidden sm:inline">Website</span>
-          </a>
+          <ActionIcon label={`${person.name}'s website`} href={person.website_url}>
+            <Globe className="h-[18px] w-[18px]" aria-hidden />
+          </ActionIcon>
         )}
       </div>
 
       <NoteEditor eventId={eventId} targetId={person.attendee_id} initial={person.note} />
     </li>
+  );
+}
+
+/**
+ * A compact circular contact action — renders as a link (external contact URLs)
+ * or a button (vCard download). Neutral at rest to match the card's Bookmark
+ * affordance; `primary` gives the main action a subtle accent tint, `hoverClass`
+ * lets a link reveal its brand colour on hover (e.g. LinkedIn blue).
+ */
+function ActionIcon({
+  label,
+  title,
+  href,
+  onClick,
+  primary,
+  hoverClass,
+  children,
+}: {
+  label: string;
+  title?: string;
+  href?: string;
+  onClick?: () => void;
+  primary?: boolean;
+  hoverClass?: string;
+  children: React.ReactNode;
+}) {
+  const cls = cn(
+    "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-all active:scale-90",
+    primary
+      ? "border-accent/40 bg-accent/10 text-accent hover:bg-accent/20"
+      : cn("border-border bg-background/40 text-muted-foreground hover:text-foreground", hoverClass ?? "hover:bg-muted"),
+  );
+  if (href) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" aria-label={label} title={title ?? label} className={cls}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <button type="button" onClick={onClick} aria-label={label} title={title ?? label} className={cls}>
+      {children}
+    </button>
   );
 }
 

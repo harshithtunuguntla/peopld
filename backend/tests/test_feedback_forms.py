@@ -69,6 +69,90 @@ def test_save_then_get_roundtrips(client, event):
     assert got["questions"][1]["options"] == ["Yes", "No"]
 
 
+def test_form_reports_response_count(client, db, event):
+    eid = event["id"]
+    _publish_form(client, db, eid)
+    # No responses yet.
+    assert client.get(BASE.format(eid=eid), headers=AUTH).json()["response_count"] == 0
+    qs = client.get(f"{BASE.format(eid=eid)}/fill", headers=ATTENDEE_AUTH).json()["questions"]
+    client.post(
+        f"{BASE.format(eid=eid)}/submit",
+        json={"answers": [{"question_id": qs[0]["id"], "value": 5}, {"question_id": qs[1]["id"], "value": "Yes"}]},
+        headers=ATTENDEE_AUTH,
+    )
+    assert client.get(BASE.format(eid=eid), headers=AUTH).json()["response_count"] == 1
+
+
+def test_editing_form_preserves_question_ids_and_answers(client, db, event):
+    """Regression: editing a published form that already has responses must NOT
+    drop collected answers (question rows are reconciled by id, not recreated)."""
+    eid = event["id"]
+    _publish_form(client, db, eid)
+    qs = client.get(f"{BASE.format(eid=eid)}/fill", headers=ATTENDEE_AUTH).json()["questions"]
+    rating_id, choice_id, text_id = qs[0]["id"], qs[1]["id"], qs[2]["id"]
+    client.post(
+        f"{BASE.format(eid=eid)}/submit",
+        json={"answers": [
+            {"question_id": rating_id, "value": 4},
+            {"question_id": choice_id, "value": "Yes"},
+            {"question_id": text_id, "value": "Loved it"},
+        ]},
+        headers=ATTENDEE_AUTH,
+    )
+
+    # Organizer re-saves: same questions (carrying their ids), one relabelled and
+    # reordered, plus a brand-new question appended.
+    full = client.get(BASE.format(eid=eid), headers=AUTH).json()
+    edited = full["questions"]
+    edited[0]["label"] = "Overall rating?"          # edit wording in place
+    edited[0], edited[1] = edited[1], edited[0]      # reorder
+    edited.append({"type": "short_text", "label": "One word for tonight?", "required": False})
+    save = client.put(
+        BASE.format(eid=eid),
+        json={"title": full["title"], "gate_recap": full["gate_recap"], "questions": edited},
+        headers=AUTH,
+    )
+    assert save.status_code == 200
+
+    # The kept questions keep their ids; the answers are still attached.
+    res = client.get(f"{BASE.format(eid=eid)}/results", headers=AUTH).json()
+    assert res["response_count"] == 1
+    ids_now = {q["question_id"] for q in res["questions"]}
+    assert {rating_id, choice_id, text_id} <= ids_now
+    by_id = {q["question_id"]: q for q in res["questions"]}
+    assert by_id[rating_id]["average"] == 4.0
+    assert by_id[choice_id]["option_counts"] == {"Yes": 1}
+    assert by_id[text_id]["text_answers"] == ["Loved it"]
+
+
+def test_removing_a_question_drops_only_its_answers(client, db, event):
+    eid = event["id"]
+    _publish_form(client, db, eid)
+    qs = client.get(f"{BASE.format(eid=eid)}/fill", headers=ATTENDEE_AUTH).json()["questions"]
+    rating_id, choice_id, text_id = qs[0]["id"], qs[1]["id"], qs[2]["id"]
+    client.post(
+        f"{BASE.format(eid=eid)}/submit",
+        json={"answers": [
+            {"question_id": rating_id, "value": 3},
+            {"question_id": choice_id, "value": "No"},
+            {"question_id": text_id, "value": "ok"},
+        ]},
+        headers=ATTENDEE_AUTH,
+    )
+    full = client.get(BASE.format(eid=eid), headers=AUTH).json()
+    kept = [q for q in full["questions"] if q["id"] != text_id]  # drop the text question
+    client.put(
+        BASE.format(eid=eid),
+        json={"title": full["title"], "gate_recap": full["gate_recap"], "questions": kept},
+        headers=AUTH,
+    )
+    res = client.get(f"{BASE.format(eid=eid)}/results", headers=AUTH).json()
+    ids_now = {q["question_id"] for q in res["questions"]}
+    assert text_id not in ids_now            # the removed question is gone
+    assert {rating_id, choice_id} <= ids_now  # the others survive
+    assert res["response_count"] == 1         # the submission itself is intact
+
+
 def test_choice_question_needs_two_options(client, event):
     body = _form_body(questions=[{"type": "single_choice", "label": "Pick", "options": ["Only one"]}])
     r = client.put(BASE.format(eid=event["id"]), json=body, headers=AUTH)

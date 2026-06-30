@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Loader2, Check, User, EyeOff } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
@@ -31,6 +31,20 @@ export function FeedbackFillForm({
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  // Per-question wrappers so we can scroll the first unanswered required one into
+  // view — otherwise tapping Submit with an error below the fold looks like nothing.
+  const fieldRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Lightweight progress so a long form doesn't feel bottomless.
+  const { answered, totalRequired } = useMemo(() => {
+    let a = 0;
+    let req = 0;
+    for (const q of form.questions) {
+      if (q.required) req += 1;
+      if (q.id && !isAnswerEmpty(answers[q.id])) a += 1;
+    }
+    return { answered: a, totalRequired: req };
+  }, [form.questions, answers]);
 
   function setAnswer(id: string, v: AnswerValue) {
     setAnswers((prev) => ({ ...prev, [id]: v }));
@@ -45,6 +59,13 @@ export function FeedbackFillForm({
     if (Object.keys(missing).length) {
       setErrors(missing);
       setServerError(null);
+      // Take the guest straight to the first thing they missed.
+      const firstId = form.questions.find((q) => q.id && missing[q.id])?.id;
+      if (firstId) {
+        const el = fieldRefs.current[firstId];
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        el?.querySelector<HTMLElement>("input, textarea, button")?.focus({ preventScroll: true });
+      }
       return;
     }
     setBusy(true);
@@ -93,7 +114,7 @@ export function FeedbackFillForm({
 
       <div className="mt-5 space-y-5">
         {form.questions.map((q) => (
-          <div key={q.id}>
+          <div key={q.id} ref={(el) => { if (q.id) fieldRefs.current[q.id] = el; }}>
             <label className="block text-sm font-medium text-foreground">
               {q.label}
               {q.required && <span className="ml-1 text-accent">*</span>}
@@ -115,7 +136,10 @@ export function FeedbackFillForm({
             Skip
           </button>
         ) : (
-          <span />
+          <span className="text-xs text-muted-foreground">
+            {answered} of {form.questions.length} answered
+            {totalRequired > 0 && <span className="text-accent"> · {totalRequired} required</span>}
+          </span>
         )}
         <Button variant="accent" onClick={submit} disabled={busy} className="gap-1.5">
           {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}

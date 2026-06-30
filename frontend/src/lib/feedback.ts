@@ -29,6 +29,8 @@ export interface FormConfig {
   gate_recap: boolean;
   collect_identity: boolean;
   questions: FormQuestion[];
+  /** Submissions collected so far — drives the builder's "edit live data" guard. */
+  response_count?: number;
 }
 
 export interface AttendeeForm {
@@ -112,6 +114,86 @@ export function blankQuestion(type: QuestionType = "short_text"): FormQuestion {
     scale: 5,
   };
 }
+
+/* ----------------------------- Starter templates ----------------------------- */
+
+/** Build a fully-formed question for a template (sane defaults, no id). */
+function tq(type: QuestionType, label: string, extra: Partial<FormQuestion> = {}): FormQuestion {
+  return { ...blankQuestion(type), label, ...extra };
+}
+
+export interface FormTemplate {
+  id: string;
+  name: string;
+  /** One line describing what this template is good for (shown on the card). */
+  tagline: string;
+  title: string;
+  description?: string | null;
+  questions: FormQuestion[];
+}
+
+/**
+ * Ready-to-edit starter forms so an organizer never faces a blank builder. These
+ * are just seed content — applying one fills the builder, which the organizer can
+ * then tweak and publish like any other form.
+ */
+export const FORM_TEMPLATES: FormTemplate[] = [
+  {
+    id: "pulse",
+    name: "Quick pulse",
+    tagline: "Two questions, 20 seconds — the highest response rates.",
+    title: "Quick pulse",
+    description: "Just two quick questions — thank you!",
+    questions: [
+      tq("nps", "How likely are you to recommend this event to a friend or colleague?", { required: true }),
+      tq("long_text", "What's the main reason for your score?"),
+    ],
+  },
+  {
+    id: "event-feedback",
+    name: "Event feedback",
+    tagline: "A well-rounded post-event survey covering the essentials.",
+    title: "Event feedback",
+    description: "A few quick questions — it helps us make the next one even better.",
+    questions: [
+      tq("rating", "How would you rate the event overall?", { required: true, scale: 5 }),
+      tq("nps", "How likely are you to recommend this event?", { required: true }),
+      tq("long_text", "What did you enjoy most?"),
+      tq("long_text", "What could we do better next time?"),
+      tq("single_choice", "Would you come to another event like this?", {
+        options: ["Definitely", "Maybe", "Probably not"],
+      }),
+    ],
+  },
+  {
+    id: "networking",
+    name: "Networking value",
+    tagline: "Measure the connections — perfect for a matchmaking event.",
+    title: "How was the networking?",
+    description: "We design these nights around the people you meet — tell us how it went.",
+    questions: [
+      tq("rating", "How valuable were the connections you made?", { required: true, scale: 5 }),
+      tq("yes_no", "Did you meet someone you'll follow up with?", { required: true }),
+      tq("long_text", "Who did you connect with, or what made it work?"),
+      tq("single_choice", "How many new people did you have a real conversation with?", {
+        options: ["0", "1–2", "3–5", "6+"],
+      }),
+    ],
+  },
+  {
+    id: "sessions",
+    name: "Sessions & speakers",
+    tagline: "For talks and panels — rate content and delivery.",
+    title: "Sessions & speakers",
+    description: "Help us book the right speakers and topics next time.",
+    questions: [
+      tq("rating", "How would you rate the content?", { required: true, scale: 5 }),
+      tq("rating", "How would you rate the speakers?", { required: true, scale: 5 }),
+      tq("long_text", "What was your biggest takeaway?"),
+      tq("long_text", "Any topics or speakers you'd like to see next time?"),
+    ],
+  },
+];
 
 /** Human-readable rendering of one answer value, by question type — used in the
  *  individual-response view and the per-respondent CSV. Empty → an em dash. */

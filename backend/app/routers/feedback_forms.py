@@ -109,6 +109,13 @@ def _ordered_questions(db: Client, form_id: str) -> list[dict]:
     return sorted(rows, key=lambda r: r.get("position", 0))
 
 
+def _count_submissions(db: Client, form_id: str) -> int:
+    rows = (
+        db.table("feedback_submissions").select("id").eq("form_id", form_id).execute().data or []
+    )
+    return len(rows)
+
+
 def _form_response(db: Client, event_id: str, form_row: dict) -> FormConfigResponse:
     questions = [_unpack_question(r) for r in _ordered_questions(db, form_row["id"])]
     return FormConfigResponse(
@@ -120,6 +127,7 @@ def _form_response(db: Client, event_id: str, form_row: dict) -> FormConfigRespo
         gate_recap=bool(form_row.get("gate_recap")),
         collect_identity=bool(form_row.get("collect_identity", True)),
         questions=questions,
+        response_count=_count_submissions(db, form_row["id"]),
     )
 
 
@@ -167,23 +175,36 @@ def save_form(
     if existing:
         form_id = existing["id"]
         db.table("feedback_forms").update(fields).eq("id", form_id).execute()
-        db.table("feedback_questions").delete().eq("form_id", form_id).execute()
     else:
         created = db.table("feedback_forms").insert({"event_id": event_id, **fields}).execute()
         form_id = created.data[0]["id"]
 
+    # Reconcile questions by id INSTEAD of delete-all + reinsert. Re-creating rows
+    # would mint new question ids, and feedback_answers.question_id is ON DELETE
+    # CASCADE — so a published form with responses would lose every collected
+    # answer the moment the organizer saved an edit. Here we update questions that
+    # still exist (preserving their id, so answers stay linked), insert genuinely
+    # new ones, and delete only the questions the organizer actually removed
+    # (cascading just those answers, which is the intended behaviour).
+    prior_ids = {str(r["id"]) for r in _ordered_questions(db, form_id)}
+    kept_ids: set[str] = set()
     for i, q in enumerate(body.questions):
-        db.table("feedback_questions").insert(
-            {
-                "form_id": form_id,
-                "position": i,
-                "type": q.type,
-                "label": q.label,
-                "help_text": q.help_text,
-                "required": q.required,
-                "options": _pack_options(q),
-            }
-        ).execute()
+        payload = {
+            "position": i,
+            "type": q.type,
+            "label": q.label,
+            "help_text": q.help_text,
+            "required": q.required,
+            "options": _pack_options(q),
+        }
+        qid = str(q.id) if q.id else None
+        if qid and qid in prior_ids:
+            db.table("feedback_questions").update(payload).eq("id", qid).execute()
+            kept_ids.add(qid)
+        else:
+            db.table("feedback_questions").insert({"form_id": form_id, **payload}).execute()
+    for removed in prior_ids - kept_ids:
+        db.table("feedback_questions").delete().eq("id", removed).execute()
 
     record_audit(
         db,

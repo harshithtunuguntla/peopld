@@ -813,6 +813,7 @@ class FormConfigResponse(BaseModel):
     gate_recap: bool = False
     collect_identity: bool = True
     questions: List[FormQuestion] = Field(default_factory=list)
+    response_count: int = 0  # submissions so far — drives the builder's "live data" guard
 
 
 class PublishUpdate(BaseModel):

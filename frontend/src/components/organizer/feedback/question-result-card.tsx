@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -11,18 +12,21 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { Check, Copy, Search, Sparkles, Lock } from "lucide-react";
 
 import { Card } from "@/components/organizer/console-ui";
 import { COLORS } from "@/lib/design/colors";
-import { isText, type QuestionResult } from "@/lib/feedback";
+import { AI_ENABLED } from "@/lib/features";
+import { cn } from "@/lib/utils";
+import { isText, type IndividualResponse, type QuestionResult } from "@/lib/feedback";
 
 /**
  * One question's results, visualized the way mature form tools do (Google Forms /
  * Typeform): a **pie** for single-select + yes/no, **horizontal bars** for
  * checkboxes (multi-select), a **distribution column chart** for ratings, an **NPS
- * breakdown** (promoters / passives / detractors + score) for NPS, and a **list**
- * for free text. Self-contained + reusable; recharts is already in the console
- * bundle (analytics), so no new dependency.
+ * breakdown** (promoters / passives / detractors + score) for NPS, and a rich
+ * **searchable, attributed list** for free text. Self-contained + reusable;
+ * recharts is already in the console bundle (analytics), so no new dependency.
  */
 
 // Brand palette for categorical slices/bars (single source — lib/design/colors).
@@ -38,19 +42,62 @@ const TOOLTIP_STYLE = {
 
 const AXIS_TICK = { fontSize: 12, fill: "hsl(var(--muted-foreground))" } as const;
 
-export function QuestionResultCard({ q }: { q: QuestionResult }) {
+/** A single written answer, paired with who wrote it (when identity is collected). */
+interface TextEntry {
+  text: string;
+  name?: string | null;
+  company?: string | null;
+}
+
+export function QuestionResultCard({
+  q,
+  responseCount = 0,
+  responses = [],
+  collectIdentity = false,
+}: {
+  q: QuestionResult;
+  /** Total people who submitted the form — the denominator for skip rate. */
+  responseCount?: number;
+  /** Per-respondent submissions, used to attribute free-text answers. */
+  responses?: IndividualResponse[];
+  collectIdentity?: boolean;
+}) {
+  // Attribute free-text answers to their author by walking the per-respondent
+  // submissions (kept in form order / newest-first by the API).
+  const textEntries = useMemo<TextEntry[]>(() => {
+    if (!isText(q.type)) return [];
+    const out: TextEntry[] = [];
+    for (const r of responses) {
+      const a = r.answers.find((x) => x.question_id === q.question_id);
+      const text = typeof a?.value === "string" ? a.value.trim() : "";
+      if (text) out.push({ text, name: r.respondent_name, company: r.respondent_company });
+    }
+    // Fall back to the bare list if responses weren't supplied (defensive).
+    if (out.length === 0 && q.text_answers.length) return q.text_answers.map((text) => ({ text }));
+    return out;
+  }, [q, responses]);
+
+  const skipped = responseCount > 0 ? Math.max(0, responseCount - q.answered) : 0;
+
   return (
     <Card className="p-4 sm:p-6">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="font-display text-base text-foreground">{q.label}</h3>
-        <span className="shrink-0 text-xs text-muted-foreground">{q.answered} answered</span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {responseCount > 0 ? `${q.answered} of ${responseCount} answered` : `${q.answered} answered`}
+          {skipped > 0 && <span className="text-warning"> · {skipped} skipped</span>}
+        </span>
       </div>
 
       {q.answered === 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">No answers yet.</p>
       ) : (
         <div className="mt-4">
-          <QuestionViz q={q} />
+          {isText(q.type) ? (
+            <TextAnswers entries={textEntries} collectIdentity={collectIdentity} />
+          ) : (
+            <QuestionViz q={q} />
+          )}
         </div>
       )}
     </Card>
@@ -58,7 +105,6 @@ export function QuestionResultCard({ q }: { q: QuestionResult }) {
 }
 
 function QuestionViz({ q }: { q: QuestionResult }) {
-  if (isText(q.type)) return <TextAnswers answers={q.text_answers} />;
   if (q.type === "nps") return <NpsBreakdown q={q} />;
   if (q.type === "rating") return <RatingDistribution q={q} />;
   if (q.type === "multi_choice") return <ChoiceBars q={q} />;
@@ -242,18 +288,162 @@ function NpsBreakdown({ q }: { q: QuestionResult }) {
   );
 }
 
-/* ----------------------------- text: list ----------------------------- */
+/* ----------------------------- text: searchable, attributed list ----------------------------- */
 
-function TextAnswers({ answers }: { answers: string[] }) {
-  if (answers.length === 0) return <Empty label="No written answers." />;
+const TEXT_PAGE = 8; // reveal long lists in batches — production-friendly
+
+function TextAnswers({ entries, collectIdentity }: { entries: TextEntry[]; collectIdentity: boolean }) {
+  const [query, setQuery] = useState("");
+  const [shown, setShown] = useState(TEXT_PAGE);
+  const [copied, setCopied] = useState(false);
+
+  const filtered = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return entries;
+    return entries.filter(
+      (e) =>
+        e.text.toLowerCase().includes(term) ||
+        (e.name ?? "").toLowerCase().includes(term) ||
+        (e.company ?? "").toLowerCase().includes(term),
+    );
+  }, [entries, query]);
+
+  if (entries.length === 0) return <Empty label="No written answers." />;
+
+  async function copyAll() {
+    const text = filtered
+      .map((e) => (collectIdentity && e.name ? `${e.name}: ${e.text}` : `• ${e.text}`))
+      .join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      /* clipboard blocked — the CSV export is the fallback */
+    }
+  }
+
+  const visible = filtered.slice(0, shown);
+
   return (
-    <ul className="space-y-2">
-      {answers.map((t, i) => (
-        <li key={i} className="rounded-xl border border-border bg-background/40 px-3 py-2 text-sm text-foreground">
-          {t}
-        </li>
-      ))}
-    </ul>
+    <div>
+      <AiSummaryBeta count={entries.length} />
+
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="relative min-w-0 flex-1 sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <input
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setShown(TEXT_PAGE);
+            }}
+            placeholder={`Search ${entries.length} answers…`}
+            aria-label="Search written answers"
+            className="h-9 w-full rounded-lg border border-border bg-background/50 pl-8 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-accent/50"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={copyAll}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? "Copied" : "Copy all"}
+        </button>
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="py-4 text-center text-sm text-muted-foreground">No answers match “{query.trim()}”.</p>
+      ) : (
+        <ul className="space-y-2">
+          {visible.map((e, i) => (
+            <TextItem key={i} entry={e} collectIdentity={collectIdentity} />
+          ))}
+        </ul>
+      )}
+
+      {shown < filtered.length && (
+        <button
+          type="button"
+          onClick={() => setShown((n) => n + TEXT_PAGE)}
+          className="mt-3 w-full rounded-lg border border-border py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Show {Math.min(TEXT_PAGE, filtered.length - shown)} more
+        </button>
+      )}
+    </div>
+  );
+}
+
+const CLAMP_AT = 240; // characters before we offer a "more" expansion
+
+function TextItem({ entry, collectIdentity }: { entry: TextEntry; collectIdentity: boolean }) {
+  const [open, setOpen] = useState(false);
+  const long = entry.text.length > CLAMP_AT;
+  const body = open || !long ? entry.text : entry.text.slice(0, CLAMP_AT).trimEnd() + "…";
+
+  return (
+    <li className="rounded-xl border border-border bg-background/40 px-3 py-2.5 text-sm">
+      <p className="whitespace-pre-wrap break-words text-foreground">{body}</p>
+      {long && (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="mt-1 text-xs font-medium text-accent hover:underline"
+        >
+          {open ? "Show less" : "Read more"}
+        </button>
+      )}
+      {collectIdentity && entry.name && (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          — {entry.name}
+          {entry.company && <span> · {entry.company}</span>}
+        </p>
+      )}
+    </li>
+  );
+}
+
+/* ----------------------------- AI summary (Beta, disabled) ----------------------------- */
+
+/**
+ * Themes & sentiment across written answers. The model isn't wired yet, so this
+ * ships as a clearly-labelled, disabled **Beta** teaser. When AI_ENABLED flips on,
+ * swap the disabled action for the real call — the surface is already designed in.
+ */
+function AiSummaryBeta({ count }: { count: number }) {
+  return (
+    <div className="mb-3 flex items-start gap-3 rounded-xl border border-dashed border-accent/30 bg-accent/[0.04] p-3">
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+        <Sparkles className="h-4 w-4" aria-hidden />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium text-foreground">AI summary</p>
+          <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
+            Beta
+          </span>
+        </div>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Automatic themes &amp; sentiment across {count} written {count === 1 ? "answer" : "answers"} — read the room in seconds.
+        </p>
+      </div>
+      <button
+        type="button"
+        disabled={!AI_ENABLED}
+        title={AI_ENABLED ? "Summarize answers" : "Coming soon"}
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium",
+          AI_ENABLED
+            ? "border-accent/40 text-accent hover:bg-accent/10"
+            : "cursor-not-allowed border-border text-muted-foreground opacity-70",
+        )}
+      >
+        {!AI_ENABLED && <Lock className="h-3 w-3" aria-hidden />}
+        {AI_ENABLED ? "Summarize" : "Soon"}
+      </button>
+    </div>
   );
 }
 

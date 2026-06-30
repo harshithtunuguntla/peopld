@@ -18,6 +18,9 @@ import {
   ChevronLeft,
   ChevronRight,
   EyeOff,
+  Copy,
+  AlertTriangle,
+  Sparkles,
 } from "lucide-react";
 
 import { apiFetch, ApiError } from "@/lib/api";
@@ -41,14 +44,17 @@ import {
   type FormConfig,
   type FormQuestion,
   type FormResults,
+  type FormTemplate,
   type IndividualResponse,
   type QuestionType,
+  FORM_TEMPLATES,
   QUESTION_TYPE_META,
   blankQuestion,
   formatAnswer,
   isChoice,
   isText,
   typeLabel,
+  type AnswerValue,
 } from "@/lib/feedback";
 
 /**
@@ -136,6 +142,7 @@ function BuildView({ eventId }: { eventId: string }) {
   const [savedTick, setSavedTick] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
 
   useEffect(() => {
     apiFetch<FormConfig>(`/events/${eventId}/feedback-form`)
@@ -161,6 +168,21 @@ function BuildView({ eventId }: { eventId: string }) {
   function addQuestion(type: QuestionType) {
     setQuestions((qs) => [...qs, blankQuestion(type)]);
     setAdding(false);
+  }
+
+  function applyTemplate(t: FormTemplate) {
+    patch({ title: t.title, description: t.description ?? "" });
+    setQuestions(() => t.questions.map((q) => ({ ...q, options: [...q.options] })));
+  }
+
+  function duplicateAt(i: number) {
+    setQuestions((qs) => {
+      const src = qs[i];
+      const clone: FormQuestion = { ...src, id: undefined, options: [...src.options] };
+      const next = [...qs];
+      next.splice(i + 1, 0, clone);
+      return next;
+    });
   }
 
   function clientValidate(c: FormConfig): string | null {
@@ -240,12 +262,30 @@ function BuildView({ eventId }: { eventId: string }) {
     );
   }
 
+  const responseCount = config.response_count ?? 0;
+
   return (
     <div className="space-y-4 pb-28">
+      {previewing && <PreviewOverlay config={config} onClose={() => setPreviewing(false)} />}
+
       {error && (
         <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
           {error}
         </p>
+      )}
+
+      {/* Live-data guard: once people have answered, edits can affect collected
+          answers. Adding/reordering/rewording is safe; removing or retyping a
+          question drops the answers gathered for it (we confirm those inline). */}
+      {responseCount > 0 && (
+        <div className="flex items-start gap-3 rounded-2xl border border-warning/30 bg-warning/10 p-4">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
+          <p className="text-sm text-foreground">
+            <span className="font-medium">{responseCount} {responseCount === 1 ? "person has" : "people have"} already responded.</span>{" "}
+            Adding questions, reordering, and editing wording are safe. Removing a question — or changing its
+            type — will drop the answers already collected for it.
+          </p>
+        </div>
       )}
 
       {/* Publish status banner */}
@@ -316,6 +356,10 @@ function BuildView({ eventId }: { eventId: string }) {
         </div>
       </Card>
 
+      {/* Templates — only when the form is still empty, so an organizer never
+          stares at a blank builder. Applying one fills the fields to edit. */}
+      {config.questions.length === 0 && <TemplateGallery onPick={applyTemplate} />}
+
       {/* Questions */}
       <div className="space-y-3">
         {config.questions.map((q, i) => (
@@ -324,8 +368,10 @@ function BuildView({ eventId }: { eventId: string }) {
             q={q}
             index={i}
             total={config.questions.length}
+            responseCount={responseCount}
             onChange={(updated) => setQuestions((qs) => qs.map((x, j) => (j === i ? updated : x)))}
             onRemove={() => setQuestions((qs) => qs.filter((_, j) => j !== i))}
+            onDuplicate={() => duplicateAt(i)}
             onMove={(dir) =>
               setQuestions((qs) => {
                 const j = i + dir;
@@ -387,6 +433,15 @@ function BuildView({ eventId }: { eventId: string }) {
             )}
           </p>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setPreviewing(true)}
+              disabled={config.questions.length === 0}
+              className="gap-1.5"
+              title="See the form exactly as guests will"
+            >
+              <Eye className="h-4 w-4" /> <span className="hidden sm:inline">Preview</span>
+            </Button>
             <Button variant="outline" onClick={save} disabled={saving || !dirty} className="gap-1.5">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Save
@@ -417,18 +472,50 @@ function QuestionEditor({
   q,
   index,
   total,
+  responseCount,
   onChange,
   onRemove,
+  onDuplicate,
   onMove,
 }: {
   q: FormQuestion;
   index: number;
   total: number;
+  responseCount: number;
   onChange: (q: FormQuestion) => void;
   onRemove: () => void;
+  onDuplicate: () => void;
   onMove: (dir: -1 | 1) => void;
 }) {
   const update = (p: Partial<FormQuestion>) => onChange({ ...q, ...p });
+  // Only guard questions that already exist (have an id) and have collected data.
+  const hasData = responseCount > 0 && !!q.id;
+
+  function handleTypeChange(val: string) {
+    const type = val as QuestionType;
+    if (type === q.type) return;
+    if (
+      hasData &&
+      !window.confirm(
+        "Change this question's type? Answers already collected for it may no longer match the new format.",
+      )
+    )
+      return;
+    const p: Partial<FormQuestion> = { type };
+    if (isChoice(type) && q.options.filter((o) => o.trim()).length < 2) p.options = ["Option 1", "Option 2"];
+    update(p);
+  }
+
+  function handleRemove() {
+    if (
+      hasData &&
+      !window.confirm(
+        `Delete this question? The ${responseCount === 1 ? "answer" : "answers"} already collected for it will be removed.`,
+      )
+    )
+      return;
+    onRemove();
+  }
 
   return (
     <Card className="p-4 sm:p-5">
@@ -439,16 +526,12 @@ function QuestionEditor({
             ariaLabel="Question type"
             value={q.type}
             options={QUESTION_TYPE_META.map((t) => ({ value: t.value, label: t.label }))}
-            onChange={(val) => {
-              const type = val as QuestionType;
-              const p: Partial<FormQuestion> = { type };
-              if (isChoice(type) && q.options.filter((o) => o.trim()).length < 2) p.options = ["Option 1", "Option 2"];
-              update(p);
-            }}
+            onChange={handleTypeChange}
           />
           <IconBtn label="Move up" disabled={index === 0} onClick={() => onMove(-1)}><ArrowUp className="h-4 w-4" /></IconBtn>
           <IconBtn label="Move down" disabled={index === total - 1} onClick={() => onMove(1)}><ArrowDown className="h-4 w-4" /></IconBtn>
-          <IconBtn label="Delete question" onClick={onRemove}><Trash2 className="h-4 w-4" /></IconBtn>
+          <IconBtn label="Duplicate question" onClick={onDuplicate}><Copy className="h-4 w-4" /></IconBtn>
+          <IconBtn label="Delete question" onClick={handleRemove}><Trash2 className="h-4 w-4" /></IconBtn>
         </div>
       </div>
 
@@ -525,6 +608,110 @@ function IconBtn({ label, disabled, onClick, children }: { label: string; disabl
     >
       {children}
     </button>
+  );
+}
+
+/** Starter-form picker shown when the builder is empty. */
+function TemplateGallery({ onPick }: { onPick: (t: FormTemplate) => void }) {
+  return (
+    <Card className="p-4 sm:p-6">
+      <div className="flex items-center gap-2">
+        <Sparkles className="h-4 w-4 text-accent" aria-hidden />
+        <h2 className="font-display text-lg text-foreground">Start with a template</h2>
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Pick a ready-made form and tweak it, or add your own questions below from scratch.
+      </p>
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {FORM_TEMPLATES.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onPick(t)}
+            className="group rounded-2xl border border-border bg-background/40 p-4 text-left transition-colors hover:border-accent/50"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-medium text-foreground">{t.name}</p>
+              <span className="text-xs text-muted-foreground">{t.questions.length} questions</span>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">{t.tagline}</p>
+            <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-accent opacity-0 transition-opacity group-hover:opacity-100">
+              <Plus className="h-3.5 w-3.5" /> Use this template
+            </span>
+          </button>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/** Full-form "see it as a guest will" preview — interactive controls, nothing
+ *  saved. Reuses the exact AnswerField the attendee fills, so it's faithful. */
+function PreviewOverlay({ config, onClose }: { config: FormConfig; onClose: () => void }) {
+  const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
+  const questions = config.questions.filter((q) => q.label.trim());
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-background/80 p-4 backdrop-blur-sm sm:p-8"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Form preview"
+      onClick={onClose}
+    >
+      <div
+        className="my-auto w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-xl sm:p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">
+            <Eye className="h-3.5 w-3.5" aria-hidden /> Preview — answers aren&apos;t saved
+          </span>
+          <button type="button" onClick={onClose} aria-label="Close preview" className="text-muted-foreground hover:text-foreground">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <h2 className="font-display text-xl text-foreground">{config.title || "Untitled form"}</h2>
+        {config.description && <p className="mt-1 text-sm text-muted-foreground">{config.description}</p>}
+
+        <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-border bg-background/40 px-2.5 py-1 text-xs text-muted-foreground">
+          {config.collect_identity ? (
+            <><User className="h-3.5 w-3.5" aria-hidden /> Your name is shared with the organizer</>
+          ) : (
+            <><EyeOff className="h-3.5 w-3.5" aria-hidden /> Responses are anonymous</>
+          )}
+        </p>
+
+        <div className="mt-5 space-y-5">
+          {questions.map((q, i) => {
+            const key = q.id ?? `preview-${i}`;
+            return (
+              <div key={key}>
+                <label className="block text-sm font-medium text-foreground">
+                  {q.label}
+                  {q.required && <span className="ml-1 text-accent">*</span>}
+                </label>
+                {q.help_text && <p className="mb-2 mt-0.5 text-xs text-muted-foreground">{q.help_text}</p>}
+                <div className="mt-2">
+                  <AnswerField
+                    question={{ ...q, options: q.options.filter((o) => o.trim()) }}
+                    value={answers[key]}
+                    onChange={(v) => setAnswers((prev) => ({ ...prev, [key]: v }))}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-6 flex justify-end">
+          <Button variant="accent" onClick={onClose} className="gap-1.5">
+            <Check className="h-4 w-4" /> Looks good
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -649,7 +836,15 @@ function ResponsesView({
           <p className="mt-1 text-sm text-muted-foreground">They&apos;ll appear here as guests fill the form on their recap.</p>
         </Card>
       ) : tab === "summary" ? (
-        results.questions.map((q) => <QuestionResultCard key={q.question_id} q={q} />)
+        results.questions.map((q) => (
+          <QuestionResultCard
+            key={q.question_id}
+            q={q}
+            responseCount={results.response_count}
+            responses={results.responses}
+            collectIdentity={results.collect_identity}
+          />
+        ))
       ) : (
         <IndividualResponses results={results} />
       )}

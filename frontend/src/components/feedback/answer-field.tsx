@@ -122,24 +122,31 @@ export function AnswerField({
   // nps: 0–10 scale
   const current = typeof value === "number" ? value : null;
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {Array.from({ length: 11 }, (_, i) => i).map((n) => (
-        <button
-          key={n}
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange(n)}
-          aria-pressed={current === n}
-          className={cn(
-            "h-10 w-10 shrink-0 rounded-xl border text-sm font-medium tabular-nums transition-colors disabled:opacity-60",
-            current === n
-              ? "border-transparent bg-accent text-accent-foreground"
-              : "border-border bg-card text-foreground hover:border-accent/50",
-          )}
-        >
-          {n}
-        </button>
-      ))}
+    <div>
+      <div className="flex flex-wrap gap-1.5">
+        {Array.from({ length: 11 }, (_, i) => i).map((n) => (
+          <button
+            key={n}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(n)}
+            aria-pressed={current === n}
+            className={cn(
+              "h-10 w-10 shrink-0 rounded-xl border text-sm font-medium tabular-nums transition-colors disabled:opacity-60",
+              current === n
+                ? "border-transparent bg-accent text-accent-foreground"
+                : "border-border bg-card text-foreground hover:border-accent/50",
+            )}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+      {/* Anchor the scale so 0 and 10 aren't ambiguous. */}
+      <div className="mt-1.5 flex justify-between text-[11px] text-muted-foreground">
+        <span>Not likely</span>
+        <span>Very likely</span>
+      </div>
     </div>
   );
 }

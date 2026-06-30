@@ -26,13 +26,44 @@ export function buildVCard(p: VCardPerson, metAt?: string): string {
   return lines.join("\r\n"); // CRLF per spec
 }
 
-/** Trigger a .vcf download — on a phone this opens "Add to contacts". */
+/** A filesystem-safe basename for the .vcf, e.g. "asha-rao". */
+function fileBase(name: string): string {
+  return name.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "contact";
+}
+
+/** Trigger a .vcf download — opening it adds the contact. Desktop / fallback path. */
 export function downloadVCard(p: VCardPerson, metAt?: string): void {
   const blob = new Blob([buildVCard(p, metAt)], { type: "text/vcard;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "contact"}.vcf`;
+  a.download = `${fileBase(p.name)}.vcf`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Add a person to the phone's address book with the most native experience the
+ * browser allows. On modern phones (iOS 15+ Safari, Android Chrome) we share the
+ * vCard as a file, so the OS shows its own "Add to Contacts" sheet directly — no
+ * file dropped in Downloads. Everywhere else (desktop, older browsers) we fall
+ * back to a .vcf download, which still imports on every contacts app.
+ *
+ * Note: no web API can write a contact silently — the OS must mediate (a privacy
+ * boundary), so the closest "open contacts directly" is this native share sheet.
+ */
+export async function saveContact(p: VCardPerson, metAt?: string): Promise<void> {
+  const text = buildVCard(p, metAt);
+  try {
+    const file = new File([text], `${fileBase(p.name)}.vcf`, { type: "text/vcard" });
+    if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: p.name });
+      return;
+    }
+  } catch (err) {
+    // User dismissed the share sheet — respect that, don't also download.
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    // Any other failure: fall through to the download path below.
+  }
+  downloadVCard(p, metAt);
 }

@@ -6,7 +6,7 @@ import { Heart, Globe, Linkedin, StickyNote, Loader2, Check, CalendarDays, Bookm
 import { apiFetch } from "@/lib/api";
 import { Avatar } from "@/components/brand/avatar";
 import { Highlight } from "@/components/connections/search-box";
-import { downloadVCard } from "@/lib/vcard";
+import { saveContact } from "@/lib/vcard";
 import { cn } from "@/lib/utils";
 
 /** One round-level connection row as returned by the API. */
@@ -237,14 +237,16 @@ export function PersonCard({
         </div>
       )}
 
-      {/* Compact contact actions — icon-only to stay on one line in narrow grid
-          columns; each is labelled (aria + desktop tooltip) so it stays clear. */}
-      <div className="mt-3 flex items-center gap-2">
+      {/* Sleek, bare contact actions — a hairline divider then small muted glyphs
+          that lift + colour on hover. Each glyph stays ~18px but carries an
+          invisible padded hit-area (~38px) so it's still thumb-friendly on mobile,
+          and is labelled (aria + desktop tooltip) so dropping the text stays clear. */}
+      <div className="mt-4 flex items-center justify-center gap-1 border-t border-border/60 pt-2.5">
         <ActionIcon
           label="Add to contacts"
           title="Save to your phone's contacts"
-          onClick={() => downloadVCard(person, person.eventLabel)}
-          primary
+          onClick={() => void saveContact(person, person.eventLabel)}
+          hoverColor="hover:text-emerald-600 dark:hover:text-emerald-400"
         >
           <UserPlus className="h-[18px] w-[18px]" aria-hidden />
         </ActionIcon>
@@ -252,13 +254,17 @@ export function PersonCard({
           <ActionIcon
             label={`${person.name} on LinkedIn`}
             href={person.linkedin_url}
-            hoverClass="hover:border-[#0a66c2]/45 hover:bg-[#0a66c2]/10 hover:text-[#0a66c2]"
+            hoverColor="hover:text-[#0a66c2] dark:hover:text-[#4a9fe8]"
           >
             <Linkedin className="h-[18px] w-[18px]" aria-hidden />
           </ActionIcon>
         )}
         {person.website_url && (
-          <ActionIcon label={`${person.name}'s website`} href={person.website_url}>
+          <ActionIcon
+            label={`${person.name}'s website`}
+            href={person.website_url}
+            hoverColor="hover:text-accent"
+          >
             <Globe className="h-[18px] w-[18px]" aria-hidden />
           </ActionIcon>
         )}
@@ -270,33 +276,29 @@ export function PersonCard({
 }
 
 /**
- * A compact circular contact action — renders as a link (external contact URLs)
- * or a button (vCard download). Neutral at rest to match the card's Bookmark
- * affordance; `primary` gives the main action a subtle accent tint, `hoverClass`
- * lets a link reveal its brand colour on hover (e.g. LinkedIn blue).
+ * A bare contact action glyph — renders as a link (external contact URLs) or a
+ * button (vCard download). No border/background; the small icon lifts + brightens
+ * on hover (`hoverColor` lets a link reveal its brand colour, e.g. LinkedIn blue).
+ * Padding gives it a ~38px hit-area so the tiny glyph is still thumb-friendly.
  */
 function ActionIcon({
   label,
   title,
   href,
   onClick,
-  primary,
-  hoverClass,
+  hoverColor,
   children,
 }: {
   label: string;
   title?: string;
   href?: string;
   onClick?: () => void;
-  primary?: boolean;
-  hoverClass?: string;
+  hoverColor?: string;
   children: React.ReactNode;
 }) {
   const cls = cn(
-    "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-all active:scale-90",
-    primary
-      ? "border-accent/40 bg-accent/10 text-accent hover:bg-accent/20"
-      : cn("border-border bg-background/40 text-muted-foreground hover:text-foreground", hoverClass ?? "hover:bg-muted"),
+    "inline-flex items-center justify-center rounded-md p-2.5 text-muted-foreground transition-[color,transform] duration-200 ease-out hover:-translate-y-0.5 hover:scale-110 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    hoverColor ?? "hover:text-foreground",
   );
   if (href) {
     return (

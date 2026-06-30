@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
@@ -234,7 +234,7 @@ function LiveEventHero({ event }: { event: OrgEvent }) {
           </div>
 
           {/* Cover panel — image when set, else the event's deterministic color. */}
-          <div className="relative hidden min-h-[180px] overflow-hidden lg:block" style={{ background: cover.bg }}>
+          <div className="stat-fill relative hidden min-h-[180px] overflow-hidden lg:block" style={{ "--tile-bg": cover.bg } as CSSProperties}>
             {event.cover_image_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={event.cover_image_url} alt="" className="absolute inset-0 h-full w-full object-cover" />

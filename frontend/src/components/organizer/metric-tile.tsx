@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { Info } from "lucide-react";
 import { motion } from "framer-motion";
@@ -131,10 +131,10 @@ export function BentoTile({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.45, ease: EASE, delay }}
-      className="relative flex min-h-[124px] flex-col justify-between overflow-hidden rounded-3xl p-5 sm:min-h-[140px]"
-      style={{ background: bg, color: fg }}
+      className="stat-tile relative flex min-h-[124px] flex-col justify-between overflow-hidden rounded-3xl p-5 sm:min-h-[140px]"
+      style={{ "--tile-bg": bg, "--tile-ink": fg } as CSSProperties}
     >
-      <span className="pointer-events-none absolute -right-7 -top-7 h-20 w-20 rounded-full opacity-15" style={{ background: fg }} aria-hidden />
+      <span className="pointer-events-none absolute -right-7 -top-7 h-20 w-20 rounded-full bg-current opacity-15" aria-hidden />
       <div className="relative flex items-start justify-between">
         <Icon className="h-5 w-5 opacity-80" aria-hidden />
         {info && <InfoHint text={info} tone="onColor" />}

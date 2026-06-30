@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import { ArrowRight, CalendarDays, Check, Lock, MapPin, Users } from "lucide-react";
@@ -68,13 +69,6 @@ function attendLabel(phase: Phase): string {
  * event's own hue (calmer than a flat fill, same identity as the organizer card).
  * Returned as separate `backgroundColor` + `backgroundImage` so a browser without
  * `color-mix()` simply falls back to the flat color instead of rendering nothing. */
-function bandStyleFor(bg: string): { backgroundColor: string; backgroundImage: string } {
-  return {
-    backgroundColor: bg,
-    backgroundImage: `linear-gradient(140deg, ${bg} 0%, color-mix(in srgb, ${bg} 70%, #000) 100%)`,
-  };
-}
-
 /**
  * One event on the attendee home feed. The whole card is a link; where it goes
  * and what the CTA says depend on the caller's own state (registered?) and the
@@ -102,7 +96,6 @@ export function EventCard({
   const { day, mon, full } = dateParts(event.date, event.time);
   const href = hrefFor(event, phase);
   const cta = ctaFor(event, phase);
-  const bandStyle = bandStyleFor(cover.bg);
 
   return (
     <motion.div
@@ -116,8 +109,8 @@ export function EventCard({
       >
         {/* Cover band */}
         <div
-          className={cn("relative h-32 overflow-hidden sm:h-36", dimmed && "opacity-80 saturate-[0.55]")}
-          style={bandStyle}
+          className={cn("event-cover relative h-32 overflow-hidden sm:h-36", dimmed && "opacity-80 saturate-[0.55]")}
+          style={{ "--cover-bg": cover.bg } as CSSProperties}
         >
           {event.cover_image_url ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -234,8 +227,8 @@ export function FeaturedEventCard({
         <div className="grid lg:grid-cols-[1.05fr_1fr]">
           {/* Banner */}
           <div
-            className="relative h-44 overflow-hidden sm:h-52 lg:h-full lg:min-h-[240px]"
-            style={bandStyleFor(cover.bg)}
+            className="event-cover relative h-44 overflow-hidden sm:h-52 lg:h-full lg:min-h-[240px]"
+            style={{ "--cover-bg": cover.bg } as CSSProperties}
           >
             {event.cover_image_url ? (
               // eslint-disable-next-line @next/next/no-img-element

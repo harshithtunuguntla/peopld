@@ -11,20 +11,25 @@
 @layer base {
   :root {
     /* Light (landing) — shadcn semantic tokens */
-    --background: 43 33% 93%;        /* warm cream canvas (matches landing) */
+    --background: 43 33% 93%;
+    /* warm cream canvas (matches landing) */
     --foreground: 252 16% 7%;
-    --card: 43 55% 96%;              /* warm porcelain — cream, NEVER stark white (demo --surface) */
+    --card: 43 55% 96%;
+    /* warm porcelain — cream, NEVER stark white (demo --surface) */
     --card-foreground: 252 16% 7%;
-    --popover: 0 0% 100%;            /* rare pure white, reserved for floating popovers/tooltips */
+    --popover: 0 0% 100%;
+    /* rare pure white, reserved for floating popovers/tooltips */
     --popover-foreground: 252 16% 7%;
-    --elevated: 0 0% 100%;           /* rare pure white for dialogs/menus that must lift hard */
+    --elevated: 0 0% 100%;
+    /* rare pure white for dialogs/menus that must lift hard */
     --primary: 252 16% 7%;
     --primary-foreground: 43 33% 93%;
     --secondary: 40 25% 88%;
     --secondary-foreground: 252 16% 7%;
     --muted: 40 20% 85%;
     --muted-foreground: 252 8% 38%;
-    --accent: 10 88% 52%;            /* deepened coral so accent TEXT reads on cream */
+    --accent: 10 88% 52%;
+    /* deepened coral so accent TEXT reads on cream */
     --accent-foreground: 0 0% 100%;
     --destructive: 0 80% 60%;
     --destructive-foreground: 0 0% 100%;
@@ -42,10 +47,14 @@
 
     /* Extended app neutrals (richer ramp for console surfaces — see
        docs/design/UI_IMPORT_HANDOFF.md §6). Additive over the shadcn base. */
-    --surface-2: 42 36% 88%;          /* deeper cream for hover/inset fills (demo --surface-2) */
-    --foreground-subtle: 252 8% 52%;  /* third text tier, below muted-foreground */
-    --line-strong: 40 12% 72%;        /* emphasized hairline (inputs, dividers) */
-    --panel: 252 16% 9%;              /* dramatic dark sub-panel shown on light */
+    --surface-2: 42 36% 88%;
+    /* deeper cream for hover/inset fills (demo --surface-2) */
+    --foreground-subtle: 252 8% 52%;
+    /* third text tier, below muted-foreground */
+    --line-strong: 40 12% 72%;
+    /* emphasized hairline (inputs, dividers) */
+    --panel: 252 16% 9%;
+    /* dramatic dark sub-panel shown on light */
     --panel-foreground: 43 33% 93%;
     --shadow-card: 0 1px 2px rgba(21, 19, 14, 0.05), 0 16px 40px -20px rgba(21, 19, 14, 0.2);
   }
@@ -55,20 +64,27 @@
     /* Dark neutrals aligned to demo-workup-ui .app-theme.dark: a violet-tinted ink
        world (#0E0D14 canvas / #17161F surface / #201F2A surface-2 / #1A1922
        elevated / #F5F0E6 cream text), brand #FF6A4D. Hue ~247-249, not 240. */
-    --background: 249 22% 6%;        /* #0E0D14 */
-    --foreground: 40 28% 89%;        /* #F5F0E6 cream */
-    --card: 247 18% 10%;             /* #17161F */
+    --background: 249 22% 6%;
+    /* #0E0D14 */
+    --foreground: 40 28% 89%;
+    /* #F5F0E6 cream */
+    --card: 247 18% 10%;
+    /* #17161F */
     --card-foreground: 40 28% 89%;
     --popover: 247 18% 10%;
     --popover-foreground: 40 28% 89%;
-    --elevated: 247 16% 11%;         /* #1A1922 */
+    --elevated: 247 16% 11%;
+    /* #1A1922 */
     --primary: 40 28% 89%;
     --primary-foreground: 249 22% 6%;
-    --secondary: 245 16% 14%;        /* #201F2A */
+    --secondary: 245 16% 14%;
+    /* #201F2A */
     --secondary-foreground: 40 28% 89%;
     --muted: 247 15% 12%;
-    --muted-foreground: 40 9% 63%;   /* warm cream-grey (demo fg-muted) */
-    --accent: 10 86% 61%;           /* #FF6A4D demo dark brand */
+    --muted-foreground: 40 9% 63%;
+    /* warm cream-grey (demo fg-muted) */
+    --accent: 10 86% 61%;
+    /* #FF6A4D demo dark brand */
     --accent-foreground: 0 0% 100%;
     --border: 247 13% 19%;
     --input: 247 13% 19%;
@@ -83,7 +99,8 @@
     --destructive-foreground: 0 0% 100%;
 
     /* Extended app neutrals — dark variants (demo violet-ink world). */
-    --surface-2: 245 16% 14%;        /* #201F2A */
+    --surface-2: 245 16% 14%;
+    /* #201F2A */
     --foreground-subtle: 40 8% 52%;
     --line-strong: 247 13% 26%;
     --panel: 245 16% 14%;
@@ -94,15 +111,18 @@
   * {
     @apply border-border;
   }
+
   html {
     @apply bg-background text-foreground antialiased;
     scroll-behavior: smooth;
     overflow-x: hidden;
     max-width: 100vw;
   }
+
   body {
     font-family: var(--font-inter), system-ui, sans-serif;
   }
+
   ::selection {
     background: #ff5a3c;
     color: #fff;
@@ -113,15 +133,19 @@
   .font-display {
     font-family: var(--font-fraunces), serif;
   }
+
   .text-balance {
     text-wrap: balance;
   }
+
   .text-pretty {
     text-wrap: pretty;
   }
+
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
+
   .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;
@@ -143,6 +167,7 @@
       linear-gradient(to bottom, rgba(15, 14, 20, 0.04) 1px, transparent 1px);
     background-size: 64px 64px;
   }
+
   .grid-paper-light {
     background-image: linear-gradient(to right, rgba(11, 15, 30, 0.06) 1px, transparent 1px),
       linear-gradient(to bottom, rgba(11, 15, 30, 0.06) 1px, transparent 1px);
@@ -154,17 +179,48 @@
     box-shadow: var(--shadow-card);
   }
 
-  /* Big solid colour stat tiles (KPI strip). Same bright brand fill in both
-     themes — but on dark we DIM it toward the canvas (keep the hue, drop the
-     glare to ~55%) so it stops vibrating on the near-black background. Text stays
-     the light-mode ink, which still reads on the dimmer fill. --tile-bg/--tile-ink
-     are set inline per tile. */
+  /* Big solid colour fills (KPI stats, recap stats, round/boarding-pass cards,
+     event covers). Same bright brand fill in BOTH themes — but on dark we DIM it
+     toward the canvas (keep the exact hue, just drop the glare to 80%) so it
+     stops vibrating on the near-black background. Text stays the light-mode ink,
+     which still reads on the slightly-dimmer fill. Set --tile-bg (and --tile-ink
+     where the element also colours text) inline per element, add the .stat-tile
+     class, and dark mode handles the rest. */
   .stat-tile {
     background: var(--tile-bg);
     color: var(--tile-ink);
   }
+
   .dark .stat-tile {
-    background: color-mix(in srgb, var(--tile-bg) 55%, hsl(var(--background)));
+    background: color-mix(in srgb, var(--tile-bg) 80%, hsl(var(--background)));
+  }
+
+  /* Background-only variant: dims the fill but leaves text colour to the element
+     (for surfaces that set their own foreground, e.g. cover bands with overlaid
+     glass chips). */
+  .stat-fill {
+    background: var(--tile-bg);
+  }
+
+  .dark .stat-fill {
+    background: color-mix(in srgb, var(--tile-bg) 80%, hsl(var(--background)));
+  }
+
+  /* Event cover band — a diagonal gradient of the event's colour (--cover-bg).
+     Light keeps the original look (colour → 30% darker). Dark dims the whole
+     gradient toward the canvas so the band doesn't glow on the dark surface. */
+  .event-cover {
+    background-color: var(--cover-bg);
+    background-image: linear-gradient(140deg, var(--cover-bg) 0%, color-mix(in srgb, var(--cover-bg) 70%, #000) 100%);
+  }
+
+  .dark .event-cover {
+    background-color: color-mix(in srgb, var(--cover-bg) 80%, hsl(var(--background)));
+    background-image: linear-gradient(
+      140deg,
+      color-mix(in srgb, var(--cover-bg) 80%, hsl(var(--background))) 0%,
+      color-mix(in srgb, var(--cover-bg) 56%, hsl(var(--background))) 100%
+    );
   }
 
   /* Liquid-glass chip — a translucent, frosted surface for labels that sit on
@@ -174,23 +230,20 @@
      legible because the blur + gradient keep enough contrast for `foreground`
      text. Theme-aware so it frosts light in light mode and dark in dark. */
   .glass-chip {
-    background-image: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.66) 0%,
-      rgba(255, 255, 255, 0.46) 100%
-    );
+    background-image: linear-gradient(135deg,
+        rgba(255, 255, 255, 0.66) 0%,
+        rgba(255, 255, 255, 0.46) 100%);
     -webkit-backdrop-filter: blur(14px) saturate(180%);
     backdrop-filter: blur(14px) saturate(180%);
     border: 1px solid rgba(255, 255, 255, 0.55);
     box-shadow: 0 4px 14px -6px rgba(15, 14, 20, 0.35),
       inset 0 1px 0 0 rgba(255, 255, 255, 0.7);
   }
+
   .dark .glass-chip {
-    background-image: linear-gradient(
-      135deg,
-      rgba(28, 26, 36, 0.64) 0%,
-      rgba(28, 26, 36, 0.44) 100%
-    );
+    background-image: linear-gradient(135deg,
+        rgba(28, 26, 36, 0.64) 0%,
+        rgba(28, 26, 36, 0.44) 100%);
     border-color: rgba(255, 255, 255, 0.16);
     box-shadow: 0 4px 14px -6px rgba(0, 0, 0, 0.55),
       inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
@@ -201,6 +254,7 @@
     background-image: radial-gradient(hsl(var(--border)) 1px, transparent 1px);
     background-size: 22px 22px;
   }
+
   .app-grid-bg {
     background-image: linear-gradient(to right, hsl(var(--border)) 1px, transparent 1px),
       linear-gradient(to bottom, hsl(var(--border)) 1px, transparent 1px);
@@ -234,22 +288,22 @@
     transform: translateX(100%);
   }
 }
+
 .skeleton {
   position: relative;
   overflow: hidden;
   background: hsl(var(--muted));
 }
+
 .skeleton::after {
   content: "";
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    hsl(var(--foreground) / 0.08),
-    transparent
-  );
+  background: linear-gradient(90deg,
+      transparent,
+      hsl(var(--foreground) / 0.08),
+      transparent);
   animation: skeleton-shimmer 1.6s ease-in-out infinite;
 }
 
@@ -260,10 +314,12 @@
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
 }
+
 .web-edge {
   animation: web-edge-in 0.5s ease both;
 }
@@ -271,6 +327,7 @@
 /* Reduced-motion safety net. Components also guard JS animations via
    useReducedMotion() / a media check. See DESIGN_SYSTEM §5. */
 @media (prefers-reduced-motion: reduce) {
+
   *,
   *::before,
   *::after {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Loader2, Users, Radio, MapPin, CalendarDays, Lock, Archive, ArchiveRestore, Sparkles } from "lucide-react";
@@ -63,11 +63,8 @@ export function EventCard({ event, onChanged, index = 0 }: { event: OrgEvent; on
             two-stop gradient (same band treatment as the attendee card). Tall enough
             to read as a banner (not a thin strip) and to let a real photo breathe. */}
         <div
-          className="group/cover relative h-32 overflow-hidden sm:h-36"
-          style={{
-            backgroundColor: cover.bg, // solid fallback if color-mix() is unsupported
-            backgroundImage: `linear-gradient(140deg, ${cover.bg} 0%, color-mix(in srgb, ${cover.bg} 70%, #000) 100%)`,
-          }}
+          className="event-cover group/cover relative h-32 overflow-hidden sm:h-36"
+          style={{ "--cover-bg": cover.bg } as CSSProperties}
         >
           {event.cover_image_url ? (
             // eslint-disable-next-line @next/next/no-img-element

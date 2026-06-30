@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
@@ -351,8 +351,8 @@ function RecapStat({
       initial={{ opacity: 0, scale: 0.94 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ delay, duration: 0.4 }}
-      className="relative overflow-hidden rounded-3xl p-5"
-      style={{ background: bg, color: ink }}
+      className="stat-tile relative overflow-hidden rounded-3xl p-5"
+      style={{ "--tile-bg": bg, "--tile-ink": ink } as CSSProperties}
     >
       {highlight && value > 0 && (
         <span className="absolute right-3 top-3 rounded-full bg-black/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">

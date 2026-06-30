@@ -246,25 +246,16 @@ export function PersonCard({
           label="Add to contacts"
           title="Save to your phone's contacts"
           onClick={() => void saveContact(person, person.eventLabel)}
-          hoverColor="hover:text-emerald-600 dark:hover:text-emerald-400"
         >
           <UserPlus className="h-[18px] w-[18px]" aria-hidden />
         </ActionIcon>
         {person.linkedin_url && (
-          <ActionIcon
-            label={`${person.name} on LinkedIn`}
-            href={person.linkedin_url}
-            hoverColor="hover:text-[#0a66c2] dark:hover:text-[#4a9fe8]"
-          >
+          <ActionIcon label={`${person.name} on LinkedIn`} href={person.linkedin_url}>
             <Linkedin className="h-[18px] w-[18px]" aria-hidden />
           </ActionIcon>
         )}
         {person.website_url && (
-          <ActionIcon
-            label={`${person.name}'s website`}
-            href={person.website_url}
-            hoverColor="hover:text-accent"
-          >
+          <ActionIcon label={`${person.name}'s website`} href={person.website_url}>
             <Globe className="h-[18px] w-[18px]" aria-hidden />
           </ActionIcon>
         )}
@@ -277,29 +268,26 @@ export function PersonCard({
 
 /**
  * A bare contact action glyph — renders as a link (external contact URLs) or a
- * button (vCard download). No border/background; the small icon lifts + brightens
- * on hover (`hoverColor` lets a link reveal its brand colour, e.g. LinkedIn blue).
- * Padding gives it a ~38px hit-area so the tiny glyph is still thumb-friendly.
+ * button (vCard download). No border/background; the small icon lifts, scales and
+ * brightens to the app accent on hover — one unified colour keeps the row cohesive
+ * rather than a multi-brand rainbow. Padding gives it a ~38px hit-area so the tiny
+ * glyph is still thumb-friendly.
  */
 function ActionIcon({
   label,
   title,
   href,
   onClick,
-  hoverColor,
   children,
 }: {
   label: string;
   title?: string;
   href?: string;
   onClick?: () => void;
-  hoverColor?: string;
   children: React.ReactNode;
 }) {
-  const cls = cn(
-    "inline-flex items-center justify-center rounded-md p-2.5 text-muted-foreground transition-[color,transform] duration-200 ease-out hover:-translate-y-0.5 hover:scale-110 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-    hoverColor ?? "hover:text-foreground",
-  );
+  const cls =
+    "inline-flex items-center justify-center rounded-md p-2.5 text-muted-foreground transition-[color,transform] duration-200 ease-out hover:-translate-y-0.5 hover:scale-110 hover:text-accent active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
   if (href) {
     return (
       <a href={href} target="_blank" rel="noopener noreferrer" aria-label={label} title={title ?? label} className={cls}>

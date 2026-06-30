@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import { Loader2, Plus, UserCheck, UserMinus, Undo2, QrCode, Download, Search, UsersRound, ArrowDownUp, Star, Pencil, X, Globe } from "lucide-react";
 
@@ -19,6 +19,7 @@ import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
 import { LinkedInGlyph } from "@/components/brand/glyphs";
 import { isAcceptableUrl, normalizeUrl } from "@/lib/url";
 import { inkOn } from "@/lib/design/rounds";
+import { darkTile } from "@/lib/design/tile";
 import { ATTENDEE_STATUS_HEX, ATTENDEE_TONE } from "@/lib/design/status";
 import { StatusPill } from "@/components/ui/status-pill";
 import { cn } from "@/lib/utils";
@@ -354,18 +355,19 @@ function Kpi({
   onClick?: () => void;
 }) {
   const ink = inkOn(bg);
+  const dk = darkTile(bg);
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "relative overflow-hidden rounded-3xl p-4 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30 sm:p-5",
+        "stat-tile relative overflow-hidden rounded-3xl p-4 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30 sm:p-5",
         active && "ring-2 ring-foreground/40",
       )}
-      style={{ background: bg, color: ink }}
+      style={{ "--tile-bg": bg, "--tile-ink": ink, "--tile-bg-dark": dk.bg, "--tile-ink-dark": dk.ink } as CSSProperties}
     >
-      <div className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full opacity-15" style={{ background: ink }} aria-hidden />
+      <div className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-current opacity-15" aria-hidden />
       <div className="relative font-display text-[clamp(28px,4vw,46px)] leading-none tracking-[-0.03em]">{value}</div>
       <div className="relative mt-1 text-xs opacity-80 sm:text-sm">{label}</div>
     </button>

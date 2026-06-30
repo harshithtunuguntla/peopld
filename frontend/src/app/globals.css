@@ -154,6 +154,19 @@
     box-shadow: var(--shadow-card);
   }
 
+  /* Big solid colour stat tiles (KPI strip, recap stats). Driven by CSS vars set
+     inline per tile so the theme can swap them: bright brand fill on light, a
+     deep desaturated same-hue card on dark (so the colour doesn't glow on the
+     near-black canvas). See lib/design/tile.ts. */
+  .stat-tile {
+    background: var(--tile-bg);
+    color: var(--tile-ink);
+  }
+  .dark .stat-tile {
+    background: var(--tile-bg-dark);
+    color: var(--tile-ink-dark);
+  }
+
   /* Liquid-glass chip — a translucent, frosted surface for labels that sit on
      top of a vivid cover band or photo (date block, status pill, code chip).
      Replaces the old near-opaque sticker look: real see-through glass with a

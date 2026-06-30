@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
@@ -20,7 +20,6 @@ import { FeedbackFillForm } from "@/components/feedback/fill-form";
 import { type AttendeeForm } from "@/lib/feedback";
 import { COLORS } from "@/lib/design/colors";
 import { inkOn } from "@/lib/design/rounds";
-import { darkTile } from "@/lib/design/tile";
 import { cn } from "@/lib/utils";
 
 interface ConnectionsResp {
@@ -347,21 +346,20 @@ function RecapStat({
   highlight?: boolean;
 }) {
   const ink = inkOn(bg);
-  const dk = darkTile(bg);
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.94 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ delay, duration: 0.4 }}
-      className="stat-tile relative overflow-hidden rounded-3xl p-5"
-      style={{ "--tile-bg": bg, "--tile-ink": ink, "--tile-bg-dark": dk.bg, "--tile-ink-dark": dk.ink } as CSSProperties}
+      className="relative overflow-hidden rounded-3xl p-5"
+      style={{ background: bg, color: ink }}
     >
       {highlight && value > 0 && (
-        <span className="absolute right-3 top-3 rounded-full bg-black/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide dark:bg-white/15">
+        <span className="absolute right-3 top-3 rounded-full bg-black/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">
           mutual
         </span>
       )}
-      <div className="pointer-events-none absolute -right-5 -top-5 h-16 w-16 rounded-full bg-current opacity-15" aria-hidden />
+      <div className="pointer-events-none absolute -right-5 -top-5 h-16 w-16 rounded-full opacity-15" style={{ background: ink }} aria-hidden />
       <Icon className="relative h-5 w-5 opacity-80" aria-hidden />
       <div className="relative mt-3 font-display text-[clamp(30px,9vw,44px)] leading-none tracking-[-0.03em]">
         <CountUp to={value} />

@@ -19,7 +19,6 @@ import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
 import { LinkedInGlyph } from "@/components/brand/glyphs";
 import { isAcceptableUrl, normalizeUrl } from "@/lib/url";
 import { inkOn } from "@/lib/design/rounds";
-import { darkTile } from "@/lib/design/tile";
 import { ATTENDEE_STATUS_HEX, ATTENDEE_TONE } from "@/lib/design/status";
 import { StatusPill } from "@/components/ui/status-pill";
 import { cn } from "@/lib/utils";
@@ -355,7 +354,6 @@ function Kpi({
   onClick?: () => void;
 }) {
   const ink = inkOn(bg);
-  const dk = darkTile(bg);
   return (
     <button
       type="button"
@@ -365,7 +363,7 @@ function Kpi({
         "stat-tile relative overflow-hidden rounded-3xl p-4 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30 sm:p-5",
         active && "ring-2 ring-foreground/40",
       )}
-      style={{ "--tile-bg": bg, "--tile-ink": ink, "--tile-bg-dark": dk.bg, "--tile-ink-dark": dk.ink } as CSSProperties}
+      style={{ "--tile-bg": bg, "--tile-ink": ink } as CSSProperties}
     >
       <div className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-current opacity-15" aria-hidden />
       <div className="relative font-display text-[clamp(28px,4vw,46px)] leading-none tracking-[-0.03em]">{value}</div>

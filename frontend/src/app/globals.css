@@ -154,17 +154,17 @@
     box-shadow: var(--shadow-card);
   }
 
-  /* Big solid colour stat tiles (KPI strip, recap stats). Driven by CSS vars set
-     inline per tile so the theme can swap them: bright brand fill on light, a
-     deep desaturated same-hue card on dark (so the colour doesn't glow on the
-     near-black canvas). See lib/design/tile.ts. */
+  /* Big solid colour stat tiles (KPI strip). Same bright brand fill in both
+     themes — but on dark we DIM it toward the canvas (keep the hue, drop the
+     glare to ~55%) so it stops vibrating on the near-black background. Text stays
+     the light-mode ink, which still reads on the dimmer fill. --tile-bg/--tile-ink
+     are set inline per tile. */
   .stat-tile {
     background: var(--tile-bg);
     color: var(--tile-ink);
   }
   .dark .stat-tile {
-    background: var(--tile-bg-dark);
-    color: var(--tile-ink-dark);
+    background: color-mix(in srgb, var(--tile-bg) 55%, hsl(var(--background)));
   }
 
   /* Liquid-glass chip — a translucent, frosted surface for labels that sit on

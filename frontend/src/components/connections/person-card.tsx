@@ -245,7 +245,7 @@ export function PersonCard({
         <ActionIcon
           label="Add to contacts"
           title="Save to your phone's contacts"
-          onClick={() => void saveContact(person, person.eventLabel)}
+          onClick={() => saveContact(person, person.eventLabel)}
         >
           <UserPlus className="h-[18px] w-[18px]" aria-hidden />
         </ActionIcon>

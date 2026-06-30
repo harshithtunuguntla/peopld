@@ -43,27 +43,18 @@ export function downloadVCard(p: VCardPerson, metAt?: string): void {
 }
 
 /**
- * Add a person to the phone's address book with the most native experience the
- * browser allows. On modern phones (iOS 15+ Safari, Android Chrome) we share the
- * vCard as a file, so the OS shows its own "Add to Contacts" sheet directly — no
- * file dropped in Downloads. Everywhere else (desktop, older browsers) we fall
- * back to a .vcf download, which still imports on every contacts app.
+ * Add a person to the phone's address book. We download a .vcf — universal across
+ * every iOS/Android contacts app and, crucially, it carries ALL fields (name,
+ * role, company, website, LinkedIn, note). On a phone, opening the downloaded
+ * file lands on the native "Add to Contacts" screen.
  *
- * Note: no web API can write a contact silently — the OS must mediate (a privacy
- * boundary), so the closest "open contacts directly" is this native share sheet.
+ * Why not the Web Share API (to skip the download)? `text/vcard` is NOT on the
+ * browsers' shareable-type allow-list, so `navigator.canShare({files:[vcf]})`
+ * always returns false and share can never fire for a contact — confirmed against
+ * the MDN/W3C list (images, pdf, audio, video, plain text only). The only way to
+ * open Contacts with zero download on Android is an `intent:` link, which drops
+ * the website + LinkedIn URLs — so we deliberately keep the richer vCard instead.
  */
-export async function saveContact(p: VCardPerson, metAt?: string): Promise<void> {
-  const text = buildVCard(p, metAt);
-  try {
-    const file = new File([text], `${fileBase(p.name)}.vcf`, { type: "text/vcard" });
-    if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file], title: p.name });
-      return;
-    }
-  } catch (err) {
-    // User dismissed the share sheet — respect that, don't also download.
-    if (err instanceof DOMException && err.name === "AbortError") return;
-    // Any other failure: fall through to the download path below.
-  }
+export function saveContact(p: VCardPerson, metAt?: string): void {
   downloadVCard(p, metAt);
 }

@@ -15,6 +15,7 @@ import {
 import { Check, Copy, Search, Sparkles, Lock } from "lucide-react";
 
 import { Card } from "@/components/organizer/console-ui";
+import { Pagination, usePagination } from "@/components/ui/pagination";
 import { COLORS } from "@/lib/design/colors";
 import { AI_ENABLED } from "@/lib/features";
 import { cn } from "@/lib/utils";
@@ -290,11 +291,10 @@ function NpsBreakdown({ q }: { q: QuestionResult }) {
 
 /* ----------------------------- text: searchable, attributed list ----------------------------- */
 
-const TEXT_PAGE = 8; // reveal long lists in batches — production-friendly
+const TEXT_PAGE = 5; // answers shown per page
 
 function TextAnswers({ entries, collectIdentity }: { entries: TextEntry[]; collectIdentity: boolean }) {
   const [query, setQuery] = useState("");
-  const [shown, setShown] = useState(TEXT_PAGE);
   const [copied, setCopied] = useState(false);
 
   const filtered = useMemo(() => {
@@ -307,6 +307,9 @@ function TextAnswers({ entries, collectIdentity }: { entries: TextEntry[]; colle
         (e.company ?? "").toLowerCase().includes(term),
     );
   }, [entries, query]);
+
+  // Page through the (filtered) answers; searching jumps back to page 1.
+  const pager = usePagination(filtered, TEXT_PAGE, query.trim());
 
   if (entries.length === 0) return <Empty label="No written answers." />;
 
@@ -323,8 +326,6 @@ function TextAnswers({ entries, collectIdentity }: { entries: TextEntry[]; colle
     }
   }
 
-  const visible = filtered.slice(0, shown);
-
   return (
     <div>
       <AiSummaryBeta count={entries.length} />
@@ -334,10 +335,7 @@ function TextAnswers({ entries, collectIdentity }: { entries: TextEntry[]; colle
           <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
           <input
             value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setShown(TEXT_PAGE);
-            }}
+            onChange={(e) => setQuery(e.target.value)}
             placeholder={`Search ${entries.length} answers…`}
             aria-label="Search written answers"
             className="h-9 w-full rounded-lg border border-border bg-background/50 pl-8 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-accent/50"
@@ -356,21 +354,20 @@ function TextAnswers({ entries, collectIdentity }: { entries: TextEntry[]; colle
       {filtered.length === 0 ? (
         <p className="py-4 text-center text-sm text-muted-foreground">No answers match “{query.trim()}”.</p>
       ) : (
-        <ul className="space-y-2">
-          {visible.map((e, i) => (
-            <TextItem key={i} entry={e} collectIdentity={collectIdentity} />
-          ))}
-        </ul>
-      )}
-
-      {shown < filtered.length && (
-        <button
-          type="button"
-          onClick={() => setShown((n) => n + TEXT_PAGE)}
-          className="mt-3 w-full rounded-lg border border-border py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-        >
-          Show {Math.min(TEXT_PAGE, filtered.length - shown)} more
-        </button>
+        <>
+          <ul className="space-y-2">
+            {pager.pageItems.map((e, i) => (
+              <TextItem key={pager.rangeStart + i} entry={e} collectIdentity={collectIdentity} />
+            ))}
+          </ul>
+          <Pagination
+            className="mt-3"
+            page={pager.page}
+            totalPages={pager.totalPages}
+            onChange={pager.setPage}
+            summary={`Showing ${pager.rangeStart}–${pager.rangeEnd} of ${pager.total}`}
+          />
+        </>
       )}
     </div>
   );

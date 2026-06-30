@@ -15,7 +15,10 @@ import { PersonCard, type Person, type Connection } from "@/components/connectio
 import { SearchBox } from "@/components/connections/search-box";
 import { searchItems, tokenize, type FieldSpec } from "@/lib/connections/search";
 import { SelectMenu } from "@/components/ui/select-menu";
+import { Pagination, usePagination } from "@/components/ui/pagination";
 import { cn } from "@/lib/utils";
+
+const PAGE_SIZE = 12; // connection cards per page
 
 type RelFilter = "all" | "met" | "matches" | "liked" | "saved";
 
@@ -191,6 +194,9 @@ export default function MyConnectionsPage() {
     return searchItems(byFilter, query, CROSS_FIELDS);
   }, [cards, query, eventFilter, relFilter]);
 
+  // Page the results; any filter/search change resets to page 1.
+  const pager = usePagination(visible, PAGE_SIZE, `${query}|${eventFilter}|${relFilter}`);
+
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
       <AuroraBackground intensity={0.35} />
@@ -280,15 +286,27 @@ export default function MyConnectionsPage() {
                 {visible.length === 0 ? (
                   <p className="mt-10 text-center text-sm text-muted-foreground">No one matches those filters.</p>
                 ) : (
-                  // Masonry (CSS columns) — cards have very different heights (links,
-                  // notes, interest chips), so a grid would stretch every card in a row
-                  // to the tallest and leave dead space. Columns let each card size to
-                  // its own content and pack tightly.
-                  <ul className="mt-5 columns-1 gap-x-3 sm:columns-2 [&>li]:mb-3 [&>li]:break-inside-avoid">
-                    {visible.map(({ person, eventId }) => (
-                      <PersonCard key={`${eventId}-${person.attendee_id}`} person={person} eventId={eventId} highlight={terms} />
-                    ))}
-                  </ul>
+                  <>
+                    {/* Masonry (CSS columns) — cards have very different heights (links,
+                        notes, interest chips), so a grid would stretch every card in a row
+                        to the tallest and leave dead space. Columns let each card size to
+                        its own content and pack tightly. */}
+                    <ul className="mt-5 columns-1 gap-x-3 sm:columns-2 [&>li]:mb-3 [&>li]:break-inside-avoid">
+                      {pager.pageItems.map(({ person, eventId }) => (
+                        <PersonCard key={`${eventId}-${person.attendee_id}`} person={person} eventId={eventId} highlight={terms} />
+                      ))}
+                    </ul>
+                    <Pagination
+                      className="mt-8"
+                      page={pager.page}
+                      totalPages={pager.totalPages}
+                      onChange={(p) => {
+                        pager.setPage(p);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      summary={`Showing ${pager.rangeStart}–${pager.rangeEnd} of ${pager.total}`}
+                    />
+                  </>
                 )}
               </>
             )}

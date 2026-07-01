@@ -83,6 +83,10 @@ def get_directory(
         tag = a.get("tag") or "attendee"
         if tag == "speaker":
             speakers += 1
+        # Phone is the one gated channel: only surface it when the person opted in
+        # ("everyone at this event can see my number"). Enforced here so a hidden
+        # number never leaves the API. IG / X / email are open, like the pro links.
+        phone_visible = bool(a.get("phone_visible", False))
         entries.append(
             DirectoryEntry(
                 attendee_id=a["id"],
@@ -93,6 +97,11 @@ def get_directory(
                 looking_for=a.get("looking_for"),
                 linkedin_url=a.get("linkedin_url"),
                 website_url=a.get("website_url"),
+                instagram=a.get("instagram"),
+                twitter=a.get("twitter"),
+                email=a.get("email"),
+                phone=a.get("phone") if phone_visible else None,
+                phone_dial_code=a.get("phone_dial_code") if phone_visible else None,
                 interests=their_interests,
                 shared_interests=shared,
                 avatar_url=a.get("avatar_url"),
@@ -111,12 +120,15 @@ def get_directory(
         )
     )
 
+    # Meeting picks only make sense before seating happens. Once the event has
+    # ended, seating is history — so cap 0 tells the UI to hide the pick controls
+    # (the directory becomes a pure "who was here" contact list). Organizers
+    # previewing the list also get cap 0 (they don't get picks).
+    event_ended = event.get("status") == "ended"
     return DirectoryResponse(
         count=len(entries),
         speakers=speakers,
         my_intents_used=len(wanted_ids),
-        # Only registered attendees can make picks; an organizer previewing the
-        # list gets cap 0 so the UI hides the pick controls for them.
-        my_intents_cap=intent_cap(event) if me is not None else 0,
+        my_intents_cap=0 if (me is None or event_ended) else intent_cap(event),
         attendees=entries,
     )

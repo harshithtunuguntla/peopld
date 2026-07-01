@@ -368,10 +368,13 @@ class BulkCheckInResponse(BaseModel):
 # --- Pre-event directory ("who's coming") ---
 
 class DirectoryEntry(BaseModel):
-    """One person on the public attendee directory. Public profile fields only —
-    no status, no internal flags, and contact is professional links (LinkedIn /
-    website), never a phone number. `shared_interests` are tags the viewer and
-    this person both picked, surfaced so people have an instant opener."""
+    """One person on the public attendee directory. Public profile fields plus the
+    open contact channels the person chose to share (LinkedIn / website / Instagram
+    / X / email) — the same tier surfaced on the rolodex card. The phone number is
+    the ONE gated field: it's only populated when the person opted in
+    (`phone_visible`), enforced server-side so a hidden number never leaves the API.
+    `shared_interests` are tags the viewer and this person both picked, surfaced so
+    people have an instant opener."""
     attendee_id: UUID
     name: str
     role: str
@@ -380,6 +383,11 @@ class DirectoryEntry(BaseModel):
     looking_for: Optional[str] = None
     linkedin_url: Optional[str] = None
     website_url: Optional[str] = None
+    instagram: Optional[str] = None
+    twitter: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None            # only set when the owner made it visible
+    phone_dial_code: Optional[str] = None
     interests: list[str] = []
     shared_interests: list[str] = []
     avatar_url: Optional[str] = None

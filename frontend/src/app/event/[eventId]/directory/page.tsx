@@ -7,8 +7,6 @@ import type { User } from "@supabase/supabase-js";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
-  Globe,
-  Linkedin,
   Mic,
   Sparkles,
   UserPlus,
@@ -23,6 +21,7 @@ import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Wordmark } from "@/components/brand/wordmark";
 import { Avatar } from "@/components/brand/avatar";
 import { SearchBox, Highlight } from "@/components/connections/search-box";
+import { ContactActions } from "@/components/connections/contact-actions";
 import { searchItems, tokenize, type FieldSpec } from "@/lib/connections/search";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +36,11 @@ interface DirectoryEntry {
   looking_for: string | null;
   linkedin_url: string | null;
   website_url: string | null;
+  instagram: string | null;
+  twitter: string | null;
+  email: string | null;
+  phone: string | null; // present only when the owner made it visible
+  phone_dial_code: string | null;
   interests: string[];
   shared_interests: string[];
   avatar_url: string | null;
@@ -73,6 +77,7 @@ export default function DirectoryPage({ params }: { params: Promise<{ eventId: s
   const [authChecked, setAuthChecked] = useState(false);
   const [data, setData] = useState<DirectoryResp | null>(null);
   const [eventName, setEventName] = useState("");
+  const [eventEnded, setEventEnded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Picks ("I want to meet") — lifted here so the counter + cap apply across cards.
@@ -83,6 +88,10 @@ export default function DirectoryPage({ params }: { params: Promise<{ eventId: s
 
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
+
+  // The viewer's own name prefills the WhatsApp intro on each card.
+  const viewerName =
+    (user?.user_metadata?.full_name as string) || (user?.user_metadata?.name as string) || "";
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -98,8 +107,12 @@ export default function DirectoryPage({ params }: { params: Promise<{ eventId: s
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    apiFetch<{ name: string }>(`/events/${eventId}`)
-      .then((e) => !cancelled && setEventName(e.name))
+    apiFetch<{ name: string; status?: string }>(`/events/${eventId}`)
+      .then((e) => {
+        if (cancelled) return;
+        setEventName(e.name);
+        setEventEnded(e.status === "ended");
+      })
       .catch(() => {});
     apiFetch<DirectoryResp>(`/events/${eventId}/directory`)
       .then((d) => {
@@ -225,7 +238,11 @@ export default function DirectoryPage({ params }: { params: Promise<{ eventId: s
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {data
-              ? `${data.count} ${data.count === 1 ? "person" : "people"} registered so far. Pick who you most want to meet — we'll try to seat you together.`
+              ? eventEnded
+                ? `${data.count} ${data.count === 1 ? "person" : "people"} were in the room. Browse everyone and reach out.`
+                : picksEnabled
+                  ? `${data.count} ${data.count === 1 ? "person" : "people"} registered so far. Pick who you most want to meet — we'll try to seat you together.`
+                  : `${data.count} ${data.count === 1 ? "person" : "people"} registered so far. Browse who's coming.`
               : "Loading the room…"}
           </p>
         </header>
@@ -330,6 +347,8 @@ export default function DirectoryPage({ params }: { params: Promise<{ eventId: s
                 capReached={capReached}
                 onToggle={() => toggleIntent(p)}
                 highlight={terms}
+                viewerName={viewerName}
+                eventName={eventName}
               />
             ))}
           </ul>
@@ -353,6 +372,8 @@ function DirectoryCard({
   capReached,
   onToggle,
   highlight = [],
+  viewerName,
+  eventName,
 }: {
   person: DirectoryEntry;
   index: number;
@@ -362,6 +383,8 @@ function DirectoryCard({
   capReached: boolean;
   onToggle: () => void;
   highlight?: string[];
+  viewerName?: string;
+  eventName?: string;
 }) {
   const roleLine = [person.role, person.company].filter(Boolean).join(" · ");
   const sharedSet = new Set(person.shared_interests.map((s) => s.toLowerCase()));
@@ -465,32 +488,19 @@ function DirectoryCard({
           </button>
         )}
 
-        {(person.linkedin_url || person.website_url) && (
-          <div className="flex gap-2">
-            {person.linkedin_url && (
-              <a
-                href={person.linkedin_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={`${person.name} on LinkedIn`}
-                className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-              >
-                <Linkedin className="h-4 w-4" aria-hidden /> LinkedIn
-              </a>
-            )}
-            {person.website_url && (
-              <a
-                href={person.website_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={`${person.name}'s website`}
-                className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-full border border-border bg-background/40 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-              >
-                <Globe className="h-4 w-4" aria-hidden /> Website
-              </a>
-            )}
-          </div>
-        )}
+        {/* Lean contact glyphs — identical to the rolodex card. Neutral "from {event}"
+            WhatsApp intro (the directory spans both before and after the event, so
+            "we met at" wouldn't always be true). Phone only shows if the person
+            opted in; IG / X / email / links show whenever shared. */}
+        <ContactActions
+          person={person}
+          eventName={eventName}
+          waMessage={
+            viewerName
+              ? `Hi, I'm ${viewerName} from ${eventName ?? "the event"} 👋`
+              : `Hi — reaching out from ${eventName ?? "the event"} 👋`
+          }
+        />
       </div>
     </motion.li>
   );

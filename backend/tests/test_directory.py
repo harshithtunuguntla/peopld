@@ -77,15 +77,49 @@ def test_directory_computes_shared_interests(client, db, event):
     assert set(entry["interests"]) == {"climate", "hiring"}
 
 
-def test_directory_no_contact_phone_field(client, db, event):
+def test_directory_open_channels_are_public(client, db, event):
+    """IG / X / email / pro links are the open tier — shown to anyone on the list."""
     _viewer(db, event["id"])
     make_attendee(db, event["id"], name="Asha", website_url="https://asha.dev",
-                  linkedin_url="https://linkedin.com/in/asha")
+                  linkedin_url="https://linkedin.com/in/asha",
+                  instagram="asha.codes", twitter="asha_x", email="asha@x.dev")
     res = client.get(f"/events/{event['id']}/directory", headers=ATTENDEE_AUTH)
-    raw = res.text
-    assert "whatsapp" not in raw.lower()
-    # Professional links ARE part of the public profile.
-    assert "asha.dev" in raw
+    entry = res.json()["attendees"][0]
+    assert entry["instagram"] == "asha.codes"
+    assert entry["twitter"] == "asha_x"
+    assert entry["email"] == "asha@x.dev"
+    assert entry["website_url"] == "https://asha.dev"
+
+
+def test_directory_gates_phone_by_visibility(client, db, event):
+    """Phone is the ONE gated channel — only surfaced when the owner opted in.
+    Enforced server-side, so a hidden number never leaves the API."""
+    _viewer(db, event["id"])
+    make_attendee(db, event["id"], name="Shy", phone="9876543210",
+                  phone_dial_code="+91", phone_visible=False)
+    make_attendee(db, event["id"], name="Open", phone="1234567890",
+                  phone_dial_code="+91", phone_visible=True)
+
+    res = client.get(f"/events/{event['id']}/directory", headers=ATTENDEE_AUTH)
+    by_name = {a["name"]: a for a in res.json()["attendees"]}
+    assert by_name["Shy"]["phone"] is None
+    assert by_name["Shy"]["phone_dial_code"] is None
+    assert by_name["Open"]["phone"] == "1234567890"
+    assert by_name["Open"]["phone_dial_code"] == "+91"
+    # The hidden number must not appear anywhere in the payload.
+    assert "9876543210" not in res.text
+
+
+def test_directory_hides_picks_after_event_ended(client, db, event):
+    """Once the event has ended, seating is history — cap 0 tells the UI to drop the
+    'want to meet' controls and become a pure 'who was here' contact list."""
+    _viewer(db, event["id"])
+    make_attendee(db, event["id"], name="Asha")
+    db.table("events").update({"status": "ended"}).eq("id", event["id"]).execute()
+
+    res = client.get(f"/events/{event['id']}/directory", headers=ATTENDEE_AUTH)
+    assert res.status_code == 200
+    assert res.json()["my_intents_cap"] == 0
 
 
 def test_directory_speakers_first_and_counted(client, db, event):

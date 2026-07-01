@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Heart, Globe, Linkedin, Instagram, Mail, StickyNote, Loader2, Check, CalendarDays, Bookmark, UserCheck, Users, Sparkles, UserPlus } from "lucide-react";
+import { Heart, StickyNote, Loader2, Check, CalendarDays, Bookmark, UserCheck, Users, Sparkles } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
 import { Avatar } from "@/components/brand/avatar";
 import { Highlight } from "@/components/connections/search-box";
-import { WhatsAppGlyph, XGlyph } from "@/components/brand/glyphs";
-import { saveContact } from "@/lib/vcard";
-import { whatsappHref, instagramHref, xHref, atHandle } from "@/lib/url";
+import { ContactActions } from "@/components/connections/contact-actions";
 import { cn } from "@/lib/utils";
 
 /** One round-level connection row as returned by the API. */
@@ -151,18 +149,9 @@ export function PersonCard({
   const otherInterests = person.interests.filter((t) => !sharedSet.has(t.toLowerCase()));
   const rounds = [...person.rounds].sort((a, b) => a - b);
 
-  // Contact channels. The event label (for the WhatsApp intro + vCard note) is the
-  // connection's own event on the cross-event page, else the current event's name.
+  // The event label (for the WhatsApp intro + vCard note) is the connection's own
+  // event on the cross-event page, else the current event's name.
   const metAtLabel = person.eventLabel ?? eventName;
-  const whatsappNumber = person.phone
-    ? `${person.phone_dial_code ?? ""}${person.phone}`.replace(/\s+/g, "")
-    : null;
-  const waMessage = viewerName
-    ? `Hi, I'm ${viewerName}${metAtLabel ? ` — we met at ${metAtLabel}` : ""} 👋`
-    : `Hi${metAtLabel ? ` — we met at ${metAtLabel}` : "!"} 👋`;
-  const waHref = whatsappHref(person.phone_dial_code, person.phone, waMessage);
-  const igHref = instagramHref(person.instagram);
-  const twHref = xHref(person.twitter);
 
   const [saved, setSaved] = useState(person.saved);
   const [saveBusy, setSaveBusy] = useState(false);
@@ -273,135 +262,10 @@ export function PersonCard({
         </div>
       )}
 
-      {/* Sleek, bare contact actions — a hairline divider then small muted glyphs
-          that lift + colour on hover. Each glyph stays ~18px but carries an
-          invisible padded hit-area (~38px) so it's still thumb-friendly on mobile,
-          and is labelled (aria + desktop tooltip) so dropping the text stays clear. */}
-      <div className="mt-4 flex flex-wrap items-center justify-center gap-1 border-t border-border/60 pt-2.5">
-        <ActionIcon
-          label="Add to contacts"
-          title="Save to your phone's contacts"
-          onClick={() =>
-            saveContact(
-              {
-                ...person,
-                phone_full: whatsappNumber,
-                instagram: person.instagram,
-                twitter: person.twitter,
-                email: person.email,
-              },
-              metAtLabel,
-            )
-          }
-        >
-          <UserPlus className="h-[18px] w-[18px]" aria-hidden />
-        </ActionIcon>
-        {waHref && (
-          <ActionIcon label={`Message ${person.name} on WhatsApp`} title="WhatsApp" href={waHref}>
-            <WhatsAppGlyph className="h-[18px] w-[18px]" />
-          </ActionIcon>
-        )}
-        {person.email && <MailAction email={person.email} name={person.name} />}
-        {igHref && (
-          <ActionIcon label={`${person.name} on Instagram`} title={atHandle(person.instagram, "instagram.com")} href={igHref}>
-            <Instagram className="h-[18px] w-[18px]" aria-hidden />
-          </ActionIcon>
-        )}
-        {twHref && (
-          <ActionIcon label={`${person.name} on X`} title={atHandle(person.twitter, "x.com")} href={twHref}>
-            <XGlyph className="h-[18px] w-[18px]" />
-          </ActionIcon>
-        )}
-        {person.linkedin_url && (
-          <ActionIcon label={`${person.name} on LinkedIn`} href={person.linkedin_url}>
-            <Linkedin className="h-[18px] w-[18px]" aria-hidden />
-          </ActionIcon>
-        )}
-        {person.website_url && (
-          <ActionIcon label={`${person.name}'s website`} href={person.website_url}>
-            <Globe className="h-[18px] w-[18px]" aria-hidden />
-          </ActionIcon>
-        )}
-      </div>
+      <ContactActions person={person} viewerName={viewerName} eventName={metAtLabel} className="mt-4" />
 
       <NoteEditor eventId={eventId} targetId={person.attendee_id} initial={person.note} />
     </li>
-  );
-}
-
-/**
- * A bare contact action glyph — renders as a link (external contact URLs) or a
- * button (vCard download). No border/background; the small icon lifts, scales and
- * brightens to the app accent on hover — one unified colour keeps the row cohesive
- * rather than a multi-brand rainbow. Padding gives it a ~38px hit-area so the tiny
- * glyph is still thumb-friendly.
- */
-function ActionIcon({
-  label,
-  title,
-  href,
-  onClick,
-  children,
-}: {
-  label: string;
-  title?: string;
-  href?: string;
-  onClick?: () => void;
-  children: React.ReactNode;
-}) {
-  const cls =
-    "inline-flex items-center justify-center rounded-md p-2.5 text-muted-foreground transition-[color,transform] duration-200 ease-out hover:-translate-y-0.5 hover:scale-110 hover:text-accent active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-  if (href) {
-    return (
-      <a href={href} target="_blank" rel="noopener noreferrer" aria-label={label} title={title ?? label} className={cls}>
-        {children}
-      </a>
-    );
-  }
-  return (
-    <button type="button" onClick={onClick} aria-label={label} title={title ?? label} className={cls}>
-      {children}
-    </button>
-  );
-}
-
-/**
- * Email action. One tap copies the address (works everywhere, unlike a `mailto:`
- * that dead-ends on a phone with no mail app configured) and briefly flips the
- * glyph to a check. Right-click / long-press still gets the native "copy link"
- * on the hidden mailto for anyone who wants to compose instead.
- */
-function MailAction({ email, name }: { email: string; name: string }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(email);
-    } catch {
-      // Clipboard blocked (insecure context / permissions) — fall back to a prompt
-      // so the address is still selectable/copyable by hand.
-      window.prompt("Copy this email address:", email);
-      return;
-    }
-    setCopied(true);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setCopied(false), 1400);
-  }
-
-  const cls =
-    "inline-flex items-center justify-center rounded-md p-2.5 text-muted-foreground transition-[color,transform] duration-200 ease-out hover:-translate-y-0.5 hover:scale-110 hover:text-accent active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-  return (
-    <button
-      type="button"
-      onClick={copy}
-      aria-label={copied ? `${name}'s email copied` : `Copy ${name}'s email`}
-      title={copied ? "Copied!" : email}
-      className={cn(cls, copied && "text-success hover:text-success")}
-    >
-      {copied ? <Check className="h-[18px] w-[18px]" aria-hidden /> : <Mail className="h-[18px] w-[18px]" aria-hidden />}
-    </button>
   );
 }
 

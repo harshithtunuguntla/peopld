@@ -7,3 +7,10 @@
  * clearly-labelled, disabled **Beta** until this is set to "true".
  */
 export const AI_ENABLED = process.env.NEXT_PUBLIC_AI_ENABLED === "true";
+
+/**
+ * Emailing a copy of your rolodex to yourself (needs the SMTP sender wired up).
+ * OFF by default — until the mail transport is configured the UI shows the action
+ * as a clearly-labelled, disabled **Coming soon** so nobody hits a dead send.
+ */
+export const EMAIL_ENABLED = process.env.NEXT_PUBLIC_EMAIL_ENABLED === "true";

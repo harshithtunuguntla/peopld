@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Globe, Linkedin, Instagram, Mail, Check, UserPlus } from "lucide-react";
+import { Globe, Linkedin, Instagram, Mail, Check, Contact } from "lucide-react";
 
 import { WhatsAppGlyph, XGlyph } from "@/components/brand/glyphs";
 import { whatsappHref, instagramHref, xHref, atHandle } from "@/lib/url";
@@ -77,9 +77,12 @@ export function ContactActions({
       )}
     >
       {showAddToContacts && (
-        <ActionIcon
-          label="Add to contacts"
-          title="Save to your phone's contacts"
+        // The primary action — and the one that ISN'T a recognizable brand mark,
+        // so it carries a visible label (mobile has no hover tooltip to lean on)
+        // and a contact-card icon that reads clearly as "save a contact", distinct
+        // from the person-plus "Want to meet" glyph it used to share.
+        <button
+          type="button"
           onClick={() =>
             saveContact(
               {
@@ -96,9 +99,13 @@ export function ContactActions({
               eventName,
             )
           }
+          aria-label={`Save ${person.name} to your phone's contacts`}
+          title="Save to your phone's contacts"
+          className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-2 text-xs font-medium text-muted-foreground transition-[color,border-color,transform] duration-200 ease-out hover:-translate-y-0.5 hover:border-accent/40 hover:text-accent active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <UserPlus className="h-[18px] w-[18px]" aria-hidden />
-        </ActionIcon>
+          <Contact className="h-4 w-4" aria-hidden />
+          Save contact
+        </button>
       )}
       {waHref && (
         <ActionIcon label={`Message ${person.name} on WhatsApp`} title="WhatsApp" href={waHref}>

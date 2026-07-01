@@ -4,10 +4,11 @@ import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
-import { ArrowLeft, Loader2, Heart, Sparkles, Users, Bookmark, UserCheck, Mail, Check, TrendingUp, ChevronDown } from "lucide-react";
+import { ArrowLeft, Loader2, Heart, Sparkles, Users, Bookmark, UserCheck, Mail, Check, TrendingUp, ChevronDown, Clock } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
+import { EMAIL_ENABLED } from "@/lib/features";
 import { LiveShell } from "@/components/live/live-screens";
 import { PersonCard, groupByPerson, type Connection, type Person } from "@/components/connections/person-card";
 import { SearchBox } from "@/components/connections/search-box";
@@ -205,29 +206,46 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
           ) : (
             <>
               <div className="mt-4 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={emailList}
-                  disabled={emailState === "sending" || emailState === "sent"}
-                  className={cn(
-                    "inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium transition-colors disabled:opacity-70",
-                    emailState === "sent"
-                      ? "border-success/40 bg-success/10 text-success"
-                      : "border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground",
-                  )}
-                >
-                  {emailState === "sending" ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                  ) : emailState === "sent" ? (
-                    <Check className="h-3.5 w-3.5" aria-hidden />
-                  ) : (
-                    <Mail className="h-3.5 w-3.5" aria-hidden />
-                  )}
-                  {emailState === "sent" ? "Emailed to you" : "Email me this list"}
-                </button>
-                {emailMsg && (
-                  <span className={cn("text-xs", emailState === "error" ? "text-destructive" : "text-muted-foreground")}>
-                    {emailMsg}
+                {EMAIL_ENABLED ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={emailList}
+                      disabled={emailState === "sending" || emailState === "sent"}
+                      className={cn(
+                        "inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium transition-colors disabled:opacity-70",
+                        emailState === "sent"
+                          ? "border-success/40 bg-success/10 text-success"
+                          : "border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground",
+                      )}
+                    >
+                      {emailState === "sending" ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                      ) : emailState === "sent" ? (
+                        <Check className="h-3.5 w-3.5" aria-hidden />
+                      ) : (
+                        <Mail className="h-3.5 w-3.5" aria-hidden />
+                      )}
+                      {emailState === "sent" ? "Emailed to you" : "Email me this list"}
+                    </button>
+                    {emailMsg && (
+                      <span className={cn("text-xs", emailState === "error" ? "text-destructive" : "text-muted-foreground")}>
+                        {emailMsg}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  // SMTP isn't wired yet — show the feature as clearly "coming soon"
+                  // and disabled rather than letting a tap hit a dead send.
+                  <span
+                    className="inline-flex h-9 cursor-not-allowed items-center gap-1.5 rounded-full border border-dashed border-border px-3.5 text-sm font-medium text-muted-foreground/70"
+                    title="Emailing your list is coming soon"
+                  >
+                    <Clock className="h-3.5 w-3.5" aria-hidden />
+                    Email me this list
+                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Soon
+                    </span>
                   </span>
                 )}
               </div>

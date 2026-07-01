@@ -7,6 +7,11 @@ export interface VCardPerson {
   company?: string | null;
   linkedin_url?: string | null;
   website_url?: string | null;
+  email?: string | null;
+  /** Full international WhatsApp/phone number (dial code + local), digits ok. */
+  phone_full?: string | null;
+  instagram?: string | null;
+  twitter?: string | null;
 }
 
 /** Escape per RFC 6350: backslash, comma, semicolon, and newlines. */
@@ -18,8 +23,12 @@ export function buildVCard(p: VCardPerson, metAt?: string): string {
   const lines = ["BEGIN:VCARD", "VERSION:3.0", `FN:${esc(p.name)}`];
   if (p.company) lines.push(`ORG:${esc(p.company)}`);
   if (p.role) lines.push(`TITLE:${esc(p.role)}`);
+  if (p.email) lines.push(`EMAIL;TYPE=INTERNET:${esc(p.email)}`);
+  if (p.phone_full) lines.push(`TEL;TYPE=CELL:${esc(p.phone_full)}`);
   if (p.website_url) lines.push(`URL:${esc(p.website_url)}`);
   if (p.linkedin_url) lines.push(`URL;TYPE=LinkedIn:${esc(p.linkedin_url)}`);
+  if (p.instagram) lines.push(`X-SOCIALPROFILE;TYPE=instagram:${esc(p.instagram)}`);
+  if (p.twitter) lines.push(`X-SOCIALPROFILE;TYPE=twitter:${esc(p.twitter)}`);
   const note = metAt ? `Met at ${metAt}` : "Met via Peopld";
   lines.push(`NOTE:${esc(note)}`);
   lines.push("END:VCARD");

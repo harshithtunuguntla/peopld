@@ -43,6 +43,7 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
   const [data, setData] = useState<ConnectionsResp | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [meId, setMeId] = useState<string | null>(null);
+  const [eventName, setEventName] = useState<string | null>(null);
   const [emailState, setEmailState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [emailMsg, setEmailMsg] = useState<string | null>(null);
 
@@ -66,6 +67,10 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
         const conns = await apiFetch<ConnectionsResp>(
           `/events/${eventId}/attendees/${me.id}/connections`,
         );
+        // The event name is only needed for the WhatsApp intro line — best-effort.
+        apiFetch<{ name: string }>(`/events/${eventId}`)
+          .then((ev) => { if (!cancelled) setEventName(ev.name); })
+          .catch(() => {});
         if (!cancelled) {
           setMeId(me.id);
           setData(conns);
@@ -83,6 +88,10 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
   }, [user, eventId, router]);
 
   const people = useMemo(() => (data ? groupByPerson(data.connections) : []), [data]);
+  const viewerName =
+    (user?.user_metadata?.full_name as string | undefined) ??
+    (user?.user_metadata?.name as string | undefined) ??
+    undefined;
 
   // Saved-contacts filter. Seed the set from the snapshot, then keep it in sync as
   // cards are bookmarked/un-bookmarked so the "Saved" view updates live.
@@ -254,7 +263,15 @@ export default function ConnectionsPage({ params }: { params: Promise<{ eventId:
               ) : (
                 <ul className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {visible.map((p) => (
-                    <PersonCard key={p.attendee_id} person={p} eventId={eventId} onSavedChange={handleSavedChange} highlight={terms} />
+                    <PersonCard
+                      key={p.attendee_id}
+                      person={p}
+                      eventId={eventId}
+                      onSavedChange={handleSavedChange}
+                      highlight={terms}
+                      viewerName={viewerName}
+                      eventName={eventName ?? undefined}
+                    />
                   ))}
                 </ul>
               )}

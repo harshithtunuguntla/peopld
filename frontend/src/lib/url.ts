@@ -36,3 +36,53 @@ export function normalizeUrl(raw: string | null | undefined): string | null {
 export function isAcceptableUrl(raw: string | null | undefined): boolean {
   return (raw ?? "").trim() === "" || normalizeUrl(raw) !== null;
 }
+
+/**
+ * Contact-handle helpers. People paste a handle ("@maya"), a bare
+ * ("instagram.com/maya"), or a full URL — we accept all and extract the handle
+ * so we can both display "@maya" and build a canonical profile link.
+ */
+
+/** Pull the handle out of whatever the user typed for a social profile. */
+export function socialHandle(raw: string | null | undefined, host: string): string {
+  let v = (raw ?? "").trim();
+  if (!v) return "";
+  // Strip a full/partial URL down to the path segment after the host.
+  const m = v.match(new RegExp(`${host.replace(".", "\\.")}/([^/?#\\s]+)`, "i"));
+  if (m) v = m[1];
+  return v.replace(/^@+/, "").replace(/[/?#\s]+.*$/, "").trim();
+}
+
+export function instagramHref(raw: string | null | undefined): string | null {
+  const h = socialHandle(raw, "instagram.com");
+  return h ? `https://instagram.com/${h}` : null;
+}
+
+export function xHref(raw: string | null | undefined): string | null {
+  // Accept either x.com or twitter.com input; always link to x.com.
+  const h = socialHandle(raw, "x.com") || socialHandle(raw, "twitter.com");
+  return h ? `https://x.com/${h}` : null;
+}
+
+/** "@maya" for display, from any accepted input. */
+export function atHandle(raw: string | null | undefined, host = "instagram.com"): string {
+  const h = socialHandle(raw, host) || (raw ?? "").trim().replace(/^@+/, "");
+  return h ? `@${h}` : "";
+}
+
+/**
+ * A wa.me deep link with a prefilled message. WhatsApp requires a full
+ * international number (country code + local, digits only), which is why we
+ * store a dial code alongside the number — a bare local number produces a broken
+ * link. Returns null when there's no number.
+ */
+export function whatsappHref(
+  dialCode: string | null | undefined,
+  phone: string | null | undefined,
+  message?: string,
+): string | null {
+  const digits = `${dialCode ?? ""}${phone ?? ""}`.replace(/\D/g, "");
+  if (!digits) return null;
+  const text = message ? `?text=${encodeURIComponent(message)}` : "";
+  return `https://wa.me/${digits}${text}`;
+}

@@ -197,6 +197,14 @@ class AttendeeCreate(BaseModel):
     looking_for: Optional[str] = None
     linkedin_url: Optional[str] = None
     website_url: Optional[str] = None  # personal site / product link
+    # Personal contact channels (all optional). `phone` is the WhatsApp number;
+    # `phone_visible` is the owner's opt-in for showing it to everyone at the event
+    # (default off — see migration 028). instagram/twitter are open like the links.
+    phone: Optional[str] = None
+    phone_dial_code: Optional[str] = None  # e.g. "+91" — combined with `phone` for the wa.me link
+    phone_visible: bool = False
+    instagram: Optional[str] = None
+    twitter: Optional[str] = None  # X handle / url
     interests: list[str] = []  # conversation-seed tags; shared ones highlight on cards
     avatar_url: Optional[str] = None  # OAuth profile photo, captured client-side at registration
     access_code: Optional[str] = None  # required iff the event has one; verified server-side, not stored on the attendee
@@ -215,6 +223,11 @@ class AttendeeProfileDefaults(BaseModel):
     looking_for: Optional[str] = None
     linkedin_url: Optional[str] = None
     website_url: Optional[str] = None
+    phone: Optional[str] = None
+    phone_dial_code: Optional[str] = None
+    phone_visible: bool = False
+    instagram: Optional[str] = None
+    twitter: Optional[str] = None
     interests: list[str] = []
 
 
@@ -230,6 +243,11 @@ class MyProfileUpdate(BaseModel):
     looking_for: Optional[str] = None
     linkedin_url: Optional[str] = None
     website_url: Optional[str] = None
+    phone: Optional[str] = None
+    phone_dial_code: Optional[str] = None
+    phone_visible: bool = False
+    instagram: Optional[str] = None
+    twitter: Optional[str] = None
     interests: list[str] = []
     avatar_url: Optional[str] = None
 
@@ -250,6 +268,11 @@ class MyProfileResponse(BaseModel):
     looking_for: Optional[str] = None
     linkedin_url: Optional[str] = None
     website_url: Optional[str] = None
+    phone: Optional[str] = None
+    phone_dial_code: Optional[str] = None
+    phone_visible: bool = False
+    instagram: Optional[str] = None
+    twitter: Optional[str] = None
     interests: list[str] = []
     avatar_url: Optional[str] = None
     # True once name + role exist (saved global profile, or derived from a prior
@@ -297,6 +320,11 @@ class AttendeeSelfUpdate(BaseModel):
     looking_for: Optional[str] = None
     linkedin_url: Optional[str] = None
     website_url: Optional[str] = None
+    phone: Optional[str] = None
+    phone_dial_code: Optional[str] = None
+    phone_visible: Optional[bool] = None
+    instagram: Optional[str] = None
+    twitter: Optional[str] = None
     interests: Optional[list[str]] = None
     show_in_directory: Optional[bool] = None  # opt in/out of the public pre-event list
 
@@ -312,6 +340,11 @@ class AttendeeResponse(BaseModel):
     looking_for: Optional[str]
     linkedin_url: Optional[str]
     website_url: Optional[str] = None
+    phone: Optional[str] = None
+    phone_dial_code: Optional[str] = None
+    phone_visible: bool = False
+    instagram: Optional[str] = None
+    twitter: Optional[str] = None
     interests: list[str] = []
     avatar_url: Optional[str] = None
     show_in_directory: bool = True
@@ -666,6 +699,15 @@ class ConnectionEntry(BaseModel):
     looking_for: Optional[str] = None
     linkedin_url: Optional[str] = None
     website_url: Optional[str] = None
+    # Personal contact channels. `phone`/`phone_dial_code` are ONLY populated when
+    # the owner opted into visibility (phone_visible) — the API is the enforcement
+    # point, so a hidden number never leaves the server. instagram/twitter/email
+    # are shown to anyone in the caller's rolodex (like the professional links).
+    phone: Optional[str] = None
+    phone_dial_code: Optional[str] = None
+    instagram: Optional[str] = None
+    twitter: Optional[str] = None
+    email: Optional[str] = None
     avatar_url: Optional[str] = None
     interests: list[str] = []
     shared_interests: list[str] = []  # tags the caller and this person both picked
@@ -713,6 +755,11 @@ class MyConnectionCard(BaseModel):
     looking_for: Optional[str] = None
     linkedin_url: Optional[str] = None
     website_url: Optional[str] = None
+    phone: Optional[str] = None
+    phone_dial_code: Optional[str] = None
+    instagram: Optional[str] = None
+    twitter: Optional[str] = None
+    email: Optional[str] = None
     avatar_url: Optional[str] = None
     interests: list[str] = []
     shared_interests: list[str] = []

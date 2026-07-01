@@ -171,7 +171,7 @@ def fetch_my_attendee(db: Client, event_id: str, user_id: str) -> dict | None:
 
 PROFILE_FIELDS = (
     "name, role, company, description, looking_for, linkedin_url, website_url, "
-    "interests, avatar_url"
+    "phone, phone_dial_code, phone_visible, instagram, twitter, interests, avatar_url"
 )
 
 
@@ -210,6 +210,11 @@ def fetch_profile_defaults(db: Client, user_id: str) -> dict:
         "looking_for": source.get("looking_for"),
         "linkedin_url": source.get("linkedin_url"),
         "website_url": source.get("website_url"),
+        "phone": source.get("phone"),
+        "phone_dial_code": source.get("phone_dial_code") or "+91",
+        "phone_visible": bool(source.get("phone_visible", False)),
+        "instagram": source.get("instagram"),
+        "twitter": source.get("twitter"),
         "interests": source.get("interests") or [],
         "avatar_url": source.get("avatar_url"),
         "complete": bool((source.get("name") or "").strip() and (source.get("role") or "").strip()),

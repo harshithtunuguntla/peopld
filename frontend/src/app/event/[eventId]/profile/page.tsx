@@ -4,7 +4,7 @@ import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
-import { ArrowLeft, Check, Globe, Loader2 } from "lucide-react";
+import { ArrowLeft, Check, Globe, Loader2, Instagram } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
@@ -13,9 +13,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
+import { Switch } from "@/components/ui/switch";
+import { PhoneField } from "@/components/ui/phone-field";
 import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
-import { LinkedInGlyph } from "@/components/brand/glyphs";
+import { LinkedInGlyph, XGlyph, WhatsAppGlyph } from "@/components/brand/glyphs";
 import { normalizeUrl } from "@/lib/url";
+import { DEFAULT_DIAL_CODE, dialCodeMeta } from "@/lib/dial-codes";
 
 interface Me {
   id: string;
@@ -26,6 +29,11 @@ interface Me {
   looking_for: string | null;
   linkedin_url: string | null;
   website_url: string | null;
+  phone: string | null;
+  phone_dial_code: string | null;
+  phone_visible: boolean;
+  instagram: string | null;
+  twitter: string | null;
   interests: string[];
 }
 
@@ -120,6 +128,11 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
     looking_for: me.looking_for ?? "",
     linkedin_url: me.linkedin_url ?? "",
     website_url: me.website_url ?? "",
+    phone: me.phone ?? "",
+    phone_dial_code: me.phone_dial_code || DEFAULT_DIAL_CODE,
+    phone_visible: me.phone_visible ?? false,
+    instagram: me.instagram ?? "",
+    twitter: me.twitter ?? "",
     interests: me.interests ?? [],
   });
   const [busy, setBusy] = useState(false);
@@ -161,6 +174,11 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
           looking_for: form.looking_for.trim() || null,
           linkedin_url: linkedin,
           website_url: website,
+          phone: form.phone.replace(/\s+/g, "").trim() || null,
+          phone_dial_code: form.phone_dial_code || null,
+          phone_visible: form.phone_visible,
+          instagram: form.instagram.trim() || null,
+          twitter: form.twitter.trim() || null,
           interests: form.interests,
         }),
       });
@@ -226,6 +244,49 @@ function ProfileForm({ eventId, me }: { eventId: string; me: Me }) {
           <Input {...p} type="url" inputMode="url" startIcon={<Globe className="h-4 w-4" aria-hidden />} value={form.website_url} onChange={set("website_url")} placeholder="yourproduct.com" />
         )}
       </Field>
+
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <Field label="Instagram" name="p-instagram">
+          {(p) => <Input {...p} startIcon={<Instagram className="h-4 w-4" aria-hidden />} value={form.instagram} onChange={set("instagram")} placeholder="@yourhandle" />}
+        </Field>
+        <Field label="X" name="p-twitter">
+          {(p) => <Input {...p} startIcon={<XGlyph className="h-3.5 w-3.5" />} value={form.twitter} onChange={set("twitter")} placeholder="@yourhandle" />}
+        </Field>
+      </div>
+
+      <Field label="WhatsApp / phone" name="p-phone" hint="People you connect with can message you here.">
+        {(p) => (
+          <PhoneField
+            {...p}
+            dialCode={form.phone_dial_code}
+            phone={form.phone}
+            onDialChange={(code) => { setForm((f) => ({ ...f, phone_dial_code: code })); setSaved(false); }}
+            onPhoneChange={set("phone")}
+          />
+        )}
+      </Field>
+
+      {form.phone.trim() && (
+        <label htmlFor="p-phone-visible" className="-mt-2 flex items-start justify-between gap-3 rounded-xl border border-border bg-secondary/40 px-3.5 py-3">
+          <span className="flex items-start gap-2.5">
+            <WhatsAppGlyph className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <span>
+              <span className="block text-sm font-medium text-foreground">Let everyone at this event see my number</span>
+              <span className="block text-xs text-muted-foreground">
+                {form.phone_visible
+                  ? `Anyone at the event can WhatsApp you on ${dialCodeMeta(form.phone_dial_code).code} ${form.phone.trim()}.`
+                  : "Off — your number stays private and won't appear on your card."}
+              </span>
+            </span>
+          </span>
+          <Switch
+            id="p-phone-visible"
+            checked={form.phone_visible}
+            onChange={(nextVal) => { setForm((f) => ({ ...f, phone_visible: nextVal })); setSaved(false); }}
+            ariaLabel="Let everyone at this event see my phone number"
+          />
+        </label>
+      )}
 
       {error && (
         <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">

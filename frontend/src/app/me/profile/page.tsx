@@ -4,18 +4,21 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
-import { ArrowLeft, Check, Globe, Loader2 } from "lucide-react";
+import { ArrowLeft, Check, Globe, Loader2, Instagram } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
 import { isAcceptableUrl, normalizeUrl } from "@/lib/url";
+import { dialCodeMeta } from "@/lib/dial-codes";
 import { cleanDefaults, type RegisterValues } from "@/components/auth/register-form";
 import { Wordmark } from "@/components/brand/wordmark";
 import { AuroraBackground } from "@/components/brand/aurora-background";
-import { LinkedInGlyph } from "@/components/brand/glyphs";
+import { LinkedInGlyph, XGlyph, WhatsAppGlyph } from "@/components/brand/glyphs";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { PhoneField } from "@/components/ui/phone-field";
 import { TagInput, INTEREST_SUGGESTIONS } from "@/components/ui/tag-input";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -190,6 +193,11 @@ function ProfileForm({
           looking_for: form.looking_for.trim() || null,
           linkedin_url: normalizeUrl(form.linkedin_url),
           website_url: normalizeUrl(form.website_url),
+          phone: form.phone.replace(/\s+/g, "").trim() || null,
+          phone_dial_code: form.phone_dial_code || null,
+          phone_visible: form.phone_visible,
+          instagram: form.instagram.trim() || null,
+          twitter: form.twitter.trim() || null,
           interests: form.interests,
         }),
       });
@@ -287,6 +295,53 @@ function ProfileForm({
           />
         )}
       </Field>
+
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <Field label="Instagram" name="draft-instagram">
+          {(p) => (
+            <Input {...p} startIcon={<Instagram className="h-4 w-4" aria-hidden />} value={form.instagram} onChange={set("instagram")} placeholder="@yourhandle" />
+          )}
+        </Field>
+        <Field label="X" name="draft-twitter">
+          {(p) => (
+            <Input {...p} startIcon={<XGlyph className="h-3.5 w-3.5" />} value={form.twitter} onChange={set("twitter")} placeholder="@yourhandle" />
+          )}
+        </Field>
+      </div>
+
+      <Field label="WhatsApp / phone" name="draft-phone" hint="People you connect with can message you here.">
+        {(p) => (
+          <PhoneField
+            {...p}
+            dialCode={form.phone_dial_code}
+            phone={form.phone}
+            onDialChange={(code) => { setForm((c) => ({ ...c, phone_dial_code: code })); setSaved(false); }}
+            onPhoneChange={set("phone")}
+          />
+        )}
+      </Field>
+
+      {form.phone.trim() && (
+        <label htmlFor="draft-phone-visible" className="-mt-2 flex items-start justify-between gap-3 rounded-xl border border-border bg-secondary/40 px-3.5 py-3">
+          <span className="flex items-start gap-2.5">
+            <WhatsAppGlyph className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <span>
+              <span className="block text-sm font-medium text-foreground">Let everyone at your events see my number</span>
+              <span className="block text-xs text-muted-foreground">
+                {form.phone_visible
+                  ? `People can WhatsApp you on ${dialCodeMeta(form.phone_dial_code).code} ${form.phone.trim()}.`
+                  : "Off — your number stays private and won't appear on your card."}
+              </span>
+            </span>
+          </span>
+          <Switch
+            id="draft-phone-visible"
+            checked={form.phone_visible}
+            onChange={(nextVal) => { setForm((c) => ({ ...c, phone_visible: nextVal })); setSaved(false); }}
+            ariaLabel="Let everyone at your events see my phone number"
+          />
+        </label>
+      )}
 
       {error && (
         <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">

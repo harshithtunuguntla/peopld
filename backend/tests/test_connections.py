@@ -132,6 +132,64 @@ def test_connections_surfaces_unmet_pick(client, db, event):
     assert entries[0]["met"] is False
 
 
+def test_connections_gate_phone_by_visibility(client, db, event):
+    """The WhatsApp number is only exposed when its OWNER opted in (phone_visible).
+    Instagram / X / email are open like the professional links. Enforced in the
+    API so a hidden number never ships to the client."""
+    me = make_attendee(db, event["id"], name="Me", user_id=ATTENDEE_USER_ID)
+    shy = make_attendee(
+        db, event["id"], name="Shy",
+        phone="9990001111", phone_dial_code="+91", phone_visible=False,
+        instagram="shy_ig", twitter="shy_x", email="shy@x.com",
+    )
+    open_ = make_attendee(
+        db, event["id"], name="Open",
+        phone="8887776666", phone_dial_code="+1", phone_visible=True,
+        instagram="open_ig", email="open@x.com",
+    )
+    r1 = make_round(db, event["id"], round_number=1, status="completed")
+    for a in (me, shy, open_):
+        make_assignment(db, event["id"], r1["id"], a["id"], 1)
+
+    entries = client.get(
+        f"/events/{event['id']}/attendees/{me['id']}/connections",
+        headers=ATTENDEE_AUTH,
+    ).json()["connections"]
+    by_name = {e["name"]: e for e in entries}
+
+    # Hidden number: withheld. Open channels still present.
+    assert by_name["Shy"]["phone"] is None
+    assert by_name["Shy"]["phone_dial_code"] is None
+    assert by_name["Shy"]["instagram"] == "shy_ig"
+    assert by_name["Shy"]["twitter"] == "shy_x"
+    assert by_name["Shy"]["email"] == "shy@x.com"
+
+    # Opted-in number: exposed with its dial code.
+    assert by_name["Open"]["phone"] == "8887776666"
+    assert by_name["Open"]["phone_dial_code"] == "+1"
+    assert by_name["Open"]["email"] == "open@x.com"
+
+
+def test_registration_captures_email_and_contacts(client, db, event):
+    """Registering stores the account email + contact channels on the attendee so
+    the rolodex can show them (email without a per-view auth lookup)."""
+    body = client.post(
+        f"/events/{event['id']}/attendees",
+        headers=ATTENDEE_AUTH,
+        json={
+            "name": "Neha", "role": "PM",
+            "phone": "9998887777", "phone_dial_code": "+91", "phone_visible": True,
+            "instagram": "@neha", "twitter": "@neha_x",
+        },
+    )
+    assert body.status_code == 201
+    row = db.table("attendees").select("*").eq("id", body.json()["id"]).execute().data[0]
+    assert row["email"]  # captured from the auth identity
+    assert row["phone"] == "9998887777"
+    assert row["phone_visible"] is True
+    assert row["instagram"] == "@neha"
+
+
 def test_connections_repeat_pairing_counts_once(client, db, event):
     # Met the same person in two rounds → 2 entries, but 1 unique person
     me = make_attendee(db, event["id"], name="Me", user_id=ATTENDEE_USER_ID)

@@ -32,6 +32,11 @@ interface ApiCard {
   looking_for: string | null;
   linkedin_url: string | null;
   website_url: string | null;
+  phone: string | null;
+  phone_dial_code: string | null;
+  instagram: string | null;
+  twitter: string | null;
+  email: string | null;
   avatar_url: string | null;
   interests: string[];
   shared_interests: string[];
@@ -83,6 +88,11 @@ function toPerson(c: ApiCard): Person {
     looking_for: c.looking_for,
     linkedin_url: c.linkedin_url,
     website_url: c.website_url,
+    phone: c.phone,
+    phone_dial_code: c.phone_dial_code,
+    instagram: c.instagram,
+    twitter: c.twitter,
+    email: c.email,
     avatar_url: c.avatar_url,
     interests: c.interests ?? [],
     shared_interests: c.shared_interests ?? [],
@@ -156,6 +166,10 @@ export default function MyConnectionsPage() {
   }, [user, page, debouncedQuery, eventFilter, relFilter]);
 
   const terms = useMemo(() => tokenize(debouncedQuery), [debouncedQuery]);
+  const viewerName =
+    (user?.user_metadata?.full_name as string | undefined) ??
+    (user?.user_metadata?.name as string | undefined) ??
+    undefined;
   const profileEventId = data?.events[0]?.id ?? null;
   const hasAny = (data?.rel_counts.all ?? 0) > 0;
 
@@ -254,7 +268,7 @@ export default function MyConnectionsPage() {
                         to the tallest and leave dead space. Columns pack them tightly. */}
                     <ul className={cn("mt-5 columns-1 gap-x-3 transition-opacity sm:columns-2 [&>li]:mb-3 [&>li]:break-inside-avoid", loading && "opacity-60")}>
                       {data.connections.map((c) => (
-                        <PersonCard key={`${c.event_id}-${c.attendee_id}`} person={toPerson(c)} eventId={c.event_id} highlight={terms} />
+                        <PersonCard key={`${c.event_id}-${c.attendee_id}`} person={toPerson(c)} eventId={c.event_id} highlight={terms} viewerName={viewerName} />
                       ))}
                     </ul>
                     <Pagination

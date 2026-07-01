@@ -90,6 +90,10 @@ def register_attendee(
     row["event_id"] = event_id
     row["status"] = "arrived" if auto_arrive else "registered"
     row["user_id"] = user.id
+    # Capture the account's sign-in email on the attendee row so the rolodex can
+    # show it as a contact channel without a per-view auth lookup. Owner-scoped to
+    # this event's connections; never surfaced on the public directory.
+    row["email"] = user.email
 
     result = db.table("attendees").insert(row).execute()
     created = result.data[0]
@@ -108,6 +112,11 @@ def register_attendee(
             "looking_for": created.get("looking_for"),
             "linkedin_url": created.get("linkedin_url"),
             "website_url": created.get("website_url"),
+            "phone": created.get("phone"),
+            "phone_dial_code": created.get("phone_dial_code"),
+            "phone_visible": created.get("phone_visible", False),
+            "instagram": created.get("instagram"),
+            "twitter": created.get("twitter"),
             "interests": created.get("interests") or [],
             "avatar_url": created.get("avatar_url"),
         },
@@ -283,6 +292,11 @@ def update_my_registration(
             "looking_for": updated.get("looking_for"),
             "linkedin_url": updated.get("linkedin_url"),
             "website_url": updated.get("website_url"),
+            "phone": updated.get("phone"),
+            "phone_dial_code": updated.get("phone_dial_code"),
+            "phone_visible": updated.get("phone_visible", False),
+            "instagram": updated.get("instagram"),
+            "twitter": updated.get("twitter"),
             "interests": updated.get("interests") or [],
             "avatar_url": updated.get("avatar_url"),
         },

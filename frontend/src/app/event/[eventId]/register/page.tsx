@@ -15,7 +15,7 @@ import {
 } from "@/components/auth";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
-import { loadProfileDraft, saveProfileDraft } from "@/lib/profile-draft";
+import { loadProfileDraft, saveProfileDraft, clearProfileDraft, hasProfileDefaults } from "@/lib/profile-draft";
 import { supabase } from "@/lib/supabase";
 
 interface EventSummary {
@@ -164,7 +164,6 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
     setError(null);
     setBusy(true);
     try {
-      saveProfileDraft(signedInUser.id, values);
       const attendee = await apiFetch<AttendeeResponse>(`/events/${eventId}/attendees`, {
         method: "POST",
         body: JSON.stringify({
@@ -175,6 +174,11 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
           looking_for: values.looking_for || null,
           linkedin_url: values.linkedin_url || null,
           website_url: values.website_url || null,
+          phone: values.phone || null,
+          phone_dial_code: values.phone_dial_code || null,
+          phone_visible: values.phone_visible,
+          instagram: values.instagram || null,
+          twitter: values.twitter || null,
           interests: values.interests,
           // Capture the OAuth (Google) profile photo so name cards show a face.
           avatar_url:
@@ -184,6 +188,9 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
           access_code: verifiedCode || null,
         }),
       });
+      // Registration succeeded — the interrupted-fill recovery buffer is no longer
+      // needed; the synced global profile is the prefill source from here on.
+      clearProfileDraft(signedInUser.id);
       router.push(`/event/${eventId}/live`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Registration failed";
@@ -308,11 +315,18 @@ export default function RegisterPage({ params }: { params: Promise<{ eventId: st
         onSubmit={handleRegister}
         busy={busy}
         error={error}
-        defaultValues={profileDefaults}
+        // Seed from the locally-saved draft when it has content — it's the most
+        // recent thing the user typed (autosaved below), so an interrupted fill
+        // (tab-switch/eviction) is restored instead of reset to the server profile.
+        defaultValues={(() => {
+          const draft = loadProfileDraft(user.id);
+          return hasProfileDefaults(draft) ? draft : profileDefaults;
+        })()}
         defaultName={
           (user.user_metadata?.full_name as string | undefined) ??
           (user.user_metadata?.name as string | undefined)
         }
+        onAutosave={(v) => saveProfileDraft(user.id, v)}
       />
     </AuthShell>
   );

@@ -185,6 +185,10 @@ def build_connection_entries(
         liked = other_id in i_liked
         their_interests = [str(t) for t in (profile.get("interests") or [])]
         shared = [t for t in their_interests if t.casefold() in my_interest_set]
+        # Privacy gate: the WhatsApp number is only exposed when its OWNER opted in
+        # (`phone_visible`). Enforced here, server-side, so a hidden number never
+        # ships to the client. Instagram/X/email are open like the pro links.
+        phone_visible = bool(profile.get("phone_visible", False))
         return ConnectionEntry(
             attendee_id=profile["id"],
             name=profile["name"],
@@ -193,6 +197,11 @@ def build_connection_entries(
             looking_for=profile.get("looking_for"),
             linkedin_url=profile.get("linkedin_url"),
             website_url=profile.get("website_url"),
+            phone=profile.get("phone") if phone_visible else None,
+            phone_dial_code=profile.get("phone_dial_code") if phone_visible else None,
+            instagram=profile.get("instagram"),
+            twitter=profile.get("twitter"),
+            email=profile.get("email"),
             avatar_url=profile.get("avatar_url"),
             interests=their_interests,
             shared_interests=shared,

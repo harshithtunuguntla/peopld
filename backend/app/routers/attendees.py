@@ -1,19 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+﻿from fastapi import APIRouter, Depends, HTTPException, Response
 from supabase import Client
 
 from app.audit import record_audit
 from app.database import get_supabase
 from app.deps import (
+    AdminContext,
     AuthUser,
+    get_current_admin_ctx,
+    require_event_admin,
     code_matches,
     fetch_access_code,
     fetch_event_or_404,
     fetch_my_attendee,
     fetch_profile_defaults,
     fetch_room_code,
-    get_current_organizer_id,
-    get_current_user,
-    require_event_owner,
     sync_user_profile_best_effort,
 )
 from app.models.schemas import (
@@ -29,6 +29,8 @@ from app.models.schemas import (
 )
 
 router = APIRouter(prefix="/events/{event_id}/attendees", tags=["attendees"])
+
+_admin_ctx = get_current_admin_ctx
 
 
 def _fetch_attendee(db: Client, event_id: str, attendee_id: str) -> dict:
@@ -128,7 +130,7 @@ def register_attendee(
 def add_walkin(
     event_id: str,
     body: WalkInCreate,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Organizer adds an attendee with no app account. Event owner only.
@@ -141,7 +143,7 @@ def add_walkin(
     correctly from the start. Always has no `user_id`.
     """
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
 
     row = body.model_dump(mode="json")  # carries name/role/… plus tag + status
     row["event_id"] = event_id
@@ -151,7 +153,7 @@ def add_walkin(
         db,
         action="attendee.walkin_added",
         entity_type="attendee",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=created["id"],
         metadata={"tag": created.get("tag"), "status": created.get("status")},
@@ -162,7 +164,7 @@ def add_walkin(
 @router.post("/check-in-all", response_model=BulkCheckInResponse)
 def check_in_all(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """One-tap door action: mark every 'registered' attendee 'arrived'.
@@ -172,7 +174,7 @@ def check_in_all(
     Declared before /{attendee_id} so the literal path isn't matched as an id.
     """
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     registered = (
         db.table("attendees")
         .select("*")
@@ -189,7 +191,7 @@ def check_in_all(
             db,
             action="attendee.bulk_checked_in",
             entity_type="event",
-            actor_user_id=organizer_id,
+            actor_user_id=ctx.user_id,
             event_id=event_id,
             entity_id=event_id,
             metadata={"count": len(registered)},
@@ -405,13 +407,13 @@ def update_attendee(
     event_id: str,
     attendee_id: str,
     body: AttendeeUpdate,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Organizer control panel — mark arrived/left, tag, or fix identity details
     (name/role/company/looking_for). Event owner only."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     attendee = _fetch_attendee(db, event_id, attendee_id)
 
     changes = body.model_dump(exclude_none=True)
@@ -444,7 +446,7 @@ def update_attendee(
         db,
         action=action,
         entity_type="attendee",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=attendee_id,
         metadata=metadata,

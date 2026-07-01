@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   CalendarDays,
   Settings,
+  Users,
   Plus,
   Menu,
   X,
@@ -33,6 +34,7 @@ type NavItem = { href: string; label: string; icon: React.ElementType; exact?: b
 const GLOBAL_NAV: NavItem[] = [
   { href: "/organizer/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { href: "/organizer/events", label: "Events", icon: CalendarDays },
+  { href: "/organizer/team", label: "Team", icon: Users },
   { href: "/organizer/settings", label: "Settings", icon: Settings },
 ];
 

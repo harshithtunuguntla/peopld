@@ -998,6 +998,84 @@ class LiveStats(BaseModel):
     rounds_completed: int = 0  # finished rounds → drives the between-rounds "Round X of N" status
 
 
+# --- RBAC / Admin context ---
+
+class OrganizationMembership(BaseModel):
+    organization_id: UUID
+    organization_name: str
+    role: Literal["super_organizer", "organizer"]
+
+
+class UserContextResponse(BaseModel):
+    """Returned by GET /me/context — powers post-login role routing."""
+    user_id: UUID
+    email: Optional[str] = None
+    platform_role: Optional[Literal["super_admin"]] = None
+    memberships: List[OrganizationMembership] = Field(default_factory=list)
+    default_admin_url: Optional[str] = None
+
+
+class OrgMemberAddRequest(BaseModel):
+    email: str
+    role: Literal["super_organizer", "organizer"] = "organizer"
+
+    @field_validator("email")
+    @classmethod
+    def _normalize(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class OrgMemberResponse(BaseModel):
+    user_id: UUID
+    email: Optional[str] = None
+    name: Optional[str] = None
+    role: Literal["super_organizer", "organizer"]
+    created_at: datetime
+
+
+class OrgInvitationResponse(BaseModel):
+    id: UUID
+    organization_id: UUID
+    email: str
+    role: Literal["super_organizer", "organizer"]
+    invited_by_user_id: Optional[UUID] = None
+    accepted_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class OrganizationResponse(BaseModel):
+    id: UUID
+    name: str
+    created_by_user_id: Optional[UUID] = None
+    created_at: datetime
+    member_count: int = 0
+
+
+class AdminSummaryResponse(BaseModel):
+    organizations_total: int
+    events_total: int
+    events_live: int
+    events_upcoming: int
+    events_completed: int
+    attendees_total: int
+    connections_total: int
+
+
+class OrgCreateRequest(BaseModel):
+    name: str
+
+
+class PlatformAdminAddRequest(BaseModel):
+    email: str
+
+
+class PlatformAdminResponse(BaseModel):
+    user_id: UUID
+    email: Optional[str] = None
+    created_at: datetime
+
+
 # --- Book-a-demo (public marketing lead capture) ---
 
 # A pragmatic email check — we don't pull in the email-validator dependency just

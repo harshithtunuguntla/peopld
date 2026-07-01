@@ -7,6 +7,7 @@ from app.audit import record_audit
 from app.realtime import broadcast_event_changed
 from app.database import get_supabase
 from app.deps import (
+    AdminContext,
     AuthUser,
     code_matches,
     fetch_access_code,
@@ -15,9 +16,9 @@ from app.deps import (
     find_event_by_code,
     generate_access_code,
     generate_room_code,
-    get_current_organizer_id,
+    get_current_admin_ctx,
     get_optional_user,
-    require_event_owner,
+    require_event_admin,
 )
 from app.models.schemas import (
     AccessCodeResponse,
@@ -42,6 +43,8 @@ from app.models.schemas import (
 )
 
 router = APIRouter(prefix="/events", tags=["events"])
+
+_admin_ctx = get_current_admin_ctx
 
 
 def _attach_requires_code(db: Client, row: dict) -> dict:
@@ -157,23 +160,48 @@ def list_events(
 
 @router.get("/mine", response_model=list[EventResponse])
 def list_my_events(
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
     include_archived: bool = False,
 ):
-    """Organizer dashboard - all events created by the authenticated organizer.
+    """Organizer dashboard — all events in the caller's organization(s).
 
-    Archived events are hidden by default (dashboard hygiene); pass
-    ?include_archived=true to include them (so they can be unarchived).
+    Platform super admins see all events via /admin/events; this endpoint
+    returns org-scoped events for organizers and super-organizers. Archived
+    events are hidden by default; pass ?include_archived=true to include them.
     """
-    result = (
-        db.table("events")
-        .select("*")
-        .eq("organizer_id", organizer_id)
-        .order("created_at", desc=True)
-        .execute()
-    )
-    rows = result.data or []
+    if ctx.is_platform_admin and not ctx.memberships:
+        # Platform admin with no org — use /admin/events instead
+        rows = (
+            db.table("events").select("*").order("created_at", desc=True).execute().data or []
+        )
+    elif ctx.memberships:
+        org_ids = [m.organization_id for m in ctx.memberships]
+        rows = (
+            db.table("events")
+            .select("*")
+            .in_("organization_id", org_ids)
+            .order("created_at", desc=True)
+            .execute()
+            .data
+            or []
+        )
+        # Legacy fallback: also include events where organizer_id matches but
+        # organization_id isn't set yet (pre-backfill events).
+        legacy = (
+            db.table("events")
+            .select("*")
+            .eq("organizer_id", ctx.user_id)
+            .is_("organization_id", "null")
+            .order("created_at", desc=True)
+            .execute()
+            .data
+            or []
+        )
+        seen_ids = {str(r["id"]) for r in rows}
+        rows += [r for r in legacy if str(r["id"]) not in seen_ids]
+    else:
+        rows = []
     if not include_archived:
         rows = [r for r in rows if not r.get("archived_at")]
     return _attach_requires_code_bulk(db, rows)
@@ -217,16 +245,32 @@ def _pair_round_numbers(
 
 @router.get("/dashboard-summary", response_model=DashboardSummary)
 def dashboard_summary(
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Honest, event-wide aggregates for the organizer dashboard bento — computed
     server-side in a handful of bulk queries (not per-event round-trips). Archived
     events are excluded so the headline numbers match the visible event list."""
-    events = (
-        db.table("events").select("id, status, archived_at").eq("organizer_id", organizer_id).execute().data
-        or []
-    )
+    if ctx.memberships:
+        org_ids = [m.organization_id for m in ctx.memberships]
+        events = (
+            db.table("events").select("id, status, archived_at").in_("organization_id", org_ids).execute().data
+            or []
+        )
+        # Legacy: include owned events not yet in an org
+        legacy = (
+            db.table("events").select("id, status, archived_at")
+            .eq("organizer_id", ctx.user_id).is_("organization_id", "null").execute().data
+            or []
+        )
+        seen_ids = {str(e["id"]) for e in events}
+        events += [e for e in legacy if str(e["id"]) not in seen_ids]
+    elif ctx.is_platform_admin:
+        events = (
+            db.table("events").select("id, status, archived_at").execute().data or []
+        )
+    else:
+        events = []
     events = [e for e in events if not e.get("archived_at")]
     event_ids = [str(e["id"]) for e in events]
 
@@ -288,13 +332,16 @@ def dashboard_summary(
 @router.post("", response_model=EventResponse, status_code=201)
 def create_event(
     body: EventCreate,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     row = body.model_dump(mode="json")
     access_code = row.pop("access_code", None)  # secret — lives in its own table
-    row["organizer_id"] = organizer_id
+    row["organizer_id"] = ctx.user_id
     row["status"] = "upcoming"
+    # Attach to the user's first organization (multi-org selector is post-pilot).
+    if ctx.memberships:
+        row["organization_id"] = ctx.memberships[0].organization_id
     result = db.table("events").insert(row).execute()
     created = result.data[0]
     _upsert_access_code(db, created["id"], access_code)
@@ -302,7 +349,7 @@ def create_event(
         db,
         action="event.created",
         entity_type="event",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=created["id"],
         entity_id=created["id"],
     )
@@ -371,11 +418,11 @@ def join_by_code(
 def update_event(
     event_id: str,
     body: EventUpdate,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
 
     changes = body.model_dump(mode="json", exclude_none=True)
     # access_code is a secret in its own table — pull it out of the events update.
@@ -399,7 +446,7 @@ def update_event(
         db,
         action="event.updated",
         entity_type="event",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=event_id,
         # status/config values only. access_code is logged as a boolean — never the value.
@@ -412,12 +459,12 @@ def update_event(
 def end_event(
     event_id: str,
     background_tasks: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Ends the event and completes any round still active."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
 
     now = datetime.now(timezone.utc).isoformat()
     db.table("rounds").update({"status": "completed", "ended_at": now}).eq(
@@ -429,7 +476,7 @@ def end_event(
         db,
         action="event.ended",
         entity_type="event",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=event_id,
     )
@@ -442,19 +489,19 @@ def end_event(
 def resync_event(
     event_id: str,
     background_tasks: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Organizer "Re-sync room": re-ring the doorbell for every connected phone.
 
-    Owner-only and server-sent — there is no client-side broadcast path to abuse.
+    Admin-only and server-sent — there is no client-side broadcast path to abuse.
     It NEVER re-runs seating (the DB is already the source of truth); it just tells
     phones to re-fetch the authoritative snapshot, for the rare case where one
     missed a doorbell. Returns immediately; the broadcast fires in the background
     so the click feels instant.
     """
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     background_tasks.add_task(broadcast_event_changed, event_id, "manual")
     return {"queued": True}
 
@@ -462,14 +509,13 @@ def resync_event(
 @router.post("/{event_id}/archive", response_model=EventResponse)
 def archive_event(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Soft-archive an event: hide it from the dashboard without destroying data
-    (reversible via /unarchive). Owner only. A live event must be ended first so
-    archiving can't yank a running room out from under attendees."""
+    (reversible via /unarchive). Event admin only. A live event must be ended first."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     if event["status"] == "active":
         raise HTTPException(status_code=409, detail="End the live event before archiving it")
 
@@ -479,7 +525,7 @@ def archive_event(
         db,
         action="event.archived",
         entity_type="event",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=event_id,
     )
@@ -489,19 +535,19 @@ def archive_event(
 @router.post("/{event_id}/unarchive", response_model=EventResponse)
 def unarchive_event(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
-    """Restore a soft-archived event back to the dashboard. Owner only."""
+    """Restore a soft-archived event back to the dashboard. Event admin only."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
 
     result = db.table("events").update({"archived_at": None}).eq("id", event_id).execute()
     record_audit(
         db,
         action="event.unarchived",
         entity_type="event",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=event_id,
     )
@@ -511,28 +557,28 @@ def unarchive_event(
 @router.get("/{event_id}/access-code", response_model=AccessCodeResponse)
 def get_access_code(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
-    """The event's secret code, returned ONLY to the owning organizer so they can
+    """The event's secret code, returned ONLY to event admins so they can
     read it aloud / show the QR. Attendee phones can never reach this value."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     return AccessCodeResponse(code=fetch_access_code(db, event_id))
 
 
 @router.post("/{event_id}/access-code/regenerate", response_model=AccessCodeResponse)
 def regenerate_access_code(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
-    """Mint the event's access code (owner only) — but ONLY the first time. The
+    """Mint the event's access code (event admin only) — but ONLY the first time. The
     code is permanent once set (attendees may already have it / a QR), so a second
     call returns 409 instead of rotating it. This stays as the one-time 'generate'
     for an event created open."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     if (fetch_access_code(db, event_id) or "").strip():
         raise HTTPException(
             status_code=409,
@@ -544,7 +590,7 @@ def regenerate_access_code(
         db,
         action="event.code_set",
         entity_type="event",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=event_id,
         # never log the code value itself
@@ -555,13 +601,13 @@ def regenerate_access_code(
 @router.delete("/{event_id}/access-code", response_model=AccessCodeResponse)
 def clear_access_code(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Removal is not allowed once a code is set — it's permanent (attendees may
     already have it / a QR). Returns 409 when a code exists; a no-op otherwise."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     if (fetch_access_code(db, event_id) or "").strip():
         raise HTTPException(
             status_code=409,
@@ -578,27 +624,27 @@ def clear_access_code(
 @router.get("/{event_id}/room-code", response_model=RoomCodeResponse)
 def get_room_code(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
-    """The event's room code, returned ONLY to the owning organizer so they can
-    reveal it in the room. None until they open check-in. Attendee phones can
+    """The event's room code, returned ONLY to event admins so they can
+    reveal it in the room. None until check-in is opened. Attendee phones can
     never reach this value (service-role-only table)."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     return RoomCodeResponse(code=fetch_room_code(db, event_id))
 
 
 @router.post("/{event_id}/room-code/regenerate", response_model=RoomCodeResponse)
 def regenerate_room_code(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
-    """Open check-in / mint a fresh room code (owner only). Doubles as the first
+    """Open check-in / mint a fresh room code (event admin only). Doubles as the first
     'generate' when none exists. Any previously shown code stops working."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     code = generate_room_code()
     db.table("event_room_codes").upsert(
         {"event_id": event_id, "code": code}, on_conflict="event_id"
@@ -607,7 +653,7 @@ def regenerate_room_code(
         db,
         action="event.room_code_regenerated",
         entity_type="event",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=event_id,
         # never log the code value itself
@@ -618,18 +664,18 @@ def regenerate_room_code(
 @router.delete("/{event_id}/room-code", response_model=RoomCodeResponse)
 def clear_room_code(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
-    """Close check-in — no one can self-arrive until a new code is opened (owner only)."""
+    """Close check-in — no one can self-arrive until a new code is opened (event admin only)."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     db.table("event_room_codes").delete().eq("event_id", event_id).execute()
     record_audit(
         db,
         action="event.room_code_cleared",
         entity_type="event",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=event_id,
     )
@@ -639,12 +685,12 @@ def clear_room_code(
 @router.get("/{event_id}/attendees", response_model=list[AttendeeResponse])
 def list_attendees(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
-    """Full attendee list (includes contact info) — event owner only."""
+    """Full attendee list (includes contact info) — event admins only."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     result = db.table("attendees").select("*").eq("event_id", event_id).execute()
     return result.data or []
 
@@ -667,16 +713,15 @@ def _likes_and_matches(db: Client, event_id: str) -> tuple[int, int]:
 @router.get("/{event_id}/analytics", response_model=EventAnalytics)
 def get_analytics(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Post-event summary: attendee count, rounds completed, avg unique people met.
 
-    Organizer dashboard feature — attendees get their own numbers from the
-    connections endpoint instead.
+    Event admin feature — attendees get their own numbers from the connections endpoint.
     """
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
 
     attendees = db.table("attendees").select("*").eq("event_id", event_id).execute().data or []
     rounds = db.table("rounds").select("*").eq("event_id", event_id).execute().data or []
@@ -859,14 +904,14 @@ def get_analytics(
 @router.get("/{event_id}/live-stats", response_model=LiveStats)
 def get_live_stats(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Organizer "room pulse" — the live numbers the control room polls during an
     event: who's here, who's seated this round, and how the connections are
-    flowing. Event owner only."""
+    flowing. Event admins only."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
 
     attendees = db.table("attendees").select("status").eq("event_id", event_id).execute().data or []
     registered = len(attendees)

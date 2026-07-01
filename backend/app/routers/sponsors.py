@@ -1,4 +1,4 @@
-"""Sponsors & event branding.
+﻿"""Sponsors & event branding.
 
 Sponsors are shown to attendees during the dead time between rounds (and in the
 pre-event lobby), rotating around the hourglass. They're authored by the event
@@ -16,10 +16,17 @@ from supabase import Client
 
 from app.audit import record_audit
 from app.database import get_supabase
-from app.deps import fetch_event_or_404, get_current_organizer_id, require_event_owner
+from app.deps import (
+    AdminContext,
+    fetch_event_or_404,
+    get_current_admin_ctx,
+    require_event_admin,
+)
 from app.models.schemas import SponsorItem, SponsorsPutRequest, SponsorsResponse
 
 router = APIRouter(prefix="/events/{event_id}/sponsors", tags=["sponsors"])
+
+_admin_ctx = get_current_admin_ctx
 
 # Sane caps so a paste can't blow up a phone screen or the payload.
 MAX_SPONSORS = 20
@@ -79,13 +86,13 @@ def get_sponsors(event_id: str, db: Client = Depends(get_supabase)):
 def replace_sponsors(
     event_id: str,
     body: SponsorsPutRequest,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Replace the event's full sponsor list (owner only). Empty rows (no name and
     no image) are dropped; the list is capped and order is preserved."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
 
     rows: list[dict] = []
     for i, s in enumerate(body.sponsors[:MAX_SPONSORS]):
@@ -113,7 +120,7 @@ def replace_sponsors(
         db,
         action="event.sponsors_updated",
         entity_type="event",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=event_id,
         metadata={"count": len(rows)},  # counts only, never the sponsor content

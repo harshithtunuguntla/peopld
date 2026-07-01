@@ -1,4 +1,4 @@
-"""Customizable post-event feedback forms (Google-Forms-style) + recap gating.
+﻿"""Customizable post-event feedback forms (Google-Forms-style) + recap gating.
 
 Three audiences, one form per event:
   - Organizer (owner-only): build the form (any mix of question types), toggle
@@ -18,12 +18,12 @@ from supabase import Client
 from app.audit import record_audit
 from app.database import get_supabase
 from app.deps import (
+    AdminContext,
     AuthUser,
+    get_current_admin_ctx,
+    require_event_admin,
     fetch_event_or_404,
     fetch_my_attendee,
-    get_current_organizer_id,
-    get_current_user,
-    require_event_owner,
 )
 from app.models.schemas import (
     CHOICE_TYPES,
@@ -40,6 +40,8 @@ from app.models.schemas import (
 )
 
 router = APIRouter(prefix="/events/{event_id}/feedback-form", tags=["feedback-form"])
+
+_admin_ctx = get_current_admin_ctx
 
 
 # --- A sensible default an organizer can ship as-is or edit ----------------------
@@ -135,13 +137,13 @@ def _form_response(db: Client, event_id: str, form_row: dict) -> FormConfigRespo
 @router.get("", response_model=FormConfigResponse)
 def get_form(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Owner-only. Returns the saved form, or an editable default scaffold (no id,
     unpublished) when none exists yet so the builder is never blank."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     form = _get_form_row(db, event_id)
     if not form:
         return _default_form(event_id)
@@ -152,14 +154,14 @@ def get_form(
 def save_form(
     event_id: str,
     body: FormConfigUpdate,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Owner-only whole-form upsert: persists title/description/gating and REPLACES
     the question set (positions follow the submitted order). Does not change the
     published flag — that's an explicit separate action."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
 
     for q in body.questions:
         if q.type in CHOICE_TYPES and len(q.options) < 2:
@@ -210,7 +212,7 @@ def save_form(
         db,
         action="feedback_form.saved",
         entity_type="feedback_form",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=str(form_id),
         metadata={"questions": len(body.questions), "gate_recap": body.gate_recap},
@@ -223,13 +225,13 @@ def save_form(
 def set_published(
     event_id: str,
     body: PublishUpdate,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Owner-only. Flip the form live (or back to draft). Publishing requires at
     least one question."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     form = _get_form_row(db, event_id)
     if not form:
         raise HTTPException(status_code=404, detail="Build and save the form before publishing it.")
@@ -241,7 +243,7 @@ def set_published(
         db,
         action="feedback_form.published" if body.is_published else "feedback_form.unpublished",
         entity_type="feedback_form",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=str(form["id"]),
     )
@@ -251,13 +253,13 @@ def set_published(
 @router.get("/results", response_model=FormResults)
 def get_results(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Owner-only aggregated results. Response rate is over CHECKED-IN attendees
     (the realistic denominator — registrants who never came can't respond)."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     form = _get_form_row(db, event_id)
     if not form:
         return FormResults()

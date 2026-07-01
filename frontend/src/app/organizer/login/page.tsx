@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Loader2, Lock } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
+import { apiFetch } from "@/lib/api";
 import { Wordmark } from "@/components/brand/wordmark";
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { Button } from "@/components/ui/button";
@@ -19,22 +20,25 @@ export default function OrganizerLoginPage() {
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(true);
 
-  // Already signed in? Skip the form (mirrors the attendee /auth page, which the
-  // organizer side was missing). Role-aware: a signed-in *attendee* who lands
-  // here has no console to enter, so we send them to their own home rather than
-  // dumping them into a dashboard they can't use.
+  // Already signed in? Route based on actual role from /me/context.
   useEffect(() => {
     let active = true;
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(async ({ data }) => {
       if (!active) return;
-      const role = (data.user?.app_metadata as { role?: string } | undefined)?.role;
-      if (data.user && role === "organizer") router.replace("/organizer/dashboard");
-      else if (data.user) router.replace("/home");
-      else setChecking(false);
+      if (!data.user) { setChecking(false); return; }
+      try {
+        const { apiFetch } = await import("@/lib/api");
+        const ctx = await apiFetch<{ platform_role: string | null; memberships: unknown[]; default_admin_url: string | null }>("/me/context");
+        if (!active) return;
+        if (ctx.platform_role === "super_admin") router.replace("/admin");
+        else if (ctx.memberships.length > 0) router.replace("/organizer/dashboard");
+        else router.replace("/home");
+      } catch {
+        if (!active) return;
+        router.replace("/home");
+      }
     });
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [router]);
 
   async function handleLogin(e: React.FormEvent) {
@@ -47,7 +51,15 @@ export default function OrganizerLoginPage() {
       setError(error.message);
       return;
     }
-    router.push("/organizer/dashboard");
+    // Role-aware redirect after login
+    try {
+      const ctx = await apiFetch<{ platform_role: string | null; memberships: unknown[]; default_admin_url: string | null }>("/me/context");
+      if (ctx.platform_role === "super_admin") router.push("/admin");
+      else if (ctx.memberships.length > 0) router.push("/organizer/dashboard");
+      else router.push("/home");
+    } catch {
+      router.push("/organizer/dashboard");
+    }
   }
 
   if (checking) {

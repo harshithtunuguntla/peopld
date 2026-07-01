@@ -2,16 +2,70 @@ from fastapi import APIRouter, Depends
 from supabase import Client
 
 from app.database import get_supabase
-from app.deps import AuthUser, fetch_profile_defaults, get_current_user, upsert_user_profile
+from app.deps import (
+    AuthUser,
+    _materialize_pending_invitations,
+    fetch_profile_defaults,
+    get_admin_context,
+    get_current_user,
+    upsert_user_profile,
+)
 from app.models.schemas import (
     MyConnectionEntry,
     MyConnectionsResponse,
     MyProfileResponse,
     MyProfileUpdate,
+    OrganizationMembership,
+    UserContextResponse,
 )
 from app.routers.connections import build_connection_entries
 
 router = APIRouter(prefix="/me", tags=["me"])
+
+
+@router.get("/context", response_model=UserContextResponse)
+def get_my_context(
+    user: AuthUser = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """Role resolution endpoint — called after every sign-in to determine where
+    to route the user (admin dashboard, organizer console, or attendee home).
+
+    Also materializes any pending email invitations: if the user was invited
+    while they had no Supabase account, the invitation is converted into a real
+    organization_members row here, idempotently.
+    """
+    # Accept any pending invitations sent to this email before they had an account.
+    _materialize_pending_invitations(user, db)
+
+    ctx = get_admin_context(user, db)
+
+    memberships = [
+        OrganizationMembership(
+            organization_id=m.organization_id,
+            organization_name=m.organization_name,
+            role=m.role,
+        )
+        for m in ctx.memberships
+    ]
+
+    if ctx.is_platform_admin:
+        platform_role = "super_admin"
+        default_admin_url = "/admin"
+    elif memberships:
+        platform_role = None
+        default_admin_url = "/organizer/dashboard"
+    else:
+        platform_role = None
+        default_admin_url = None
+
+    return UserContextResponse(
+        user_id=user.id,
+        email=user.email,
+        platform_role=platform_role,
+        memberships=memberships,
+        default_admin_url=default_admin_url,
+    )
 
 
 @router.get("/profile", response_model=MyProfileResponse)

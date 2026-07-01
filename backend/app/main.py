@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.logging_config import setup_logging
-from app.routers import events, attendees, rounds, icebreakers, connections, live, likes, notes, me, directory, intents, bookmarks, sponsors, demo_requests, feedback, feedback_forms, announcements
+from app.routers import events, attendees, rounds, icebreakers, connections, live, likes, notes, me, directory, intents, bookmarks, sponsors, demo_requests, feedback, feedback_forms, announcements, organizations, admin
 
 setup_logging(settings.log_format)
 request_logger = logging.getLogger("app.requests")
@@ -83,6 +83,8 @@ app.include_router(demo_requests.router)
 app.include_router(feedback.router)
 app.include_router(feedback_forms.router)
 app.include_router(announcements.router)
+app.include_router(organizations.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

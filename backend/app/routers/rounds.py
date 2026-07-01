@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import logging
 from datetime import datetime, timezone
 from math import ceil
@@ -19,7 +19,12 @@ from app.audit import record_audit
 from app.icebreakers import engine as icebreaker_engine
 from app.realtime import broadcast_event_changed
 from app.database import get_supabase
-from app.deps import fetch_event_or_404, get_current_organizer_id, require_event_owner
+from app.deps import (
+    AdminContext,
+    fetch_event_or_404,
+    get_current_admin_ctx,
+    require_event_admin,
+)
 from app.models.schemas import (
     RoundCancelResponse,
     RoundDraftResponse,
@@ -36,6 +41,8 @@ from app.models.schemas import (
 logger = logging.getLogger("app.rounds")
 
 router = APIRouter(prefix="/events/{event_id}/rounds", tags=["rounds"])
+
+_admin_ctx = get_current_admin_ctx
 
 
 def _parse_iso(value: str) -> datetime:
@@ -366,7 +373,7 @@ def _draft_response(event: dict, draft: dict, attendees_by_id: dict[str, dict]) 
 def start_round(
     event_id: str,
     background_tasks: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Generate a seating DRAFT for the organizer to preview.
@@ -375,7 +382,7 @@ def start_round(
     which has no client RLS access and is not in the realtime publication.
     """
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     if _has_active_round(db, event_id):
         raise HTTPException(status_code=409, detail="End the current round first")
     if _fetch_draft(db, event_id):
@@ -400,7 +407,7 @@ def start_round(
         db,
         action="round.draft_created",
         entity_type="round_draft",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=stored["id"],
         metadata={
@@ -416,12 +423,12 @@ def start_round(
 def regenerate_draft(
     event_id: str,
     background_tasks: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Replace the pending draft with a fresh one (re-reads the arrived pool)."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     draft = _fetch_draft(db, event_id)
     if not draft:
         raise HTTPException(status_code=404, detail="No draft to regenerate — start a round first")
@@ -438,7 +445,7 @@ def regenerate_draft(
         db,
         action="round.draft_regenerated",
         entity_type="round_draft",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=draft["id"],
         metadata={
@@ -453,12 +460,12 @@ def regenerate_draft(
 @router.get("/draft", response_model=RoundDraftResponse)
 def get_draft(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Re-fetch the pending preview (e.g., after the organizer reloads the page)."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     draft = _fetch_draft(db, event_id)
     if not draft:
         raise HTTPException(status_code=404, detail="No pending draft")
@@ -473,7 +480,7 @@ def move_draft_seat(
     event_id: str,
     body: RoundMoveRequest,
     background_tasks: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Manual override: move one person to another existing table in the pending
@@ -483,7 +490,7 @@ def move_draft_seat(
     publish stale-guard still passes.
     """
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     draft = _fetch_draft(db, event_id)
     if not draft:
         raise HTTPException(status_code=404, detail="No draft to edit — start a round first")
@@ -523,7 +530,7 @@ def move_draft_seat(
         db,
         action="round.draft_edited",
         entity_type="round_draft",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=draft["id"],
         metadata={"round_number": updated["round_number"], "table_number": body.table_number},
@@ -540,14 +547,14 @@ def publish_round(
     event_id: str,
     response: Response,
     background_tasks: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Make the draft live: create the round + assignments (Realtime fires here),
     then delete the draft. Blocked if attendance or table config changed since
     the preview was generated (stale-draft guard)."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     draft = _fetch_draft(db, event_id)
     if not draft:
         # Idempotency (REQ-RT-03): a publish whose response was lost (timeout)
@@ -639,7 +646,7 @@ def publish_round(
         db,
         action="round.published",
         entity_type="round",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=round_row["id"],
         metadata={
@@ -670,7 +677,7 @@ def publish_round(
 def begin_round(
     event_id: str,
     background_tasks: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Start the timer on a published-but-not-yet-started round.
@@ -680,7 +687,7 @@ def begin_round(
     returns it, so a double-tap can't reset the clock.
     """
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     active = _fetch_active_round(db, event_id)  # 404 if there's no current round
     if active.get("started_at"):
         return active  # already running — idempotent, never restart the clock
@@ -696,7 +703,7 @@ def begin_round(
         db,
         action="round.started",
         entity_type="round",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=active["id"],
         metadata={"round_number": active["round_number"]},
@@ -710,7 +717,7 @@ def extend_round(
     event_id: str,
     body: RoundExtendRequest,
     background_tasks: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Add time to the current round (the "+ Add time" escape hatch).
@@ -720,7 +727,7 @@ def extend_round(
     (a few seconds past the buzzer the organizer can still grant more time).
     """
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     active = _fetch_active_round(db, event_id)
     new_duration = int(active["duration_seconds"]) + int(body.seconds)
     result = (
@@ -734,7 +741,7 @@ def extend_round(
         db,
         action="round.extended",
         entity_type="round",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=active["id"],
         metadata={"round_number": active["round_number"], "added_seconds": int(body.seconds)},
@@ -747,11 +754,11 @@ def extend_round(
 def end_round(
     event_id: str,
     background_tasks: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     active = _fetch_active_round(db, event_id)
     now = datetime.now(timezone.utc).isoformat()
     result = (
@@ -765,7 +772,7 @@ def end_round(
         db,
         action="round.ended",
         entity_type="round",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=active["id"],
         metadata={"round_number": active["round_number"]},
@@ -778,7 +785,7 @@ def end_round(
 def pause_round(
     event_id: str,
     background_tasks: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Freeze the active round's countdown (e.g. for a host announcement).
@@ -788,7 +795,7 @@ def pause_round(
     is a no-op that returns the current state.
     """
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     active = _fetch_active_round(db, event_id)
     if active.get("paused_at"):
         return active  # already paused — idempotent
@@ -804,7 +811,7 @@ def pause_round(
         db,
         action="round.paused",
         entity_type="round",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=active["id"],
         metadata={"round_number": active["round_number"]},
@@ -817,14 +824,14 @@ def pause_round(
 def resume_round(
     event_id: str,
     background_tasks: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Resume a paused round, banking the paused span into total_paused_seconds
     so the timer picks up exactly where it left off. Idempotent: resuming a
     running round is a no-op."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     active = _fetch_active_round(db, event_id)
     paused_at = active.get("paused_at")
     if not paused_at:
@@ -842,7 +849,7 @@ def resume_round(
         db,
         action="round.resumed",
         entity_type="round",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=active["id"],
         metadata={"round_number": active["round_number"], "total_paused_seconds": new_total},
@@ -855,7 +862,7 @@ def resume_round(
 def cancel_round(
     event_id: str,
     background_tasks: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Roll back a mistakenly published round (REQ-RT-02).
@@ -867,7 +874,7 @@ def cancel_round(
     The freed round_number is reused by the next start.
     """
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
     active = _fetch_active_round(db, event_id)  # 404 if nothing to cancel
 
     # Count what we're wiping for the audit trail (UUIDs/counts only, no PII).
@@ -885,7 +892,7 @@ def cancel_round(
         db,
         action="round.cancelled",
         entity_type="round",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=active["id"],
         metadata={"round_number": active["round_number"], "seated_count": seated_count},
@@ -897,7 +904,7 @@ def cancel_round(
 @router.get("/run-sheet", response_model=RunSheet)
 def get_run_sheet(
     event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """The event-day seating backup (REQ: event-day resilience) — but anchored to
@@ -916,7 +923,7 @@ def get_run_sheet(
     before doors (fewer than 3 arrived) it falls back to the registered crowd.
     """
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
 
     num_tables, seats = event["num_tables"], event["seats_per_table"]
     min_size, max_size = _table_bounds(event)

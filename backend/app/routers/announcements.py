@@ -1,4 +1,4 @@
-"""Organizer live announcements — push a short message to the whole room.
+﻿"""Organizer live announcements — push a short message to the whole room.
 
 The organizer sends a one-line message ("Pizza's here", "Move to the patio for
 round 3"); it's persisted and the realtime doorbell is rung so every connected
@@ -13,14 +13,17 @@ from supabase import Client
 from app.audit import record_audit
 from app.database import get_supabase
 from app.deps import (
+    AdminContext,
     fetch_event_or_404,
-    get_current_organizer_id,
-    require_event_owner,
+    get_current_admin_ctx,
+    require_event_admin,
 )
 from app.models.schemas import Announcement, AnnouncementCreate
 from app.realtime import broadcast_event_changed
 
 router = APIRouter(prefix="/events/{event_id}/announcements", tags=["announcements"])
+
+_admin_ctx = get_current_admin_ctx
 
 
 @router.post("", response_model=Announcement)
@@ -28,12 +31,12 @@ def create_announcement(
     event_id: str,
     body: AnnouncementCreate,
     background: BackgroundTasks,
-    organizer_id: str = Depends(get_current_organizer_id),
+    ctx: AdminContext = Depends(_admin_ctx),
     db: Client = Depends(get_supabase),
 ):
     """Owner-only. Persist the message and ring the doorbell so phones pick it up."""
     event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+    require_event_admin(event, ctx)
 
     created = (
         db.table("event_announcements")
@@ -48,7 +51,7 @@ def create_announcement(
         db,
         action="announcement.sent",
         entity_type="event_announcement",
-        actor_user_id=organizer_id,
+        actor_user_id=ctx.user_id,
         event_id=event_id,
         entity_id=str(row["id"]),
         metadata={"length": len(body.message)},  # length only — never the text

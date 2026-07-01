@@ -1,6 +1,7 @@
 import logging
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 import jwt
 from jwt import PyJWKClient
@@ -8,6 +9,7 @@ from fastapi import Depends, Header, HTTPException, Request
 from supabase import Client
 
 from app.config import settings
+from app.database import get_supabase
 
 logger = logging.getLogger("app.deps")
 
@@ -325,6 +327,162 @@ def generate_room_code(length: int = ROOM_CODE_LENGTH) -> str:
     is no global code -> event lookup to keep unambiguous.
     """
     return "".join(secrets.choice(CODE_ALPHABET) for _ in range(length))
+
+
+# ── RBAC / Admin context ──────────────────────────────────────────────────────
+
+
+@dataclass
+class OrganizationMembershipInfo:
+    organization_id: str
+    organization_name: str
+    role: str  # 'super_organizer' | 'organizer'
+
+
+@dataclass
+class AdminContext:
+    """Resolved on every protected admin/organizer request from the DB — never
+    from the JWT alone, so membership removals take effect immediately."""
+    user_id: str
+    email: Optional[str]
+    is_platform_admin: bool
+    memberships: list = field(default_factory=list)  # list[OrganizationMembershipInfo]
+
+
+def get_admin_context(user: AuthUser, db: Client) -> AdminContext:
+    """Resolve the caller's admin context from the database.
+
+    Checks platform_admins and organization_members in two small reads.
+    Treats app_metadata.role as legacy only — never the auth source.
+    """
+    is_admin = bool(
+        db.table("platform_admins")
+        .select("user_id")
+        .eq("user_id", user.id)
+        .limit(1)
+        .execute()
+        .data
+    )
+
+    rows = (
+        db.table("organization_members")
+        .select("organization_id, role, organizations(id, name)")
+        .eq("user_id", user.id)
+        .execute()
+        .data
+        or []
+    )
+    memberships = []
+    for row in rows:
+        org = (row.get("organizations") or {})
+        memberships.append(
+            OrganizationMembershipInfo(
+                organization_id=str(row["organization_id"]),
+                organization_name=org.get("name", ""),
+                role=row["role"],
+            )
+        )
+
+    return AdminContext(
+        user_id=user.id,
+        email=user.email,
+        is_platform_admin=is_admin,
+        memberships=memberships,
+    )
+
+
+def require_platform_admin(ctx: AdminContext) -> None:
+    if not ctx.is_platform_admin:
+        raise HTTPException(status_code=403, detail="Platform admin access required")
+
+
+def require_any_admin(ctx: AdminContext) -> None:
+    if not ctx.is_platform_admin and not ctx.memberships:
+        raise HTTPException(status_code=403, detail="Admin or organizer access required")
+
+
+def require_event_admin(event: dict, ctx: AdminContext) -> None:
+    """Allow platform admins and any org member whose org owns the event."""
+    if ctx.is_platform_admin:
+        return
+    event_org_id = str(event.get("organization_id") or "")
+    for m in ctx.memberships:
+        if m.organization_id == event_org_id:
+            return
+    # Legacy fallback: if the event has no org yet, allow the creator (owner)
+    if str(event.get("organizer_id", "")) == ctx.user_id:
+        return
+    raise HTTPException(status_code=403, detail="Event admin access required")
+
+
+def require_org_super_organizer(organization_id: str, ctx: AdminContext) -> None:
+    """Allow platform admins or the super_organizer of this specific org."""
+    if ctx.is_platform_admin:
+        return
+    for m in ctx.memberships:
+        if m.organization_id == str(organization_id) and m.role == "super_organizer":
+            return
+    raise HTTPException(status_code=403, detail="Super organizer access required for this organization")
+
+
+def get_current_admin_ctx(
+    user: AuthUser = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+) -> AdminContext:
+    """FastAPI dependency: resolve + validate admin context in one step.
+
+    Use as `ctx: AdminContext = Depends(get_current_admin_ctx)` in any endpoint
+    that requires organizer or admin access. 403 if the caller has no role.
+    """
+    ctx = get_admin_context(user, db)
+    require_any_admin(ctx)
+    return ctx
+
+
+def _materialize_pending_invitations(user: AuthUser, db: Client) -> None:
+    """On sign-in, convert any pending email invitations into real memberships.
+
+    Called from GET /me/context — idempotent so multiple calls are safe.
+    """
+    if not user.email:
+        return
+    email = user.email.strip().lower()
+    pending = (
+        db.table("organization_invitations")
+        .select("*")
+        .eq("email", email)
+        .is_("accepted_at", "null")
+        .is_("revoked_at", "null")
+        .execute()
+        .data
+        or []
+    )
+    for inv in pending:
+        org_id = str(inv["organization_id"])
+        role = inv.get("role", "organizer")
+        # Upsert the membership row
+        existing = (
+            db.table("organization_members")
+            .select("user_id")
+            .eq("organization_id", org_id)
+            .eq("user_id", user.id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if not existing:
+            db.table("organization_members").insert({
+                "organization_id": org_id,
+                "user_id": user.id,
+                "role": role,
+                "created_by_user_id": str(inv.get("invited_by_user_id") or user.id),
+            }).execute()
+        # Mark the invitation accepted
+        from datetime import datetime, timezone
+        db.table("organization_invitations").update({
+            "accepted_user_id": user.id,
+            "accepted_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", str(inv["id"])).execute()
 
 
 def find_event_by_code(db: Client, code: str | None) -> str | None:

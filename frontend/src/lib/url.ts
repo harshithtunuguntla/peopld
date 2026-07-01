@@ -81,8 +81,12 @@ export function whatsappHref(
   phone: string | null | undefined,
   message?: string,
 ): string | null {
-  const digits = `${dialCode ?? ""}${phone ?? ""}`.replace(/\D/g, "");
-  if (!digits) return null;
+  // Require an actual local number — a dial code alone ("+91") is NOT a contact.
+  // (Manual contacts keep a default +91 even with no number, so guarding on the
+  // combined string would wrongly link to wa.me/91.)
+  const localDigits = `${phone ?? ""}`.replace(/\D/g, "");
+  if (!localDigits) return null;
+  const digits = `${dialCode ?? ""}${localDigits}`.replace(/\D/g, "");
   const text = message ? `?text=${encodeURIComponent(message)}` : "";
   return `https://wa.me/${digits}${text}`;
 }

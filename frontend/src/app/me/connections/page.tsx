@@ -12,16 +12,23 @@ import { AccountMenu } from "@/components/attendee/account-menu";
 import { Wordmark } from "@/components/brand/wordmark";
 import { AuroraBackground } from "@/components/brand/aurora-background";
 import { PersonCard, type Person } from "@/components/connections/person-card";
+import { ManualPersonCard } from "@/components/connections/manual-person-card";
+import { AddConnectionSheet, type ManualConnectionDraft } from "@/components/connections/add-connection-sheet";
 import { SearchBox } from "@/components/connections/search-box";
 import { tokenize } from "@/lib/connections/search";
 import { SelectMenu } from "@/components/ui/select-menu";
 import { Pagination } from "@/components/ui/pagination";
+import { DEFAULT_DIAL_CODE } from "@/lib/dial-codes";
 import { useDebouncedValue } from "@/lib/use-debounced";
 import { cn } from "@/lib/utils";
+import { Plus, UserPlus } from "lucide-react";
 
 const PAGE_SIZE = 12; // connection cards per page
 
-type RelFilter = "all" | "met" | "matches" | "liked" | "saved";
+type RelFilter = "all" | "met" | "matches" | "liked" | "saved" | "added";
+
+/** Add/edit sheet state — closed, adding fresh, or editing an existing card. */
+type SheetState = { mode: "add" } | { mode: "edit"; card: ApiCard } | null;
 
 /** One deduped card as the API returns it (person fields + which event). */
 interface ApiCard {
@@ -48,9 +55,13 @@ interface ApiCard {
   liked: boolean;
   mutual: boolean;
   saved: boolean;
-  event_id: string;
-  event_name: string;
-  event_date: string; // YYYY-MM-DD
+  // "met" = you shared a table; "manual" = you added them by hand (editable/deletable).
+  source: "met" | "manual";
+  manual_id: string | null;
+  met_context: string | null;
+  event_id: string | null;   // null for a manual contact not tied to an event
+  event_name: string | null;
+  event_date: string | null; // YYYY-MM-DD
 }
 interface EventRef {
   id: string;
@@ -104,7 +115,29 @@ function toPerson(c: ApiCard): Person {
     liked: c.liked,
     mutual: c.mutual,
     saved: c.saved,
-    eventLabel: `${c.event_name} · ${shortDate(c.event_date)}`,
+    eventLabel: c.event_name
+      ? `${c.event_name}${c.event_date ? ` · ${shortDate(c.event_date)}` : ""}`
+      : undefined,
+  };
+}
+
+/** ApiCard → the add/edit sheet's editable draft (nulls become empty strings). */
+function toDraft(c: ApiCard): ManualConnectionDraft {
+  return {
+    manual_id: c.manual_id ?? undefined,
+    name: c.name,
+    role: c.role,
+    company: c.company ?? "",
+    phone: c.phone ?? "",
+    phone_dial_code: c.phone_dial_code ?? DEFAULT_DIAL_CODE,
+    email: c.email ?? "",
+    instagram: c.instagram ?? "",
+    twitter: c.twitter ?? "",
+    linkedin_url: c.linkedin_url ?? "",
+    website_url: c.website_url ?? "",
+    note: c.note ?? "",
+    met_context: c.met_context ?? "",
+    event_id: c.event_id ?? "",
   };
 }
 
@@ -124,6 +157,9 @@ export default function MyConnectionsPage() {
   const [eventFilter, setEventFilter] = useState<string>("all");
   const [relFilter, setRelFilter] = useState<RelFilter>("all");
   const [page, setPage] = useState(1);
+  // Add/edit sheet + a bump we increment after any create/edit/delete to refetch.
+  const [sheet, setSheet] = useState<SheetState>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -154,6 +190,8 @@ export default function MyConnectionsPage() {
       .then((next) => {
         if (controller.signal.aborted) return;
         setData(next);
+        // If a delete emptied the last page, drop back to the new last page.
+        if (next.page > next.total_pages) setPage(next.total_pages);
       })
       .catch((e) => {
         if (controller.signal.aborted) return;
@@ -163,7 +201,18 @@ export default function MyConnectionsPage() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [user, page, debouncedQuery, eventFilter, relFilter]);
+  }, [user, page, debouncedQuery, eventFilter, relFilter, refreshKey]);
+
+  async function handleDelete(manualId: string) {
+    try {
+      await apiFetch(`/me/connections/manual/${manualId}`, { method: "DELETE" });
+      setRefreshKey((k) => k + 1);
+    } catch {
+      // Leave the card in place so nothing silently vanishes; the user can retry.
+    }
+  }
+
+  const eventOptions = (data?.events ?? []).map((e) => ({ id: e.id, name: e.name }));
 
   const terms = useMemo(() => tokenize(debouncedQuery), [debouncedQuery]);
   const viewerName =
@@ -178,7 +227,7 @@ export default function MyConnectionsPage() {
       <AuroraBackground intensity={0.35} />
       <div className="pointer-events-none absolute inset-0 grid-paper-light opacity-[0.12]" aria-hidden />
 
-      <div className="relative z-10 mx-auto w-full max-w-3xl px-5 pb-16 pt-7">
+      <div className="relative z-10 mx-auto w-full max-w-3xl px-5 pb-28 pt-7">
         <div className="flex items-center justify-between">
           <Link
             href="/home"
@@ -232,7 +281,7 @@ export default function MyConnectionsPage() {
             </div>
 
             {!hasAny ? (
-              <EmptyState />
+              <EmptyState onAdd={() => setSheet({ mode: "add" })} />
             ) : (
               <>
                 {/* Search + filters — find anyone fast, or narrow to one event. */}
@@ -267,9 +316,42 @@ export default function MyConnectionsPage() {
                         notes, interest chips), so a grid would stretch every card in a row
                         to the tallest and leave dead space. Columns pack them tightly. */}
                     <ul className={cn("mt-5 columns-1 gap-x-3 transition-opacity sm:columns-2 [&>li]:mb-3 [&>li]:break-inside-avoid", loading && "opacity-60")}>
-                      {data.connections.map((c) => (
-                        <PersonCard key={`${c.event_id}-${c.attendee_id}`} person={toPerson(c)} eventId={c.event_id} highlight={terms} viewerName={viewerName} />
-                      ))}
+                      {data.connections.map((c) =>
+                        c.source === "manual" && c.manual_id ? (
+                          <ManualPersonCard
+                            key={`m-${c.manual_id}`}
+                            card={{
+                              manual_id: c.manual_id,
+                              name: c.name,
+                              role: c.role,
+                              company: c.company,
+                              linkedin_url: c.linkedin_url,
+                              website_url: c.website_url,
+                              phone: c.phone,
+                              phone_dial_code: c.phone_dial_code,
+                              instagram: c.instagram,
+                              twitter: c.twitter,
+                              email: c.email,
+                              note: c.note,
+                              met_context: c.met_context,
+                              event_name: c.event_name,
+                              event_date: c.event_date,
+                            }}
+                            highlight={terms}
+                            viewerName={viewerName}
+                            onEdit={() => setSheet({ mode: "edit", card: c })}
+                            onDelete={() => handleDelete(c.manual_id!)}
+                          />
+                        ) : (
+                          <PersonCard
+                            key={`${c.event_id}-${c.attendee_id}`}
+                            person={toPerson(c)}
+                            eventId={c.event_id ?? ""}
+                            highlight={terms}
+                            viewerName={viewerName}
+                          />
+                        ),
+                      )}
                     </ul>
                     <Pagination
                       className="mt-8"
@@ -288,6 +370,29 @@ export default function MyConnectionsPage() {
           </>
         )}
       </div>
+
+      {/* Add someone you met — floating action, always reachable once loaded. */}
+      {data && (
+        <button
+          type="button"
+          onClick={() => setSheet({ mode: "add" })}
+          className="fixed bottom-5 right-5 z-30 inline-flex h-12 items-center gap-2 rounded-full bg-accent px-5 text-sm font-semibold text-accent-foreground shadow-lg shadow-accent/25 transition-transform hover:-translate-y-0.5 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        >
+          <Plus className="h-5 w-5" aria-hidden /> Add someone
+        </button>
+      )}
+
+      {sheet && (
+        <AddConnectionSheet
+          initial={sheet.mode === "edit" ? toDraft(sheet.card) : undefined}
+          events={eventOptions}
+          onClose={() => setSheet(null)}
+          onSaved={() => {
+            setSheet(null);
+            setRefreshKey((k) => k + 1);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -309,6 +414,7 @@ function RelTabs({
     { key: "matches", label: "Matches", icon: <Heart className="h-3.5 w-3.5 fill-current" aria-hidden /> },
     { key: "liked", label: "Liked", icon: <Heart className="h-3.5 w-3.5" aria-hidden /> },
     { key: "saved", label: "Saved", icon: <Bookmark className="h-3.5 w-3.5" aria-hidden /> },
+    { key: "added", label: "Added by you", icon: <UserPlus className="h-3.5 w-3.5" aria-hidden /> },
   ];
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -358,14 +464,21 @@ function Stat({ icon, value, label, highlight }: { icon: React.ReactNode; value:
   );
 }
 
-function EmptyState() {
+function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="mt-10 rounded-2xl border border-dashed border-border bg-card/40 px-6 py-10 text-center">
       <Users className="mx-auto h-7 w-7 text-muted-foreground" aria-hidden />
       <p className="mt-3 font-display text-lg text-foreground">No connections yet</p>
       <p className="mt-1 text-sm text-muted-foreground">
-        Join an event and the people you sit with will collect here.
+        Join an event and the people you sit with collect here — or add someone you met.
       </p>
+      <button
+        type="button"
+        onClick={onAdd}
+        className="mt-4 inline-flex h-10 items-center gap-2 rounded-full bg-accent px-4 text-sm font-semibold text-accent-foreground transition-transform hover:-translate-y-0.5 active:scale-95"
+      >
+        <UserPlus className="h-4 w-4" aria-hidden /> Add someone you met
+      </button>
     </div>
   );
 }

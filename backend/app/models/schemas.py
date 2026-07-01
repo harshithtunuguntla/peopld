@@ -755,8 +755,13 @@ class MyConnectionsResponse(BaseModel):
 class MyConnectionCard(BaseModel):
     """One deduplicated card in the cross-event rolodex — a person at one event,
     with the rounds they shared merged into a list (the frontend renders this
-    directly, no client-side grouping)."""
-    attendee_id: UUID
+    directly, no client-side grouping).
+
+    Also carries the manually-added connections (`source="manual"`): a person you
+    jotted down yourself rather than sat with. Those have a `manual_id` (the edit/
+    delete target) and may have no event (`event_id`/`event_name`/`event_date` null)
+    when you didn't tie them to one."""
+    attendee_id: UUID  # for manual cards this is the manual_connections row id (unique key)
     name: str
     role: str
     company: Optional[str] = None
@@ -779,9 +784,14 @@ class MyConnectionCard(BaseModel):
     liked: bool = False
     mutual: bool = False
     saved: bool = False
-    event_id: UUID
-    event_name: str
-    event_date: date
+    # A person you added by hand vs. one you were seated with. Manual cards are the
+    # only editable/deletable ones (via manual_id).
+    source: Literal["met", "manual"] = "met"
+    manual_id: Optional[UUID] = None
+    met_context: Optional[str] = None
+    event_id: Optional[UUID] = None
+    event_name: Optional[str] = None
+    event_date: Optional[date] = None
 
 
 class MyConnectionEventRef(BaseModel):
@@ -809,6 +819,64 @@ class MyConnectionsPage(BaseModel):
     total: int = 0             # matches after filter/search (the paginated count)
     total_pages: int = 1
     connections: list[MyConnectionCard] = Field(default_factory=list)
+
+
+# --- Manually-added connections ("Add someone you met") ---
+
+class ManualConnectionCreate(BaseModel):
+    """Jot down someone you met. Only the name is required — everything else is a
+    bonus you can fill by hand now (and, in a later phase, have AI extract from the
+    voice note). `event_id` optionally tags which event you met them at."""
+    name: str = Field(min_length=1, max_length=120)
+    role: Optional[str] = Field(default=None, max_length=120)
+    company: Optional[str] = Field(default=None, max_length=120)
+    phone: Optional[str] = Field(default=None, max_length=40)
+    phone_dial_code: Optional[str] = Field(default=None, max_length=8)
+    email: Optional[str] = Field(default=None, max_length=200)
+    instagram: Optional[str] = Field(default=None, max_length=120)
+    twitter: Optional[str] = Field(default=None, max_length=120)
+    linkedin_url: Optional[str] = Field(default=None, max_length=300)
+    website_url: Optional[str] = Field(default=None, max_length=300)
+    note: Optional[str] = Field(default=None, max_length=4000)
+    met_context: Optional[str] = Field(default=None, max_length=200)
+    event_id: Optional[UUID] = None
+
+
+class ManualConnectionUpdate(BaseModel):
+    """Partial edit — every field optional. `name` can be updated but not blanked
+    (a blank/whitespace name is rejected by the router)."""
+    name: Optional[str] = Field(default=None, max_length=120)
+    role: Optional[str] = Field(default=None, max_length=120)
+    company: Optional[str] = Field(default=None, max_length=120)
+    phone: Optional[str] = Field(default=None, max_length=40)
+    phone_dial_code: Optional[str] = Field(default=None, max_length=8)
+    email: Optional[str] = Field(default=None, max_length=200)
+    instagram: Optional[str] = Field(default=None, max_length=120)
+    twitter: Optional[str] = Field(default=None, max_length=120)
+    linkedin_url: Optional[str] = Field(default=None, max_length=300)
+    website_url: Optional[str] = Field(default=None, max_length=300)
+    note: Optional[str] = Field(default=None, max_length=4000)
+    met_context: Optional[str] = Field(default=None, max_length=200)
+    event_id: Optional[UUID] = None
+
+
+class ManualConnectionResponse(BaseModel):
+    """A stored manual connection, returned after create/update so the client can
+    reflect it immediately."""
+    id: UUID
+    name: str
+    role: Optional[str] = None
+    company: Optional[str] = None
+    phone: Optional[str] = None
+    phone_dial_code: Optional[str] = None
+    email: Optional[str] = None
+    instagram: Optional[str] = None
+    twitter: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    website_url: Optional[str] = None
+    note: Optional[str] = None
+    met_context: Optional[str] = None
+    event_id: Optional[UUID] = None
 
 
 # --- Likes ---

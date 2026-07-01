@@ -122,7 +122,9 @@ def test_editing_form_preserves_question_ids_and_answers(client, db, event):
     by_id = {q["question_id"]: q for q in res["questions"]}
     assert by_id[rating_id]["average"] == 4.0
     assert by_id[choice_id]["option_counts"] == {"Yes": 1}
-    assert by_id[text_id]["text_answers"] == ["Loved it"]
+    # Free text lives on the paginated endpoint now.
+    txt = client.get(f"{BASE.format(eid=eid)}/results/questions/{text_id}/answers", headers=AUTH).json()
+    assert [i["text"] for i in txt["items"]] == ["Loved it"]
 
 
 def test_removing_a_question_drops_only_its_answers(client, db, event):
@@ -271,6 +273,8 @@ def test_results_aggregate_over_checked_in(client, db, event):
         headers=OTHER_ATTENDEE_AUTH,
     )
 
+    # The default /results is AGGREGATES only — bounded payload (no per-respondent
+    # detail, no free-text bodies), so those arrays come back empty here.
     res = client.get(f"{BASE.format(eid=eid)}/results", headers=AUTH).json()
     assert res["response_count"] == 2
     assert res["total_recipients"] == 3  # B(arrived) + Asha + Ravi; C excluded
@@ -278,16 +282,35 @@ def test_results_aggregate_over_checked_in(client, db, event):
     by_label = {q["label"]: q for q in res["questions"]}
     assert by_label["Overall?"]["average"] == 3.0          # (4+2)/2
     assert by_label["Come again?"]["option_counts"] == {"Yes": 1, "No": 1}
-    assert by_label["Anything else?"]["text_answers"] == ["Loved it"]
+    assert by_label["Anything else?"]["text_answers"] == []   # trimmed from the aggregate
+    assert res["responses"] == []                            # detail is paged separately
 
-    # Per-respondent (Individual view): one entry per submission, named by default.
-    assert res["collect_identity"] is True
-    assert len(res["responses"]) == 2
-    names = {r["respondent_name"] for r in res["responses"]}
+    # The full detail lives on /results/export (used by the CSV downloads).
+    full = client.get(f"{BASE.format(eid=eid)}/results/export", headers=AUTH).json()
+    by_label_full = {q["label"]: q for q in full["questions"]}
+    assert by_label_full["Anything else?"]["text_answers"] == ["Loved it"]
+    assert full["collect_identity"] is True
+    assert len(full["responses"]) == 2
+    names = {r["respondent_name"] for r in full["responses"]}
     assert names == {"Asha", "Ravi"}
-    asha = next(r for r in res["responses"] if r["respondent_name"] == "Asha")
+    asha = next(r for r in full["responses"] if r["respondent_name"] == "Asha")
     answers = {a["question_id"]: a["value"] for a in asha["answers"]}
     assert answers[rating_id] == 4 and answers[choice_id] == "Yes" and answers[text_id] == "Loved it"
+
+    # Paginated Individual view: page size caps what comes over the wire.
+    p1 = client.get(f"{BASE.format(eid=eid)}/results/responses?page=1&limit=1", headers=AUTH).json()
+    assert p1["total"] == 2 and p1["page"] == 1 and len(p1["items"]) == 1
+    p2 = client.get(f"{BASE.format(eid=eid)}/results/responses?page=2&limit=1", headers=AUTH).json()
+    assert len(p2["items"]) == 1
+    assert {p1["items"][0]["respondent_name"], p2["items"][0]["respondent_name"]} == {"Asha", "Ravi"}
+    # Search by respondent name.
+    found = client.get(f"{BASE.format(eid=eid)}/results/responses?q=ravi", headers=AUTH).json()
+    assert found["total"] == 1 and found["items"][0]["respondent_name"] == "Ravi"
+
+    # Paginated free-text answers for one question.
+    txt = client.get(f"{BASE.format(eid=eid)}/results/questions/{text_id}/answers", headers=AUTH).json()
+    assert txt["total"] == 1 and txt["items"][0]["text"] == "Loved it"
+    assert txt["items"][0]["name"] == "Asha"  # attributed (identity on)
 
 
 def test_results_anonymous_when_identity_off(client, db, event):
@@ -304,13 +327,29 @@ def test_results_anonymous_when_identity_off(client, db, event):
     )
     res = client.get(f"{BASE.format(eid=eid)}/results", headers=AUTH).json()
     assert res["collect_identity"] is False
-    assert len(res["responses"]) == 1
-    r = res["responses"][0]
+    full = client.get(f"{BASE.format(eid=eid)}/results/export", headers=AUTH).json()
+    assert len(full["responses"]) == 1
+    r = full["responses"][0]
     # Identity withheld, but the answers are still there.
     assert r["respondent_name"] is None and r["respondent_company"] is None
     assert {a["question_id"] for a in r["answers"]} == {rating_id, choice_id}
+
+    # Search doesn't leak/behave off an anonymous form (identity not collected).
+    paged = client.get(f"{BASE.format(eid=eid)}/results/responses?q=asha", headers=AUTH).json()
+    assert paged["total"] == 1  # q ignored when identity is off
+
+
+def test_paginated_results_are_owner_only(client, db, event):
+    eid = event["id"]
+    _publish_form(client, db, eid)
+    assert client.get(f"{BASE.format(eid=eid)}/results/responses", headers=OTHER_AUTH).status_code == 403
+    assert client.get(f"{BASE.format(eid=eid)}/results/export", headers=OTHER_AUTH).status_code == 403
+    assert client.get(f"{BASE.format(eid=eid)}/results/questions/x/answers", headers=OTHER_AUTH).status_code == 403
 
 
 def test_results_empty_when_no_form(client, event):
     res = client.get(f"{BASE.format(eid=event['id'])}/results", headers=AUTH).json()
     assert res["response_count"] == 0 and res["questions"] == [] and res["responses"] == []
+    # The paged/export endpoints degrade gracefully with no form.
+    assert client.get(f"{BASE.format(eid=event['id'])}/results/responses", headers=AUTH).json()["total"] == 0
+    assert client.get(f"{BASE.format(eid=event['id'])}/results/export", headers=AUTH).json()["response_count"] == 0

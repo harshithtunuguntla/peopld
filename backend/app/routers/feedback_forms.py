@@ -12,7 +12,7 @@ so one column covers choice lists and rating scales. An answer's `value` JSONB i
 a string, number, or list of strings depending on the question type.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from supabase import Client
 
 from app.audit import record_audit
@@ -34,9 +34,12 @@ from app.models.schemas import (
     FormResults,
     FormSubmission,
     IndividualResponse,
+    PagedResponses,
+    PagedTextAnswers,
     PublishUpdate,
     QuestionResult,
     ResponseAnswer,
+    TextAnswerEntry,
 )
 
 router = APIRouter(prefix="/events/{event_id}/feedback-form", tags=["feedback-form"])
@@ -248,19 +251,14 @@ def set_published(
     return _form_response(db, event_id, _get_form_row(db, event_id))
 
 
-@router.get("/results", response_model=FormResults)
-def get_results(
-    event_id: str,
-    organizer_id: str = Depends(get_current_organizer_id),
-    db: Client = Depends(get_supabase),
-):
-    """Owner-only aggregated results. Response rate is over CHECKED-IN attendees
-    (the realistic denominator — registrants who never came can't respond)."""
-    event = fetch_event_or_404(db, event_id)
-    require_event_owner(event, organizer_id)
+def _compute_results(db: Client, event_id: str) -> FormResults | None:
+    """Build the FULL results for an event's form (aggregates + every per-respondent
+    response). Returns None when no form exists. This is the single source of truth;
+    the endpoints below either trim it (the default view), page it (Individual /
+    text answers), or return it whole (CSV export)."""
     form = _get_form_row(db, event_id)
     if not form:
-        return FormResults()
+        return None
 
     collect_identity = bool(form.get("collect_identity", True))
     questions = _ordered_questions(db, form["id"])
@@ -343,6 +341,114 @@ def get_results(
         questions=results,
         responses=responses,
     )
+
+
+def _owner_results(db: Client, event_id: str, organizer_id: str) -> FormResults | None:
+    """Auth wrapper around _compute_results (owner-only)."""
+    event = fetch_event_or_404(db, event_id)
+    require_event_owner(event, organizer_id)
+    return _compute_results(db, event_id)
+
+
+def _text_entries(full: FormResults, question_id: str) -> list[TextAnswerEntry]:
+    """Free-text answers for one question, attributed to their author (when the
+    form collects identity), newest first — derived from the per-respondent list."""
+    out: list[TextAnswerEntry] = []
+    for r in full.responses:
+        for a in r.answers:
+            if str(a.question_id) == question_id and isinstance(a.value, str) and a.value.strip():
+                out.append(
+                    TextAnswerEntry(text=a.value, name=r.respondent_name, company=r.respondent_company)
+                )
+    return out
+
+
+def _matches_query(q: str, *fields: str | None) -> bool:
+    """Every whitespace-token of `q` must appear (case-insensitively) somewhere in
+    the given fields. Empty query matches everything."""
+    terms = q.lower().split()
+    if not terms:
+        return True
+    hay = " ".join(f.lower() for f in fields if f)
+    return all(t in hay for t in terms)
+
+
+@router.get("/results", response_model=FormResults)
+def get_results(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Owner-only AGGREGATES only (KPIs + per-question chart data). The growing
+    parts — free-text answers and the per-respondent list — are intentionally left
+    empty here and fetched page-by-page from the endpoints below, so this payload
+    stays bounded by the number of questions, not the number of respondents."""
+    full = _owner_results(db, event_id, organizer_id)
+    if full is None:
+        return FormResults()
+    # Strip the unbounded detail; keep the aggregates the dashboard renders.
+    for qr in full.questions:
+        qr.text_answers = []
+    full.responses = []
+    return full
+
+
+@router.get("/results/export", response_model=FormResults)
+def export_results(
+    event_id: str,
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Owner-only FULL results (every response + text answer) for the CSV exports.
+    Bounded by one event's attendee count and only fetched on an explicit download,
+    so it's fine to return whole."""
+    full = _owner_results(db, event_id, organizer_id)
+    return full if full is not None else FormResults()
+
+
+@router.get("/results/responses", response_model=PagedResponses)
+def get_responses_page(
+    event_id: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    q: str = Query("", max_length=100),
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Owner-only, paginated per-respondent submissions (the Individual view).
+    `q` searches name/company (only meaningful when identity is collected)."""
+    full = _owner_results(db, event_id, organizer_id)
+    if full is None:
+        return PagedResponses(page=page, limit=limit)
+    rows = full.responses
+    if q.strip() and full.collect_identity:
+        rows = [r for r in rows if _matches_query(q, r.respondent_name, r.respondent_company)]
+    total = len(rows)
+    start = (page - 1) * limit
+    return PagedResponses(items=rows[start : start + limit], total=total, page=page, limit=limit)
+
+
+@router.get("/results/questions/{question_id}/answers", response_model=PagedTextAnswers)
+def get_question_text_page(
+    event_id: str,
+    question_id: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(5, ge=1, le=100),
+    q: str = Query("", max_length=100),
+    organizer_id: str = Depends(get_current_organizer_id),
+    db: Client = Depends(get_supabase),
+):
+    """Owner-only, paginated free-text answers for a single question. `q` searches
+    the answer text (and author when identity is collected)."""
+    full = _owner_results(db, event_id, organizer_id)
+    if full is None:
+        return PagedTextAnswers(page=page, limit=limit)
+    entries = _text_entries(full, str(question_id))
+    if q.strip():
+        entries = [e for e in entries if _matches_query(q, e.text, e.name, e.company)]
+    total = len(entries)
+    start = (page - 1) * limit
+    return PagedTextAnswers(items=entries[start : start + limit], total=total, page=page, limit=limit)
 
 
 # ================================ Attendee ======================================

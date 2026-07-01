@@ -1,17 +1,31 @@
-from fastapi import APIRouter, Depends
+from math import ceil
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
 from supabase import Client
 
 from app.database import get_supabase
 from app.deps import AuthUser, fetch_profile_defaults, get_current_user, upsert_user_profile
 from app.models.schemas import (
-    MyConnectionEntry,
-    MyConnectionsResponse,
+    MyConnectionCard,
+    MyConnectionEventRef,
+    MyConnectionsPage,
     MyProfileResponse,
     MyProfileUpdate,
 )
 from app.routers.connections import build_connection_entries
 
 router = APIRouter(prefix="/me", tags=["me"])
+
+
+def _matches_query(q: str, *fields) -> bool:
+    """Every whitespace-token of `q` must appear (case-insensitively) somewhere in
+    the given fields. Empty query matches everything."""
+    terms = q.lower().split()
+    if not terms:
+        return True
+    hay = " ".join(str(f).lower() for f in fields if f)
+    return all(t in hay for t in terms)
 
 
 @router.get("/profile", response_model=MyProfileResponse)
@@ -47,22 +61,29 @@ def update_my_profile(
     return MyProfileResponse(**fields, complete=True)
 
 
-@router.get("/connections", response_model=MyConnectionsResponse)
+@router.get("/connections", response_model=MyConnectionsPage)
 def my_connections(
+    page: int = Query(1, ge=1),
+    limit: int = Query(24, ge=1, le=100),
+    q: str = Query("", max_length=100),
+    event: Optional[str] = Query(None),  # event_id to filter to (None / "all" = every event)
+    rel: str = Query("all"),             # all | met | matches | liked | saved
     user: AuthUser = Depends(get_current_user),
     db: Client = Depends(get_supabase),
 ):
-    """The caller's cross-event Rolodex: everyone they've met across every event
-    they've attended, each tagged with which event it came from. Identity is
-    resolved from the JWT (the user_id on their attendee rows), never the URL.
+    """The caller's cross-event Rolodex — everyone they've met across every event.
+
+    Server-paginated: stats and facet counts are computed over the WHOLE history,
+    but only one page of cards is returned, so the payload stays bounded no matter
+    how many events the caller racks up. Filtering (relationship + event) and search
+    run here too, so pagination stays consistent with what's shown. Identity is the
+    JWT's user_id on the caller's attendee rows, never the URL.
     """
     my_attendees = (
         db.table("attendees").select("*").eq("user_id", user.id).execute().data or []
     )
     if not my_attendees:
-        return MyConnectionsResponse(
-            total_people_met=0, events_count=0, matches_count=0, connections=[]
-        )
+        return MyConnectionsPage(page=page, limit=limit)
 
     # Load just the events the caller belongs to (one query).
     event_ids = list({str(a["event_id"]) for a in my_attendees})
@@ -71,40 +92,107 @@ def my_connections(
     )
     events_by_id = {str(e["id"]): e for e in events}
 
-    entries: list[MyConnectionEntry] = []
-    events_with_people: set[str] = set()
+    # Build ONE deduped card per (event, person), merging the rounds we shared and
+    # OR-ing the relationship flags — the grouping that used to live in the frontend.
+    cards_map: dict[tuple[str, str], MyConnectionCard] = {}
     for attendee in my_attendees:
-        event = events_by_id.get(str(attendee["event_id"]))
-        if not event:
+        ev = events_by_id.get(str(attendee["event_id"]))
+        if not ev:
             continue
-        # Cross-event rolodex includes the whole room you were in, not just the
-        # people a round happened to seat you with.
-        result = build_connection_entries(db, event, attendee, include_co_attendees=True)
-        if not result.connections:
-            continue
-        events_with_people.add(str(event["id"]))
+        result = build_connection_entries(db, ev, attendee, include_co_attendees=True)
         for c in result.connections:
-            entries.append(
-                MyConnectionEntry(
-                    **c.model_dump(),
-                    event_id=event["id"],
-                    event_name=event["name"],
-                    event_date=event["date"],
+            key = (str(ev["id"]), str(c.attendee_id))
+            card = cards_map.get(key)
+            if card is None:
+                cards_map[key] = MyConnectionCard(
+                    attendee_id=c.attendee_id,
+                    name=c.name,
+                    role=c.role,
+                    company=c.company,
+                    looking_for=c.looking_for,
+                    linkedin_url=c.linkedin_url,
+                    website_url=c.website_url,
+                    avatar_url=c.avatar_url,
+                    interests=c.interests,
+                    shared_interests=c.shared_interests,
+                    note=c.note,
+                    rounds=[c.round_number] if (c.met and c.round_number) else [],
+                    met=c.met,
+                    wanted=c.wanted,
+                    wants_me=c.wants_me,
+                    liked=c.liked,
+                    mutual=c.mutual,
+                    saved=c.saved,
+                    event_id=ev["id"],
+                    event_name=ev["name"],
+                    event_date=ev["date"],
                 )
-            )
+            else:
+                if c.met and c.round_number and c.round_number not in card.rounds:
+                    card.rounds.append(c.round_number)
+                card.met = card.met or c.met
+                card.wanted = card.wanted or c.wanted
+                card.wants_me = card.wants_me or c.wants_me
+                card.liked = card.liked or c.liked
+                card.mutual = card.mutual or c.mutual
+                card.saved = card.saved or c.saved
+                if not card.note and c.note:
+                    card.note = c.note
 
-    # Most recent events first, then by round order within an event.
-    entries.sort(key=lambda e: (str(e.event_date), e.round_number, e.table_number), reverse=False)
-    entries.reverse()
+    cards = list(cards_map.values())
 
-    return MyConnectionsResponse(
-        # "met" counts only people you actually shared a table with — co-attendees
-        # and picks you never sat with are surfaced but don't inflate this number.
-        total_people_met=len({str(e.attendee_id) for e in entries if e.met}),
-        events_count=len(events_with_people),
-        # Unique mutual people per event (dedupe by event + person), so meeting the
-        # same match in two rounds counts once, while the same person matched at
-        # two different events counts for each event.
-        matches_count=len({(str(e.event_id), str(e.attendee_id)) for e in entries if e.mutual}),
-        connections=entries,
+    # Stats + facet counts over the WHOLE set (so chips/headline don't change as you
+    # page). "met" counts only people you actually shared a table with.
+    rel_counts = {
+        "all": len(cards),
+        "met": sum(1 for c in cards if c.met),
+        "matches": sum(1 for c in cards if c.mutual),
+        "liked": sum(1 for c in cards if c.liked),
+        "saved": sum(1 for c in cards if c.saved),
+    }
+    ev_refs = sorted(
+        {
+            str(c.event_id): MyConnectionEventRef(id=c.event_id, name=c.event_name, date=c.event_date)
+            for c in cards
+        }.values(),
+        key=lambda e: str(e.date),
+        reverse=True,
+    )
+
+    # Filter (relationship + event + search), then sort matches → met → name.
+    def rel_ok(c: MyConnectionCard) -> bool:
+        return {
+            "met": c.met,
+            "matches": c.mutual,
+            "liked": c.liked,
+            "saved": c.saved,
+        }.get(rel, True)
+
+    def event_ok(c: MyConnectionCard) -> bool:
+        return event in (None, "", "all") or str(c.event_id) == event
+
+    filtered = [
+        c
+        for c in cards
+        if rel_ok(c)
+        and event_ok(c)
+        and _matches_query(q, c.name, c.role, c.company, c.looking_for, c.note, *(c.interests or []))
+    ]
+    filtered.sort(key=lambda c: (not c.mutual, not c.met, c.name.lower()))
+
+    total = len(filtered)
+    start = (page - 1) * limit
+    return MyConnectionsPage(
+        total_people_met=len({str(c.attendee_id) for c in cards if c.met}),
+        events_count=len({str(c.event_id) for c in cards}),
+        # Unique mutual (event, person) pairs — same person matched at two events
+        # counts for each; cards are already unique per (event, person).
+        matches_count=sum(1 for c in cards if c.mutual),
+        rel_counts=rel_counts,
+        events=list(ev_refs),
+        page=page,
+        limit=limit,
+        total=total,
+        total_pages=max(1, ceil(total / limit)),
+        connections=filtered[start : start + limit],
     )

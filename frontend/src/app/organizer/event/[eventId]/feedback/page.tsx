@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import {
   Plus,
   Trash2,
@@ -34,7 +34,7 @@ import { QuestionResultCard } from "@/components/organizer/feedback/question-res
 import { type EventInfo } from "@/components/organizer/live/types";
 import { AnswerField } from "@/components/feedback/answer-field";
 import { SearchBox } from "@/components/connections/search-box";
-import { searchItems, type FieldSpec } from "@/lib/connections/search";
+import { useDebouncedValue } from "@/lib/use-debounced";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -745,34 +745,53 @@ function ResponsesView({
     };
   }, [eventId, reloadToken, onLoadingChange]);
 
+  const [exporting, setExporting] = useState(false);
+
+  /** The CSVs need the FULL detail (all responses + text), which the default
+   *  results view no longer ships — so we pull it from the export endpoint on
+   *  click. Bounded by the event's response count; an explicit download. */
+  async function fetchFull(): Promise<FormResults | null> {
+    if (!results) return null;
+    try {
+      setExporting(true);
+      return await apiFetch<FormResults>(`/events/${eventId}/feedback-form/results/export`);
+    } catch {
+      return null;
+    } finally {
+      setExporting(false);
+    }
+  }
+
   /** CSV #1 — one row per question (quick read of the aggregate). */
-  function exportSummaryCsv() {
-    if (!results) return;
+  async function exportSummaryCsv() {
+    const full = await fetchFull();
+    if (!full) return;
     const rows: string[][] = [["Question", "Type", "Answered", "Summary"]];
-    for (const q of results.questions) {
+    for (const q of full.questions) {
       let summary = "";
       if (q.type === "rating" || q.type === "nps") summary = q.average != null ? `avg ${q.average}` : "—";
       else if (q.text_answers.length) summary = q.text_answers.join(" | ");
       else summary = Object.entries(q.option_counts).map(([k, v]) => `${k}: ${v}`).join(", ");
       rows.push([q.label, q.type, String(q.answered), summary]);
     }
-    downloadCsv(rows, `${slug(results.title)}-summary.csv`);
+    downloadCsv(rows, `${slug(full.title)}-summary.csv`);
   }
 
   /** CSV #2 — one row per respondent, one column per question (the spreadsheet
    *  you actually work from). Adds name/company/time when identity is collected. */
-  function exportResponsesCsv() {
-    if (!results) return;
-    const qCols = results.questions;
+  async function exportResponsesCsv() {
+    const full = await fetchFull();
+    if (!full) return;
+    const qCols = full.questions;
     const header = [
-      ...(results.collect_identity ? ["Name", "Company"] : ["Respondent"]),
+      ...(full.collect_identity ? ["Name", "Company"] : ["Respondent"]),
       "Submitted",
       ...qCols.map((q) => q.label),
     ];
     const rows: string[][] = [header];
-    results.responses.forEach((r, i) => {
+    full.responses.forEach((r, i) => {
       const answerByQ = new Map(r.answers.map((a) => [a.question_id, a.value]));
-      const idCols = results.collect_identity
+      const idCols = full.collect_identity
         ? [r.respondent_name || "—", r.respondent_company || "—"]
         : [`Anonymous #${i + 1}`];
       rows.push([
@@ -781,7 +800,7 @@ function ResponsesView({
         ...qCols.map((q) => formatAnswer(answerByQ.get(q.question_id), q.type)),
       ]);
     });
-    downloadCsv(rows, `${slug(results.title)}-responses.csv`);
+    downloadCsv(rows, `${slug(full.title)}-responses.csv`);
   }
 
   if (error) {
@@ -821,11 +840,11 @@ function ResponsesView({
           ]}
         />
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={exportSummaryCsv} disabled={results.response_count === 0} className="gap-1.5">
-            <Download className="h-4 w-4" /> Summary
+          <Button variant="outline" size="sm" onClick={exportSummaryCsv} disabled={results.response_count === 0 || exporting} className="gap-1.5">
+            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Summary
           </Button>
-          <Button variant="outline" size="sm" onClick={exportResponsesCsv} disabled={results.response_count === 0} className="gap-1.5">
-            <Download className="h-4 w-4" /> Per person
+          <Button variant="outline" size="sm" onClick={exportResponsesCsv} disabled={results.response_count === 0 || exporting} className="gap-1.5">
+            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Per person
           </Button>
         </div>
       </div>
@@ -837,16 +856,10 @@ function ResponsesView({
         </Card>
       ) : tab === "summary" ? (
         results.questions.map((q) => (
-          <QuestionResultCard
-            key={q.question_id}
-            q={q}
-            responseCount={results.response_count}
-            responses={results.responses}
-            collectIdentity={results.collect_identity}
-          />
+          <QuestionResultCard key={q.question_id} q={q} eventId={eventId} responseCount={results.response_count} reloadToken={reloadToken} />
         ))
       ) : (
-        <IndividualResponses results={results} />
+        <IndividualResponses eventId={eventId} results={results} reloadToken={reloadToken} />
       )}
     </div>
   );
@@ -875,41 +888,72 @@ function downloadCsv(rows: string[][], filename: string) {
   URL.revokeObjectURL(url);
 }
 
-/** Search the individual responses by who answered (name/company). Reuses the
- *  generic engine from the connections search. */
-const RESP_FIELDS: FieldSpec<IndividualResponse>[] = [
-  { get: (r) => r.respondent_name, weight: 2 },
-  { get: (r) => r.respondent_company, weight: 1 },
-];
+interface PagedResponses {
+  items: IndividualResponse[];
+  total: number;
+  page: number;
+  limit: number;
+}
 
-/* ---- Individual ("one respondent at a time", like Google Forms) ---- */
-function IndividualResponses({ results }: { results: FormResults }) {
+/* ---- Individual ("one respondent at a time", like Google Forms) ----
+   Server-paginated at limit=1: `page` is the 1-based pointer into the (optionally
+   searched) respondent list, so the browser only ever holds the one on screen. */
+function IndividualResponses({ eventId, results, reloadToken }: { eventId: string; results: FormResults; reloadToken: number }) {
   const [query, setQuery] = useState("");
-  // Search by person only makes sense when identity is collected.
-  const responses = useMemo(
-    () => (results.collect_identity ? searchItems(results.responses, query, RESP_FIELDS) : results.responses),
-    [results.responses, results.collect_identity, query],
-  );
-  const [i, setI] = useState(0);
+  const debounced = useDebouncedValue(query.trim(), 300);
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<PagedResponses | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const base = `/events/${eventId}/feedback-form/results/responses`;
+
   useEffect(() => {
-    setI(0); // jump back to the first match whenever the search changes
-  }, [query]);
-  const r: IndividualResponse | undefined = responses[i];
+    setPage(1); // new search → first match
+  }, [debounced]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const qs = new URLSearchParams({ page: String(page), limit: "1" });
+    if (debounced && results.collect_identity) qs.set("q", debounced);
+    apiFetch<PagedResponses>(`${base}?${qs}`)
+      .then((d) => !cancelled && setData(d))
+      .catch(() => !cancelled && setData({ items: [], total: 0, page: 1, limit: 1 }))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [base, page, debounced, results.collect_identity, reloadToken]);
+
+  const total = data?.total ?? 0;
+  const r = data?.items[0];
 
   const searchBox = results.collect_identity ? (
     <SearchBox value={query} onChange={setQuery} placeholder="Find a respondent by name or company…" ariaLabel="Search responses" />
   ) : null;
+
+  if (loading && !data) {
+    return (
+      <div className="space-y-4">
+        {searchBox}
+        <div className="flex justify-center py-10 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" aria-label="Loading responses" />
+        </div>
+      </div>
+    );
+  }
 
   if (!r) {
     return (
       <div className="space-y-4">
         {searchBox}
         <p className="py-8 text-center text-sm text-muted-foreground">
-          {query.trim() ? `No respondent matches “${query.trim()}”.` : "No responses yet."}
+          {debounced ? `No respondent matches “${debounced}”.` : "No responses yet."}
         </p>
       </div>
     );
   }
+
   const answerByQ = new Map(r.answers.map((a) => [a.question_id, a.value]));
   const initials = (r.respondent_name || "?")
     .split(/\s+/)
@@ -922,8 +966,8 @@ function IndividualResponses({ results }: { results: FormResults }) {
     <div className="space-y-4">
       {searchBox}
       {/* Navigator */}
-      <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card p-3">
-        <IconBtn label="Previous response" disabled={i === 0} onClick={() => setI((n) => Math.max(0, n - 1))}>
+      <div className={cn("flex items-center justify-between gap-3 rounded-2xl border border-border bg-card p-3 transition-opacity", loading && "opacity-60")}>
+        <IconBtn label="Previous response" disabled={page <= 1} onClick={() => setPage((n) => Math.max(1, n - 1))}>
           <ChevronLeft className="h-4 w-4" />
         </IconBtn>
         <div className="min-w-0 text-center">
@@ -942,16 +986,16 @@ function IndividualResponses({ results }: { results: FormResults }) {
               </>
             ) : (
               <span className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground">
-                <EyeOff className="h-3.5 w-3.5 text-muted-foreground" aria-hidden /> Anonymous #{i + 1}
+                <EyeOff className="h-3.5 w-3.5 text-muted-foreground" aria-hidden /> Anonymous #{page}
               </span>
             )}
           </div>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Response {i + 1} of {responses.length}
+            Response {page} of {total}
             {r.submitted_at && ` · ${new Date(r.submitted_at).toLocaleString()}`}
           </p>
         </div>
-        <IconBtn label="Next response" disabled={i >= responses.length - 1} onClick={() => setI((n) => Math.min(responses.length - 1, n + 1))}>
+        <IconBtn label="Next response" disabled={page >= total} onClick={() => setPage((n) => Math.min(total, n + 1))}>
           <ChevronRight className="h-4 w-4" />
         </IconBtn>
       </div>

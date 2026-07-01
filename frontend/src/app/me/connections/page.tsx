@@ -11,27 +11,58 @@ import { apiFetch } from "@/lib/api";
 import { AccountMenu } from "@/components/attendee/account-menu";
 import { Wordmark } from "@/components/brand/wordmark";
 import { AuroraBackground } from "@/components/brand/aurora-background";
-import { PersonCard, type Person, type Connection } from "@/components/connections/person-card";
+import { PersonCard, type Person } from "@/components/connections/person-card";
 import { SearchBox } from "@/components/connections/search-box";
-import { searchItems, tokenize, type FieldSpec } from "@/lib/connections/search";
+import { tokenize } from "@/lib/connections/search";
 import { SelectMenu } from "@/components/ui/select-menu";
-import { Pagination, usePagination } from "@/components/ui/pagination";
+import { Pagination } from "@/components/ui/pagination";
+import { useDebouncedValue } from "@/lib/use-debounced";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 12; // connection cards per page
 
 type RelFilter = "all" | "met" | "matches" | "liked" | "saved";
 
-interface MyConnection extends Connection {
+/** One deduped card as the API returns it (person fields + which event). */
+interface ApiCard {
+  attendee_id: string;
+  name: string;
+  role: string;
+  company: string | null;
+  looking_for: string | null;
+  linkedin_url: string | null;
+  website_url: string | null;
+  avatar_url: string | null;
+  interests: string[];
+  shared_interests: string[];
+  note: string | null;
+  rounds: number[];
+  met: boolean;
+  wanted: boolean;
+  wants_me: boolean;
+  liked: boolean;
+  mutual: boolean;
+  saved: boolean;
   event_id: string;
   event_name: string;
   event_date: string; // YYYY-MM-DD
 }
-interface MyConnectionsResp {
+interface EventRef {
+  id: string;
+  name: string;
+  date: string;
+}
+interface MyConnectionsPage {
   total_people_met: number;
   events_count: number;
   matches_count: number;
-  connections: MyConnection[];
+  rel_counts: Record<RelFilter, number>;
+  events: EventRef[];
+  page: number;
+  limit: number;
+  total: number;
+  total_pages: number;
+  connections: ApiCard[];
 }
 
 /** "2026-07-01" -> "1 Jul". */
@@ -42,84 +73,47 @@ function shortDate(d: string): string {
     : parsed.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-interface CrossEventCard {
-  person: Person;
-  eventId: string;
-  eventName: string;
-  eventDate: string;
+/** API card → the PersonCard's Person shape (+ which event it came from). */
+function toPerson(c: ApiCard): Person {
+  return {
+    attendee_id: c.attendee_id,
+    name: c.name,
+    role: c.role,
+    company: c.company,
+    looking_for: c.looking_for,
+    linkedin_url: c.linkedin_url,
+    website_url: c.website_url,
+    avatar_url: c.avatar_url,
+    interests: c.interests ?? [],
+    shared_interests: c.shared_interests ?? [],
+    note: c.note,
+    rounds: c.rounds ?? [],
+    met: c.met,
+    wanted: c.wanted,
+    wants_me: c.wants_me,
+    liked: c.liked,
+    mutual: c.mutual,
+    saved: c.saved,
+    eventLabel: `${c.event_name} · ${shortDate(c.event_date)}`,
+  };
 }
-
-/** One card per (event, person) — the same person at two events shows twice,
- * each tagged with its event. */
-function groupCrossEvent(rows: MyConnection[]): CrossEventCard[] {
-  const map = new Map<string, CrossEventCard>();
-  for (const c of rows) {
-    const met = c.met ?? true;
-    const key = `${c.event_id}::${c.attendee_id}`;
-    const existing = map.get(key);
-    if (existing) {
-      if (met && !existing.person.rounds.includes(c.round_number)) existing.person.rounds.push(c.round_number);
-      existing.person.met = existing.person.met || met;
-      existing.person.wanted = existing.person.wanted || Boolean(c.wanted);
-      existing.person.wants_me = existing.person.wants_me || Boolean(c.wants_me);
-      existing.person.liked = existing.person.liked || c.liked;
-      existing.person.mutual = existing.person.mutual || c.mutual;
-      existing.person.saved = existing.person.saved || c.saved;
-    } else {
-      map.set(key, {
-        eventId: c.event_id,
-        eventName: c.event_name,
-        eventDate: c.event_date,
-        person: {
-          attendee_id: c.attendee_id,
-          name: c.name,
-          role: c.role,
-          company: c.company,
-          looking_for: c.looking_for,
-          linkedin_url: c.linkedin_url,
-          website_url: c.website_url,
-          avatar_url: c.avatar_url,
-          interests: c.interests ?? [],
-          shared_interests: c.shared_interests ?? [],
-          note: c.note,
-          rounds: met ? [c.round_number] : [],
-          met,
-          wanted: Boolean(c.wanted),
-          wants_me: Boolean(c.wants_me),
-          liked: c.liked,
-          mutual: c.mutual,
-          saved: c.saved,
-          eventLabel: `${c.event_name} · ${shortDate(c.event_date)}`,
-        },
-      });
-    }
-  }
-  // Matches first, then people you actually met, then everyone else; alpha within.
-  return [...map.values()].sort(
-    (a, b) =>
-      Number(b.person.mutual) - Number(a.person.mutual) ||
-      Number(b.person.met) - Number(a.person.met) ||
-      a.person.name.localeCompare(b.person.name),
-  );
-}
-
-/** Searchable fields for the cross-event rolodex (generic engine, see
- *  lib/connections/search). Reads through each card's person. */
-const CROSS_FIELDS: FieldSpec<CrossEventCard>[] = [
-  { get: (c) => c.person.name, weight: 5 },
-  { get: (c) => c.person.role, weight: 4 },
-  { get: (c) => c.person.company, weight: 3 },
-  { get: (c) => c.person.looking_for, weight: 2 },
-  { get: (c) => c.person.interests, weight: 2 },
-  { get: (c) => c.person.note, weight: 1 },
-];
 
 export default function MyConnectionsPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [data, setData] = useState<MyConnectionsResp | null>(null);
+  const [data, setData] = useState<MyConnectionsPage | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Filters: search by name/role/company, narrow to one event, and a relationship
+  // tab (everyone / met / matches / liked / saved). All applied SERVER-SIDE now so
+  // pagination stays consistent and the payload stays small.
+  const [query, setQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(query.trim(), 300);
+  const [eventFilter, setEventFilter] = useState<string>("all");
+  const [relFilter, setRelFilter] = useState<RelFilter>("all");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -132,70 +126,38 @@ export default function MyConnectionsPage() {
     if (authChecked && !user) router.replace("/home");
   }, [authChecked, user, router]);
 
+  // Any filter/search change → back to page 1.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedQuery, eventFilter, relFilter]);
+
   useEffect(() => {
     if (!user) return;
     const controller = new AbortController();
+    setLoading(true);
     setError(null);
-    apiFetch<MyConnectionsResp>("/me/connections", { signal: controller.signal })
-      .then((nextData) => {
+    const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
+    if (debouncedQuery) params.set("q", debouncedQuery);
+    if (eventFilter !== "all") params.set("event", eventFilter);
+    if (relFilter !== "all") params.set("rel", relFilter);
+    apiFetch<MyConnectionsPage>(`/me/connections?${params}`, { signal: controller.signal })
+      .then((next) => {
         if (controller.signal.aborted) return;
-        setData(nextData);
-        setError(null);
+        setData(next);
       })
       .catch((e) => {
         if (controller.signal.aborted) return;
         setError(e instanceof Error ? e.message : "Couldn't load your connections");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [user]);
+  }, [user, page, debouncedQuery, eventFilter, relFilter]);
 
-  const cards = useMemo(() => (data ? groupCrossEvent(data.connections) : []), [data]);
-  const profileEventId = data?.connections[0]?.event_id ?? null;
-
-  // Filters: search by name/role/company, narrow to one event, and a relationship
-  // tab (everyone / met / matches / liked / saved). These were the gaps reported
-  // after the pilot, when the rolodex was a long undifferentiated list.
-  const [query, setQuery] = useState("");
-  const [eventFilter, setEventFilter] = useState<string>("all");
-  const [relFilter, setRelFilter] = useState<RelFilter>("all");
-
-  // The events represented in the rolodex, newest first — drives the event filter.
-  const eventOptions = useMemo(() => {
-    const seen = new Map<string, { id: string; name: string; date: string }>();
-    for (const c of cards) {
-      if (!seen.has(c.eventId)) seen.set(c.eventId, { id: c.eventId, name: c.eventName, date: c.eventDate });
-    }
-    return [...seen.values()].sort((a, b) => b.date.localeCompare(a.date));
-  }, [cards]);
-
-  // Per-relationship counts drive which filter chips show (a chip with 0 results
-  // is a dead end, so we only render the ones that match someone).
-  const relCounts = useMemo(
-    () => ({
-      all: cards.length,
-      met: cards.filter((c) => c.person.met).length,
-      matches: cards.filter((c) => c.person.mutual).length,
-      liked: cards.filter((c) => c.person.liked).length,
-      saved: cards.filter((c) => c.person.saved).length,
-    }),
-    [cards],
-  );
-
-  const terms = useMemo(() => tokenize(query), [query]);
-  const visible = useMemo(() => {
-    const byFilter = cards.filter((c) => {
-      if (eventFilter !== "all" && c.eventId !== eventFilter) return false;
-      if (relFilter === "met" && !c.person.met) return false;
-      if (relFilter === "matches" && !c.person.mutual) return false;
-      if (relFilter === "liked" && !c.person.liked) return false;
-      if (relFilter === "saved" && !c.person.saved) return false;
-      return true;
-    });
-    return searchItems(byFilter, query, CROSS_FIELDS);
-  }, [cards, query, eventFilter, relFilter]);
-
-  // Page the results; any filter/search change resets to page 1.
-  const pager = usePagination(visible, PAGE_SIZE, `${query}|${eventFilter}|${relFilter}`);
+  const terms = useMemo(() => tokenize(debouncedQuery), [debouncedQuery]);
+  const profileEventId = data?.events[0]?.id ?? null;
+  const hasAny = (data?.rel_counts.all ?? 0) > 0;
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
@@ -255,7 +217,7 @@ export default function MyConnectionsPage() {
               <Stat icon={<Heart className="h-4 w-4" />} value={data.matches_count} label="matches" highlight={data.matches_count > 0} />
             </div>
 
-            {cards.length === 0 ? (
+            {!hasAny ? (
               <EmptyState />
             ) : (
               <>
@@ -268,43 +230,42 @@ export default function MyConnectionsPage() {
                     ariaLabel="Search connections"
                   />
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <RelTabs filter={relFilter} onChange={setRelFilter} counts={relCounts} />
-                    {eventOptions.length > 1 && (
+                    <RelTabs filter={relFilter} onChange={setRelFilter} counts={data.rel_counts} />
+                    {data.events.length > 1 && (
                       <SelectMenu
                         value={eventFilter}
                         onChange={setEventFilter}
                         ariaLabel="Filter by event"
                         options={[
                           { value: "all", label: "All events" },
-                          ...eventOptions.map((ev) => ({ value: ev.id, label: ev.name })),
+                          ...data.events.map((ev) => ({ value: ev.id, label: ev.name })),
                         ]}
                       />
                     )}
                   </div>
                 </div>
 
-                {visible.length === 0 ? (
+                {data.total === 0 ? (
                   <p className="mt-10 text-center text-sm text-muted-foreground">No one matches those filters.</p>
                 ) : (
                   <>
                     {/* Masonry (CSS columns) — cards have very different heights (links,
                         notes, interest chips), so a grid would stretch every card in a row
-                        to the tallest and leave dead space. Columns let each card size to
-                        its own content and pack tightly. */}
-                    <ul className="mt-5 columns-1 gap-x-3 sm:columns-2 [&>li]:mb-3 [&>li]:break-inside-avoid">
-                      {pager.pageItems.map(({ person, eventId }) => (
-                        <PersonCard key={`${eventId}-${person.attendee_id}`} person={person} eventId={eventId} highlight={terms} />
+                        to the tallest and leave dead space. Columns pack them tightly. */}
+                    <ul className={cn("mt-5 columns-1 gap-x-3 transition-opacity sm:columns-2 [&>li]:mb-3 [&>li]:break-inside-avoid", loading && "opacity-60")}>
+                      {data.connections.map((c) => (
+                        <PersonCard key={`${c.event_id}-${c.attendee_id}`} person={toPerson(c)} eventId={c.event_id} highlight={terms} />
                       ))}
                     </ul>
                     <Pagination
                       className="mt-8"
-                      page={pager.page}
-                      totalPages={pager.totalPages}
+                      page={data.page}
+                      totalPages={data.total_pages}
                       onChange={(p) => {
-                        pager.setPage(p);
+                        setPage(p);
                         window.scrollTo({ top: 0, behavior: "smooth" });
                       }}
-                      summary={`Showing ${pager.rangeStart}–${pager.rangeEnd} of ${pager.total}`}
+                      summary={`Showing ${(data.page - 1) * data.limit + 1}–${Math.min(data.page * data.limit, data.total)} of ${data.total}`}
                     />
                   </>
                 )}
@@ -338,7 +299,7 @@ function RelTabs({
   return (
     <div className="flex flex-wrap items-center gap-2">
       {items
-        .filter((it) => it.key === "all" || counts[it.key] > 0)
+        .filter((it) => it.key === "all" || (counts[it.key] ?? 0) > 0)
         .map((it) => {
           const active = filter === it.key;
           return (
@@ -362,7 +323,7 @@ function RelTabs({
                   active ? "bg-accent-foreground/20 text-accent-foreground" : "bg-muted text-muted-foreground",
                 )}
               >
-                {counts[it.key]}
+                {counts[it.key] ?? 0}
               </span>
             </button>
           );

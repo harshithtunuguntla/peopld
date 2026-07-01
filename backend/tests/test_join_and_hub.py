@@ -178,6 +178,35 @@ def test_me_connections_empty_when_never_attended(client, db, event):
     assert body["events_count"] == 0
 
 
+def test_me_connections_paginates_and_facets(client, db, event):
+    eid = event["id"]
+    me = make_attendee(db, eid, name="Me", status="arrived", user_id=ATTENDEE_USER_ID)
+    r = make_round(db, eid, round_number=1, status="completed")
+    make_assignment(db, eid, r["id"], me["id"], 1)
+    for i in range(5):
+        other = make_attendee(db, eid, name=f"Person{i}", status="arrived")
+        make_assignment(db, eid, r["id"], other["id"], 1)
+
+    body = client.get("/me/connections?page=1&limit=2", headers=ATTENDEE_AUTH).json()
+    assert body["total"] == 5
+    assert body["total_pages"] == 3
+    assert body["page"] == 1 and body["limit"] == 2
+    assert len(body["connections"]) == 2               # only a page ships over the wire
+    assert body["rel_counts"]["all"] == 5 and body["rel_counts"]["met"] == 5
+    assert len(body["events"]) == 1                     # one event in the filter dropdown
+    # headline stats are over the whole set, not the page
+    assert body["total_people_met"] == 5
+
+    page1 = {c["name"] for c in body["connections"]}
+    page2 = {c["name"] for c in client.get("/me/connections?page=2&limit=2", headers=ATTENDEE_AUTH).json()["connections"]}
+    assert page1.isdisjoint(page2)                      # distinct people across pages
+
+    # Search narrows the total; a dead-end filter returns nothing.
+    found = client.get("/me/connections?q=Person3", headers=ATTENDEE_AUTH).json()
+    assert found["total"] == 1 and found["connections"][0]["name"] == "Person3"
+    assert client.get("/me/connections?rel=matches", headers=ATTENDEE_AUTH).json()["total"] == 0
+
+
 def test_me_connections_survives_missing_optional_bookmarks_table(client, db, event, monkeypatch):
     _met_in(db, event["id"], "Maya")
     original_table = db.table

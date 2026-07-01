@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -12,14 +12,30 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Check, Copy, Search, Sparkles, Lock } from "lucide-react";
+import { Check, Copy, Loader2, Search, Sparkles, Lock } from "lucide-react";
 
+import { apiFetch } from "@/lib/api";
 import { Card } from "@/components/organizer/console-ui";
-import { Pagination, usePagination } from "@/components/ui/pagination";
+import { Pagination } from "@/components/ui/pagination";
 import { COLORS } from "@/lib/design/colors";
 import { AI_ENABLED } from "@/lib/features";
+import { useDebouncedValue } from "@/lib/use-debounced";
 import { cn } from "@/lib/utils";
-import { isText, type IndividualResponse, type QuestionResult } from "@/lib/feedback";
+import { isText, type QuestionResult } from "@/lib/feedback";
+
+const TEXT_PAGE = 5; // free-text answers per page (fetched server-side)
+
+interface TextAnswerEntry {
+  text: string;
+  name?: string | null;
+  company?: string | null;
+}
+interface PagedText {
+  items: TextAnswerEntry[];
+  total: number;
+  page: number;
+  limit: number;
+}
 
 /**
  * One question's results, visualized the way mature form tools do (Google Forms /
@@ -43,41 +59,20 @@ const TOOLTIP_STYLE = {
 
 const AXIS_TICK = { fontSize: 12, fill: "hsl(var(--muted-foreground))" } as const;
 
-/** A single written answer, paired with who wrote it (when identity is collected). */
-interface TextEntry {
-  text: string;
-  name?: string | null;
-  company?: string | null;
-}
-
 export function QuestionResultCard({
   q,
+  eventId,
   responseCount = 0,
-  responses = [],
-  collectIdentity = false,
+  reloadToken = 0,
 }: {
   q: QuestionResult;
+  /** Event id — text answers are fetched (paginated) per question from the API. */
+  eventId: string;
   /** Total people who submitted the form — the denominator for skip rate. */
   responseCount?: number;
-  /** Per-respondent submissions, used to attribute free-text answers. */
-  responses?: IndividualResponse[];
-  collectIdentity?: boolean;
+  /** Bumped by the header Refresh — re-pulls the current text-answer page. */
+  reloadToken?: number;
 }) {
-  // Attribute free-text answers to their author by walking the per-respondent
-  // submissions (kept in form order / newest-first by the API).
-  const textEntries = useMemo<TextEntry[]>(() => {
-    if (!isText(q.type)) return [];
-    const out: TextEntry[] = [];
-    for (const r of responses) {
-      const a = r.answers.find((x) => x.question_id === q.question_id);
-      const text = typeof a?.value === "string" ? a.value.trim() : "";
-      if (text) out.push({ text, name: r.respondent_name, company: r.respondent_company });
-    }
-    // Fall back to the bare list if responses weren't supplied (defensive).
-    if (out.length === 0 && q.text_answers.length) return q.text_answers.map((text) => ({ text }));
-    return out;
-  }, [q, responses]);
-
   const skipped = responseCount > 0 ? Math.max(0, responseCount - q.answered) : 0;
 
   return (
@@ -95,7 +90,7 @@ export function QuestionResultCard({
       ) : (
         <div className="mt-4">
           {isText(q.type) ? (
-            <TextAnswers entries={textEntries} collectIdentity={collectIdentity} />
+            <TextAnswers eventId={eventId} questionId={q.question_id} answered={q.answered} reloadToken={reloadToken} />
           ) : (
             <QuestionViz q={q} />
           )}
@@ -291,33 +286,47 @@ function NpsBreakdown({ q }: { q: QuestionResult }) {
 
 /* ----------------------------- text: searchable, attributed list ----------------------------- */
 
-const TEXT_PAGE = 5; // answers shown per page
-
-function TextAnswers({ entries, collectIdentity }: { entries: TextEntry[]; collectIdentity: boolean }) {
+/**
+ * Free-text answers for one question — fetched **page by page from the API** so a
+ * question with thousands of written answers never ships them all to the browser.
+ * Search runs server-side too, so it filters the whole set, not just a local page.
+ */
+function TextAnswers({ eventId, questionId, answered, reloadToken }: { eventId: string; questionId: string; answered: number; reloadToken: number }) {
   const [query, setQuery] = useState("");
+  const debounced = useDebouncedValue(query.trim(), 300);
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<PagedText | null>(null);
+  const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
 
-  const filtered = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    if (!term) return entries;
-    return entries.filter(
-      (e) =>
-        e.text.toLowerCase().includes(term) ||
-        (e.name ?? "").toLowerCase().includes(term) ||
-        (e.company ?? "").toLowerCase().includes(term),
-    );
-  }, [entries, query]);
+  const base = `/events/${eventId}/feedback-form/results/questions/${questionId}/answers`;
 
-  // Page through the (filtered) answers; searching jumps back to page 1.
-  const pager = usePagination(filtered, TEXT_PAGE, query.trim());
+  // New search → back to page 1.
+  useEffect(() => {
+    setPage(1);
+  }, [debounced]);
 
-  if (entries.length === 0) return <Empty label="No written answers." />;
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const qs = new URLSearchParams({ page: String(page), limit: String(TEXT_PAGE) });
+    if (debounced) qs.set("q", debounced);
+    apiFetch<PagedText>(`${base}?${qs}`)
+      .then((d) => !cancelled && setData(d))
+      .catch(() => !cancelled && setData({ items: [], total: 0, page: 1, limit: TEXT_PAGE }))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [base, page, debounced, reloadToken]);
 
   async function copyAll() {
-    const text = filtered
-      .map((e) => (collectIdentity && e.name ? `${e.name}: ${e.text}` : `• ${e.text}`))
-      .join("\n");
     try {
+      // Pull the whole (filtered) set just for the copy — an explicit action.
+      const qs = new URLSearchParams({ page: "1", limit: "10000" });
+      if (debounced) qs.set("q", debounced);
+      const all = await apiFetch<PagedText>(`${base}?${qs}`);
+      const text = all.items.map((e) => (e.name ? `${e.name}: ${e.text}` : `• ${e.text}`)).join("\n");
       await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
@@ -326,9 +335,14 @@ function TextAnswers({ entries, collectIdentity }: { entries: TextEntry[]; colle
     }
   }
 
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / TEXT_PAGE));
+  const rangeStart = total === 0 ? 0 : (page - 1) * TEXT_PAGE + 1;
+  const rangeEnd = Math.min(page * TEXT_PAGE, total);
+
   return (
     <div>
-      <AiSummaryBeta count={entries.length} />
+      <AiSummaryBeta count={answered} />
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="relative min-w-0 flex-1 sm:max-w-xs">
@@ -336,7 +350,7 @@ function TextAnswers({ entries, collectIdentity }: { entries: TextEntry[]; colle
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Search ${entries.length} answers…`}
+            placeholder={`Search ${answered} answers…`}
             aria-label="Search written answers"
             className="h-9 w-full rounded-lg border border-border bg-background/50 pl-8 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-accent/50"
           />
@@ -351,21 +365,27 @@ function TextAnswers({ entries, collectIdentity }: { entries: TextEntry[]; colle
         </button>
       </div>
 
-      {filtered.length === 0 ? (
-        <p className="py-4 text-center text-sm text-muted-foreground">No answers match “{query.trim()}”.</p>
+      {loading && !data ? (
+        <div className="flex justify-center py-6 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" aria-label="Loading answers" />
+        </div>
+      ) : total === 0 ? (
+        <p className="py-4 text-center text-sm text-muted-foreground">
+          {debounced ? `No answers match “${debounced}”.` : "No written answers."}
+        </p>
       ) : (
         <>
-          <ul className="space-y-2">
-            {pager.pageItems.map((e, i) => (
-              <TextItem key={pager.rangeStart + i} entry={e} collectIdentity={collectIdentity} />
+          <ul className={cn("space-y-2 transition-opacity", loading && "opacity-60")}>
+            {(data?.items ?? []).map((e, i) => (
+              <TextItem key={`${rangeStart}-${i}`} entry={e} />
             ))}
           </ul>
           <Pagination
             className="mt-3"
-            page={pager.page}
-            totalPages={pager.totalPages}
-            onChange={pager.setPage}
-            summary={`Showing ${pager.rangeStart}–${pager.rangeEnd} of ${pager.total}`}
+            page={page}
+            totalPages={totalPages}
+            onChange={setPage}
+            summary={`Showing ${rangeStart}–${rangeEnd} of ${total}`}
           />
         </>
       )}
@@ -375,7 +395,7 @@ function TextAnswers({ entries, collectIdentity }: { entries: TextEntry[]; colle
 
 const CLAMP_AT = 240; // characters before we offer a "more" expansion
 
-function TextItem({ entry, collectIdentity }: { entry: TextEntry; collectIdentity: boolean }) {
+function TextItem({ entry }: { entry: TextAnswerEntry }) {
   const [open, setOpen] = useState(false);
   const long = entry.text.length > CLAMP_AT;
   const body = open || !long ? entry.text : entry.text.slice(0, CLAMP_AT).trimEnd() + "…";
@@ -392,7 +412,7 @@ function TextItem({ entry, collectIdentity }: { entry: TextEntry; collectIdentit
           {open ? "Show less" : "Read more"}
         </button>
       )}
-      {collectIdentity && entry.name && (
+      {entry.name && (
         <p className="mt-1.5 text-xs text-muted-foreground">
           — {entry.name}
           {entry.company && <span> · {entry.company}</span>}

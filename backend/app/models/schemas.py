@@ -702,6 +702,60 @@ class MyConnectionsResponse(BaseModel):
     connections: list[MyConnectionEntry]
 
 
+class MyConnectionCard(BaseModel):
+    """One deduplicated card in the cross-event rolodex — a person at one event,
+    with the rounds they shared merged into a list (the frontend renders this
+    directly, no client-side grouping)."""
+    attendee_id: UUID
+    name: str
+    role: str
+    company: Optional[str] = None
+    looking_for: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    website_url: Optional[str] = None
+    avatar_url: Optional[str] = None
+    interests: list[str] = []
+    shared_interests: list[str] = []
+    note: Optional[str] = None
+    rounds: list[int] = []          # rounds we actually shared a table in (empty = not met)
+    met: bool = True
+    wanted: bool = False
+    wants_me: bool = False
+    liked: bool = False
+    mutual: bool = False
+    saved: bool = False
+    event_id: UUID
+    event_name: str
+    event_date: date
+
+
+class MyConnectionEventRef(BaseModel):
+    """An event the caller attended — drives the results' event filter dropdown."""
+    id: UUID
+    name: str
+    date: date
+
+
+class MyConnectionsPage(BaseModel):
+    """Server-paginated cross-event rolodex. Stats + facet counts are computed over
+    the caller's WHOLE history; only `connections` is the current page, so the
+    payload stays bounded as someone attends more and more events.
+
+    Kept backward-compatible with the old response: `connections`,
+    `total_people_met`, `events_count`, `matches_count` still sit at the top level.
+    """
+    total_people_met: int = 0
+    events_count: int = 0
+    matches_count: int = 0
+    rel_counts: dict[str, int] = Field(default_factory=dict)  # all/met/matches/liked/saved
+    events: list[MyConnectionEventRef] = Field(default_factory=list)
+    page: int = 1
+    limit: int = 24
+    total: int = 0             # matches after filter/search (the paginated count)
+    total_pages: int = 1
+    connections: list[MyConnectionCard] = Field(default_factory=list)
+
+
 # --- Likes ---
 
 class LikeRequest(BaseModel):
@@ -881,6 +935,30 @@ class FormResults(BaseModel):
     response_rate: int = 0      # % of checked-in who submitted
     questions: List[QuestionResult] = Field(default_factory=list)
     responses: List[IndividualResponse] = Field(default_factory=list)  # per-respondent
+
+
+class TextAnswerEntry(BaseModel):
+    """One free-text answer, attributed to its author when identity is collected."""
+    text: str
+    name: Optional[str] = None
+    company: Optional[str] = None
+
+
+class PagedTextAnswers(BaseModel):
+    """A page of free-text answers for one question (server-side paginated so the
+    payload stays bounded as responses grow)."""
+    items: List[TextAnswerEntry] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    limit: int = 5
+
+
+class PagedResponses(BaseModel):
+    """A page of per-respondent submissions (the organizer's Individual view)."""
+    items: List[IndividualResponse] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    limit: int = 10
 
 
 # --- Sponsors & event branding (shown between rounds + in the lobby) ---
